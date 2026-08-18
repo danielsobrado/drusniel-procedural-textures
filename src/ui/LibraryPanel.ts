@@ -20,14 +20,6 @@ export class LibraryPanel {
   }
 
   public render(state: Readonly<ProjectState>): void {
-    const normalizedFilter = this.filter.trim().toLowerCase();
-    const presets = MATERIAL_PRESETS.filter((preset) => {
-      if (normalizedFilter.length === 0) {
-        return true;
-      }
-      return `${preset.name} ${preset.description}`.toLowerCase().includes(normalizedFilter);
-    });
-
     this.container.innerHTML = `
       <div class="panel-header">
         <div>
@@ -64,11 +56,15 @@ export class LibraryPanel {
       <section class="library-section preset-section">
         <div class="section-heading">
           <span>Material presets</span>
-          <span>${presets.length}</span>
+          <span data-role="preset-count">${MATERIAL_PRESETS.length}</span>
         </div>
         <div class="preset-list">
-          ${presets.map((preset) => `
-            <button class="preset-card" data-preset="${preset.id}">
+          ${MATERIAL_PRESETS.map((preset) => `
+            <button
+              class="preset-card"
+              data-preset="${preset.id}"
+              data-search="${this.escape(`${preset.name} ${preset.description}`.toLowerCase())}"
+            >
               <span class="preset-swatch" style="--swatch-a:${preset.layers[0]?.colorA ?? '#333'};--swatch-b:${preset.layers.at(-1)?.colorB ?? '#aaa'}"></span>
               <span class="preset-copy">
                 <strong>${this.escape(preset.name)}</strong>
@@ -77,10 +73,12 @@ export class LibraryPanel {
               <span class="preset-arrow">›</span>
             </button>
           `).join('')}
-          ${presets.length === 0 ? '<div class="empty-state">No matching presets.</div>' : ''}
+          <div class="empty-state" data-role="filter-empty" hidden>No matching presets.</div>
         </div>
       </section>
     `;
+
+    this.applyFilter();
   }
 
   private handleClick(event: Event): void {
@@ -116,8 +114,31 @@ export class LibraryPanel {
     }
 
     this.filter = input.value;
-    const stateEvent = new CustomEvent('library-filter');
-    this.container.dispatchEvent(stateEvent);
+    this.applyFilter();
+  }
+
+  private applyFilter(): void {
+    const query = this.filter.trim().toLowerCase();
+    const cards = this.container.querySelectorAll<HTMLElement>('[data-preset][data-search]');
+    let visibleCount = 0;
+
+    for (const card of cards) {
+      const visible = query.length === 0 || (card.dataset.search ?? '').includes(query);
+      card.hidden = !visible;
+      if (visible) {
+        visibleCount += 1;
+      }
+    }
+
+    const count = this.container.querySelector<HTMLElement>('[data-role="preset-count"]');
+    if (count !== null) {
+      count.textContent = String(visibleCount);
+    }
+
+    const empty = this.container.querySelector<HTMLElement>('[data-role="filter-empty"]');
+    if (empty !== null) {
+      empty.hidden = visibleCount !== 0;
+    }
   }
 
   private escape(value: string): string {
