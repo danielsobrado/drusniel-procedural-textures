@@ -235,8 +235,11 @@ export class App {
 
   private bindKeyboard(): void {
     window.addEventListener('keydown', (event) => {
-      const modifier = event.ctrlKey || event.metaKey;
+      if (isEditableTarget(event.target)) {
+        return;
+      }
 
+      const modifier = event.ctrlKey || event.metaKey;
       if (modifier && event.key.toLowerCase() === 'z') {
         event.preventDefault();
         if (event.shiftKey) {
@@ -247,14 +250,14 @@ export class App {
         return;
       }
 
-      if (isEditableTarget(event.target)) {
-        return;
-      }
-
       if (event.code === 'Space') {
         event.preventDefault();
         const bounds = this.shell.elements.viewport.getBoundingClientRect();
-        this.radial.open(bounds.left + bounds.width / 2, bounds.top + bounds.height / 2);
+        this.radial.open(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+          true
+        );
       } else if (event.key.toLowerCase() === 'f') {
         this.renderer.frameSelection();
       } else if (event.key.toLowerCase() === 'w') {
@@ -307,7 +310,7 @@ export class App {
 
   private async importProject(file: File): Promise<void> {
     try {
-      const project = normalizeProject(JSON.parse(await file.text()));
+      const project = JSON.parse(await file.text()) as unknown;
       this.activeImportedName = null;
       this.state.replaceProject(project);
       this.shell.toast(`Opened ${file.name}`);
