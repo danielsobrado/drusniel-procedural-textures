@@ -2,6 +2,7 @@ import {
   DEFAULT_BACKGROUND,
   DEFAULT_OBJECT,
   DEFAULT_PHYSICAL,
+  HISTORY_COALESCE_MS,
   HISTORY_LIMIT,
   MAX_LAYERS
 } from './constants';
@@ -33,6 +34,14 @@ function cloneProject(project: ProjectState): ProjectState {
 
 function cloneLayer(layer: MaterialLayer): MaterialLayer {
   return { ...layer, id: createId('layer') };
+}
+
+function patchChanges<T extends object>(current: T, patch: Partial<T>): boolean {
+  return Object.entries(patch).some(([key, value]) => current[key as keyof T] !== value);
+}
+
+function patchKey(prefix: string, patch: object): string {
+  return `${prefix}:${Object.keys(patch).sort().join(',')}`;
 }
 
 export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
@@ -98,6 +107,8 @@ export class AppState {
   private readonly listeners = new Set<StateListener>();
   private readonly undoStack: ProjectState[] = [];
   private readonly redoStack: ProjectState[] = [];
+  private lastCommitKey: string | null = null;
+  private lastCommitAt = 0;
 
   public constructor(initialProject: ProjectState = createDefaultProject()) {
     this.project = cloneProject(normalizeProject(initialProject));
@@ -127,22 +138,16 @@ export class AppState {
   public updateLayer(id: string, patch: Partial<MaterialLayer>): void {
     const index = this.project.layers.findIndex((layer) => layer.id === id);
     const current = this.project.layers[index];
-    if (index < 0 || current === undefined) {
+    if (index < 0 || current === undefined || !patchChanges(current, patch)) {
       return;
     }
 
-    const next = {
+    this.commit(patchKey(`layer:${id}`, patch));
+    this.project.layers[index] = {
       ...current,
       ...patch,
       id
     };
-
-    if (JSON.stringify(current) === JSON.stringify(next)) {
-      return;
-    }
-
-    this.commit();
-    this.project.layers[index] = next;
     this.emit('layers');
   }
 
@@ -255,7 +260,7 @@ export class AppState {
       return;
     }
 
-    this.commit();
+    this.commit('viewport:background');
     this.project.background = color;
     this.emit('viewport');
   }
@@ -271,17 +276,15 @@ export class AppState {
   }
 
   public setPhysical(patch: Partial<PhysicalSettings>): void {
-    const next = {
-      ...this.project.physical,
-      ...patch
-    };
-
-    if (JSON.stringify(next) === JSON.stringify(this.project.physical)) {
+    if (!patchChanges(this.project.physical, patch)) {
       return;
     }
 
-    this.commit();
-    this.project.physical = next;
+    this.commit(patchKey('physical', patch));
+    this.project.physical = {
+      ...this.project.physical,
+      ...patch
+    };
     this.emit('viewport');
   }
 
@@ -304,6 +307,7 @@ export class AppState {
 
     this.redoStack.push(cloneProject(this.project));
     this.project = previous;
+    this.resetCoalescing();
     this.emit('project');
     return true;
   }
@@ -316,16 +320,33 @@ export class AppState {
 
     this.undoStack.push(cloneProject(this.project));
     this.project = next;
+    this.resetCoalescing();
     this.emit('project');
     return true;
   }
 
-  private commit(): void {
-    this.undoStack.push(cloneProject(this.project));
-    if (this.undoStack.length > HISTORY_LIMIT) {
-      this.undoStack.shift();
+  private commit(coalesceKey?: string): void {
+    const now = Date.now();
+    const canCoalesce =
+      coalesceKey !== undefined &&
+      this.lastCommitKey === coalesceKey &&
+      now - this.lastCommitAt <= HISTORY_COALESCE_MS;
+
+    if (!canCoalesce) {
+      this.undoStack.push(cloneProject(this.project));
+      if (this.undoStack.length > HISTORY_LIMIT) {
+        this.undoStack.shift();
+      }
     }
+
     this.redoStack.length = 0;
+    this.lastCommitKey = coalesceKey ?? null;
+    this.lastCommitAt = now;
+  }
+
+  private resetCoalescing(): void {
+    this.lastCommitKey = null;
+    this.lastCommitAt = 0;
   }
 
   private emit(reason: StateChangeReason): void {
