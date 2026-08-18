@@ -1,5 +1,6 @@
 import { LAYER_KINDS, MAX_LAYERS } from '../app/constants';
 import type { LayerKind, ProjectState } from '../materials/types';
+import { escapeHtml } from '../utils/html';
 
 export interface LayerStripCallbacks {
   onAdd: (kind: LayerKind) => void;
@@ -21,6 +22,9 @@ export class LayerStrip {
     this.container.addEventListener('dragstart', (event) => this.handleDragStart(event));
     this.container.addEventListener('dragover', (event) => event.preventDefault());
     this.container.addEventListener('drop', (event) => this.handleDrop(event));
+    this.container.addEventListener('dragend', () => {
+      this.draggedLayerId = null;
+    });
   }
 
   public render(state: Readonly<ProjectState>): void {
@@ -34,7 +38,7 @@ export class LayerStrip {
           <summary class="compact-button">＋ Layer</summary>
           <div class="popup-menu">
             ${LAYER_KINDS.map((kind) => `
-              <button data-add-layer="${kind.id}">${kind.label}</button>
+              <button data-add-layer="${kind.id}">${escapeHtml(kind.label)}</button>
             `).join('')}
           </div>
         </details>
@@ -48,20 +52,20 @@ export class LayerStrip {
             data-layer-id="${layer.id}"
             data-layer-index="${index}"
           >
-            <button class="layer-visibility" data-action="toggle" title="Toggle layer">${layer.enabled ? '●' : '○'}</button>
-            <button class="layer-main" data-action="select">
-              <span class="layer-swatch" style="--layer-a:${layer.colorA};--layer-b:${layer.colorB}"></span>
+            <button class="layer-visibility" data-action="toggle" aria-label="${layer.enabled ? 'Disable' : 'Enable'} ${escapeHtml(layer.name)}" title="Toggle layer">${layer.enabled ? '●' : '○'}</button>
+            <button class="layer-main" data-action="select" aria-label="Edit ${escapeHtml(layer.name)}">
+              <span class="layer-swatch" aria-hidden="true" style="--layer-a:${layer.colorA};--layer-b:${layer.colorB}"></span>
               <span class="layer-copy">
-                <strong>${this.escape(layer.name)}</strong>
+                <strong>${escapeHtml(layer.name)}</strong>
                 <small>${layer.kind} · ${Math.round(layer.opacity * 100)}%</small>
               </span>
             </button>
             <div class="layer-card-actions">
-              <button data-action="move-left" title="Move layer left" ${index === 0 ? 'disabled' : ''}>‹</button>
-              <button data-action="move-right" title="Move layer right" ${index === state.layers.length - 1 ? 'disabled' : ''}>›</button>
+              <button data-action="move-left" aria-label="Move ${escapeHtml(layer.name)} left" title="Move layer left" ${index === 0 ? 'disabled' : ''}>‹</button>
+              <button data-action="move-right" aria-label="Move ${escapeHtml(layer.name)} right" title="Move layer right" ${index === state.layers.length - 1 ? 'disabled' : ''}>›</button>
               <span class="layer-action-spacer"></span>
-              <button data-action="duplicate" title="Duplicate">⧉</button>
-              <button data-action="remove" title="Delete">×</button>
+              <button data-action="duplicate" aria-label="Duplicate ${escapeHtml(layer.name)}" title="Duplicate">⧉</button>
+              <button data-action="remove" aria-label="Delete ${escapeHtml(layer.name)}" title="Delete">×</button>
             </div>
           </article>
         `).join('')}
@@ -131,13 +135,5 @@ export class LayerStrip {
     }
 
     this.draggedLayerId = null;
-  }
-
-  private escape(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;');
   }
 }
