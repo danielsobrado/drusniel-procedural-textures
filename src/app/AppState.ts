@@ -211,6 +211,14 @@ export class AppState {
     const layers = preset.layers.slice(0, MAX_LAYERS).map(cloneLayer);
     this.project.layers = layers;
     this.project.selectedLayerId = layers.at(-1)?.id ?? null;
+
+    if (preset.physical !== undefined) {
+      this.project.physical = {
+        ...this.project.physical,
+        ...preset.physical
+      };
+    }
+
     this.emit('layers');
   }
 
