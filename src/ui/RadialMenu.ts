@@ -27,6 +27,7 @@ const ITEMS: readonly RadialItem[] = [
 
 export class RadialMenu {
   private visible = false;
+  private previousFocus: HTMLElement | null = null;
 
   public constructor(
     private readonly host: HTMLElement,
@@ -40,16 +41,20 @@ export class RadialMenu {
     });
   }
 
-  public open(x: number, y: number): void {
+  public open(x: number, y: number, focusFirst = false): void {
     const radius = 104;
     const margin = radius + 58;
     const safeX = Math.max(margin, Math.min(window.innerWidth - margin, x));
     const safeY = Math.max(margin, Math.min(window.innerHeight - margin, y));
 
+    this.previousFocus = focusFirst && document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+
     this.host.innerHTML = `
       <div class="radial-backdrop" data-radial-dismiss></div>
-      <div class="radial-menu" style="left:${safeX}px;top:${safeY}px">
-        <div class="radial-center">
+      <div class="radial-menu" role="menu" aria-label="Quick actions" style="left:${safeX}px;top:${safeY}px">
+        <div class="radial-center" aria-hidden="true">
           <strong>Quick</strong>
           <span>actions</span>
         </div>
@@ -61,10 +66,12 @@ export class RadialMenu {
             <button
               class="radial-item"
               data-radial-command="${item.command}"
+              role="menuitem"
+              aria-label="${item.label}"
               style="--radial-x:${px.toFixed(2)}px;--radial-y:${py.toFixed(2)}px"
               title="${item.label}"
             >
-              <span>${item.glyph}</span>
+              <span aria-hidden="true">${item.glyph}</span>
               <small>${item.label}</small>
             </button>
           `;
@@ -74,6 +81,10 @@ export class RadialMenu {
 
     this.host.classList.add('is-open');
     this.visible = true;
+
+    if (focusFirst) {
+      this.host.querySelector<HTMLButtonElement>('[data-radial-command]')?.focus({ preventScroll: true });
+    }
   }
 
   public hide(): void {
@@ -84,6 +95,10 @@ export class RadialMenu {
     this.host.classList.remove('is-open');
     this.host.replaceChildren();
     this.visible = false;
+
+    const previousFocus = this.previousFocus;
+    this.previousFocus = null;
+    previousFocus?.focus({ preventScroll: true });
   }
 
   private handleClick(event: Event): void {
