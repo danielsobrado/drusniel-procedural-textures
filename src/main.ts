@@ -1,4 +1,5 @@
 import './styles/app.css';
+import './styles/refinements.css';
 import { App } from './app/App';
 import { installLongPressContextMenu } from './ui/LongPressContextMenu';
 
