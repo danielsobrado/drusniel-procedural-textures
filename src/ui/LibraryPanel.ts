@@ -1,6 +1,7 @@
 import { OBJECT_PRESETS } from '../app/constants';
 import { MATERIAL_PRESETS } from '../materials/presets';
 import type { MaterialPreset, ObjectPreset, ProjectState } from '../materials/types';
+import { escapeHtml } from '../utils/html';
 
 export interface LibraryCallbacks {
   onObject: (preset: ObjectPreset) => void;
@@ -26,28 +27,29 @@ export class LibraryPanel {
           <span class="eyebrow">Library</span>
           <h2>Objects & materials</h2>
         </div>
-        <button class="mini-button" data-action="import" title="Import GLB / GLTF">＋</button>
+        <button class="mini-button" data-action="import" aria-label="Import GLB or GLTF" title="Import GLB / GLTF">＋</button>
       </div>
 
       <label class="search-field">
-        <span>⌕</span>
-        <input data-action="filter" type="search" value="${this.escape(this.filter)}" placeholder="Filter presets">
+        <span aria-hidden="true">⌕</span>
+        <input data-action="filter" type="search" value="${escapeHtml(this.filter)}" placeholder="Filter presets" aria-label="Filter material presets">
       </label>
 
       <section class="library-section">
         <div class="section-heading">
           <span>Preview object</span>
-          ${state.importedAssetName === null ? '' : `<span class="asset-chip">${this.escape(state.importedAssetName)}</span>`}
+          ${state.importedAssetName === null ? '' : `<span class="asset-chip">${escapeHtml(state.importedAssetName)}</span>`}
         </div>
         <div class="object-grid">
           ${OBJECT_PRESETS.map((item) => `
             <button
               class="object-tile ${state.importedAssetName === null && state.selectedObject === item.id ? 'is-active' : ''}"
               data-object="${item.id}"
-              title="${item.label}"
+              title="${escapeHtml(item.label)}"
+              aria-label="Preview ${escapeHtml(item.label)}"
             >
-              <span class="object-glyph">${item.glyph}</span>
-              <span>${item.label}</span>
+              <span class="object-glyph" aria-hidden="true">${escapeHtml(item.glyph)}</span>
+              <span>${escapeHtml(item.label)}</span>
             </button>
           `).join('')}
         </div>
@@ -62,15 +64,15 @@ export class LibraryPanel {
           ${MATERIAL_PRESETS.map((preset) => `
             <button
               class="preset-card"
-              data-preset="${preset.id}"
-              data-search="${this.escape(`${preset.name} ${preset.description}`.toLowerCase())}"
+              data-preset="${escapeHtml(preset.id)}"
+              data-search="${escapeHtml(`${preset.name} ${preset.description}`.toLowerCase())}"
             >
-              <span class="preset-swatch" style="--swatch-a:${preset.layers[0]?.colorA ?? '#333'};--swatch-b:${preset.layers.at(-1)?.colorB ?? '#aaa'}"></span>
+              <span class="preset-swatch" aria-hidden="true" style="--swatch-a:${preset.layers[0]?.colorA ?? '#333'};--swatch-b:${preset.layers.at(-1)?.colorB ?? '#aaa'}"></span>
               <span class="preset-copy">
-                <strong>${this.escape(preset.name)}</strong>
-                <small>${this.escape(preset.description)}</small>
+                <strong>${escapeHtml(preset.name)}</strong>
+                <small>${escapeHtml(preset.description)}</small>
               </span>
-              <span class="preset-arrow">›</span>
+              <span class="preset-arrow" aria-hidden="true">›</span>
             </button>
           `).join('')}
           <div class="empty-state" data-role="filter-empty" hidden>No matching presets.</div>
@@ -139,13 +141,5 @@ export class LibraryPanel {
     if (empty !== null) {
       empty.hidden = visibleCount !== 0;
     }
-  }
-
-  private escape(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;');
   }
 }
