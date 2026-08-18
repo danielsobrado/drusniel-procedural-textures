@@ -296,6 +296,10 @@ export class App {
     try {
       this.shell.setStatus(`Loading ${file.name}…`);
       const model = await this.modelLoader.load(file);
+      if (model === null) {
+        return;
+      }
+
       this.renderer.setImported(model);
       this.activeImportedName = file.name;
       this.state.setImportedAsset(file.name);
