@@ -12,12 +12,12 @@
 }
 
 @media (max-width: 600px) {
-  .toolbar-project [data-command="open-project"],
-  .toolbar-project [data-command="save-project"] {
+  .toolbar-project .compact-button[data-command="open-project"],
+  .toolbar-project .compact-button[data-command="save-project"] {
     display: none;
   }
 
-  .toolbar-project [data-command="import-model"] {
+  .toolbar-project .compact-button[data-command="import-model"] {
     display: inline-flex;
   }
 }
