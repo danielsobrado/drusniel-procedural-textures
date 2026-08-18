@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { disposeObjectResources } from './ObjectResources';
 
 const SUPPORTED_EXTENSIONS = new Set(['glb', 'gltf']);
 const GLB_MAGIC = 0x46546c67;
@@ -109,7 +110,13 @@ export class ModelLoader {
     }
 
     const gltf = await this.loader.parseAsync(payload, '');
-    return this.normalize(gltf.scene, file.name);
+
+    try {
+      return this.normalize(gltf.scene, file.name);
+    } catch (error) {
+      disposeObjectResources(gltf.scene);
+      throw error;
+    }
   }
 
   private normalize(root: THREE.Object3D, name: string): THREE.Object3D {
