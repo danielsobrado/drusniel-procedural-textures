@@ -35,7 +35,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
       clearcoat: 0.82,
       clearcoatRoughness: 0.12,
       specularIntensity: 0.78,
-      ior: 1.38
+      ior: 1.38,
+      sheen: 0.34,
+      sheenRoughness: 0.58,
+      sheenColor: '#f0a08d',
+      transmission: 0.07,
+      thickness: 0.35,
+      attenuationDistance: 1.2,
+      attenuationColor: '#f4a25d'
     },
     layers: [
       layer('preset-adipose-base', 'Deep fat', 'base', {
@@ -99,7 +106,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
       clearcoat: 0.18,
       clearcoatRoughness: 0.2,
       specularIntensity: 0.68,
-      ior: 1.5
+      ior: 1.5,
+      sheen: 0,
+      sheenRoughness: 0.7,
+      sheenColor: '#ffffff',
+      transmission: 0,
+      thickness: 0,
+      attenuationDistance: 2,
+      attenuationColor: '#ffffff'
     },
     layers: [
       layer('preset-marble-base', 'Stone', 'base', {
@@ -140,7 +154,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
       clearcoat: 0.08,
       clearcoatRoughness: 0.48,
       specularIntensity: 0.46,
-      ior: 1.46
+      ior: 1.46,
+      sheen: 0,
+      sheenRoughness: 0.7,
+      sheenColor: '#ffffff',
+      transmission: 0,
+      thickness: 0,
+      attenuationDistance: 2,
+      attenuationColor: '#ffffff'
     },
     layers: [
       layer('preset-lava-base', 'Crust', 'base', {
@@ -181,7 +202,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
       clearcoat: 0.5,
       clearcoatRoughness: 0.16,
       specularIntensity: 0.7,
-      ior: 1.4
+      ior: 1.4,
+      sheen: 0.22,
+      sheenRoughness: 0.62,
+      sheenColor: '#7cc6ad',
+      transmission: 0.04,
+      thickness: 0.2,
+      attenuationDistance: 1.6,
+      attenuationColor: '#5f9d83'
     },
     layers: [
       layer('preset-alien-base', 'Dermis', 'base', {
