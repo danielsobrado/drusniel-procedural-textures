@@ -33,17 +33,17 @@ export class Shell {
       <div class="app-shell">
         <header class="topbar">
           <div class="brand" title="${APP_NAME}">
-            <span class="brand-mark">PTL</span>
+            <span class="brand-mark" aria-hidden="true">PTL</span>
             <div class="brand-copy">
-              <strong>Procedural Texture Lab</strong>
+              <strong>${APP_NAME}</strong>
               <span>Realtime material authoring</span>
             </div>
           </div>
 
           <div class="toolbar-group toolbar-project" aria-label="Project commands">
-            <button class="icon-button" data-command="undo" title="Undo (Ctrl/Cmd+Z)">↶</button>
-            <button class="icon-button" data-command="redo" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
-            <span class="toolbar-divider"></span>
+            <button class="icon-button" data-command="undo" aria-label="Undo" title="Undo (Ctrl/Cmd+Z)">↶</button>
+            <button class="icon-button" data-command="redo" aria-label="Redo" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
+            <span class="toolbar-divider" aria-hidden="true"></span>
             <button class="compact-button" data-command="import-model">Import mesh</button>
             <button class="compact-button" data-command="open-project">Open</button>
             <button class="compact-button" data-command="save-project">Save</button>
@@ -51,9 +51,9 @@ export class Shell {
 
           <div class="toolbar-group toolbar-view" aria-label="Viewport commands">
             <span class="status-pill" data-role="status">Physical · WebGL</span>
-            <button class="icon-button" data-command="frame" title="Frame selection (F)">⌗</button>
-            <button class="icon-button" data-command="wireframe" title="Toggle wireframe (W)">◇</button>
-            <button class="icon-button" data-command="snapshot" title="Save PNG">◫</button>
+            <button class="icon-button" data-command="frame" aria-label="Frame selection" title="Frame selection (F)">⌗</button>
+            <button class="icon-button" data-command="wireframe" aria-label="Toggle wireframe" title="Toggle wireframe (W)">◇</button>
+            <button class="icon-button" data-command="snapshot" aria-label="Save preview PNG" title="Save PNG">◫</button>
           </div>
         </header>
 
@@ -61,7 +61,7 @@ export class Shell {
 
         <main class="viewport" data-role="viewport">
           <div class="viewport-badge">
-            <span class="live-dot"></span>
+            <span class="live-dot" aria-hidden="true"></span>
             <span data-role="object-label">Sphere</span>
           </div>
           <div class="viewport-help">Right click / Space · radial menu</div>
