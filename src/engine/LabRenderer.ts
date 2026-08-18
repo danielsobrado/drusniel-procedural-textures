@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { DEFAULT_BACKGROUND, RENDERER_CONFIG } from '../app/constants';
 import type { ObjectPreset } from '../materials/types';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { createProceduralMesh } from './MeshFactory';
@@ -9,11 +10,17 @@ export class LabRenderer {
   public readonly canvas: HTMLCanvasElement;
 
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.05, 100);
+  private readonly camera = new THREE.PerspectiveCamera(
+    RENDERER_CONFIG.cameraFov,
+    1,
+    RENDERER_CONFIG.cameraNear,
+    RENDERER_CONFIG.cameraFar
+  );
   private readonly renderer: THREE.WebGLRenderer;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly compiler: MaterialCompiler;
+  private readonly environmentTarget: THREE.WebGLRenderTarget;
   private currentRoot: THREE.Object3D | null = null;
   private animationFrame = 0;
 
@@ -22,7 +29,8 @@ export class LabRenderer {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
-      powerPreference: 'high-performance'
+      powerPreference: 'high-performance',
+      preserveDrawingBuffer: true
     });
     this.canvas = this.renderer.domElement;
     this.canvas.className = 'lab-canvas';
@@ -30,25 +38,29 @@ export class LabRenderer {
 
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
+    this.renderer.setPixelRatio(
+      Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio)
+    );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-    this.scene.background = new THREE.Color('#111318');
+    this.scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 
+    const roomEnvironment = new RoomEnvironment();
     const environmentGenerator = new THREE.PMREMGenerator(this.renderer);
-    const environment = environmentGenerator.fromScene(new RoomEnvironment(), 0.04);
-    this.scene.environment = environment.texture;
+    this.environmentTarget = environmentGenerator.fromScene(roomEnvironment, 0.04);
+    this.scene.environment = this.environmentTarget.texture;
+    roomEnvironment.dispose();
     environmentGenerator.dispose();
 
-    this.camera.position.set(0, 0.35, 3.6);
+    this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.065;
     this.controls.enablePan = true;
-    this.controls.minDistance = 1.3;
-    this.controls.maxDistance = 12;
+    this.controls.minDistance = RENDERER_CONFIG.minDistance;
+    this.controls.maxDistance = RENDERER_CONFIG.maxDistance;
 
     this.addStudioLighting();
 
@@ -107,10 +119,10 @@ export class LabRenderer {
   }
 
   public resetView(): void {
-    this.camera.position.set(0, 0.35, 3.6);
+    this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls.target.set(0, 0, 0);
-    this.camera.near = 0.05;
-    this.camera.far = 100;
+    this.camera.near = RENDERER_CONFIG.cameraNear;
+    this.camera.far = RENDERER_CONFIG.cameraFar;
     this.camera.updateProjectionMatrix();
     this.controls.update();
     this.frameSelection();
@@ -127,7 +139,7 @@ export class LabRenderer {
     this.controls.dispose();
     this.disposeRoot(this.currentRoot);
     this.compiler.material.dispose();
-    this.scene.environment?.dispose();
+    this.environmentTarget.dispose();
     this.renderer.dispose();
   }
 
