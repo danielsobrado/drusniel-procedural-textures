@@ -24,7 +24,8 @@ The first implementation focuses on a fast professional editing workflow rather 
 - Numeric fields support direct entry and sliders.
 - Layer reordering is drag-and-drop on desktop; touch can still edit/select/add through compact controls and the radial menu.
 - Every material update is previewed immediately.
-- Keyboard shortcuts cover the common workflow.
+- Continuous edits coalesce into useful undo steps instead of one history entry per input event.
+- Keyboard shortcuts cover the common workflow without overriding native undo while editing a field.
 - Narrow layouts reorganize panels without removing authoring features.
 
 ## Material model
@@ -61,7 +62,7 @@ Initial blend modes:
 - screen
 - overlay
 
-The shader compiler evaluates the active stack inside `MeshPhysicalMaterial`. Color, roughness and displacement use the same procedural fields so layers remain spatially coherent.
+The shader compiler evaluates the active stack inside `MeshPhysicalMaterial`. Color, roughness and displacement use the same procedural fields so layers remain spatially coherent. Procedural coordinates are evaluated in normalized world space so imported meshes with different source units and sub-mesh transforms receive a consistent material scale.
 
 Global physical controls are independent from layer contributions:
 
@@ -71,6 +72,9 @@ Global physical controls are independent from layer contributions:
 - clearcoat roughness
 - specular intensity
 - IOR
+- sheen and sheen roughness/tint
+- transmission and thickness
+- attenuation distance/color
 
 ## Geometry
 
@@ -90,10 +94,15 @@ Imported targets:
 
 Imported mesh handling:
 
+- validate GLB container metadata before parsing
+- reject external GLTF resource URIs before loading
 - traverse all meshes
 - preserve model hierarchy/transforms
 - normalize to a preview volume
+- compute missing vertex normals
 - apply the lab material to mesh nodes
+- dispose replaced source materials/textures
+- discard and clean stale concurrent imports
 - frame imported content automatically
 
 Multi-file GLTF packages with external buffers/textures are deferred until the importer can accept a complete asset bundle rather than silently resolving missing files.
@@ -110,6 +119,7 @@ Phase 1 renderer:
 - optional wireframe
 - procedural vertex displacement
 - physical material controls
+- explicit resource cleanup when preview objects are replaced
 
 The architecture keeps renderer/material services isolated so WebGPU/TSL, improved displaced normals and dedicated biological scattering can be added without rewriting the UI or project model.
 
@@ -117,13 +127,14 @@ The architecture keeps renderer/material services isolated so WebGPU/TSL, improv
 
 Editable application and renderer defaults live in `config/lab.yaml` rather than being spread through feature code. The YAML configuration owns:
 
-- application limits and persistence timing
+- application limits and persistence/history timing
+- radial and touch interaction timing/layout
 - object/layer/blend catalogs
 - default physical material values
 - default viewport/background
 - camera and renderer limits
 
-Algorithm-specific shader constants remain local to the implementation where they are part of the generator itself rather than deployment/editor configuration.
+The YAML document is parsed and range-validated at startup. Supported catalogs are checked for missing, duplicate and unknown IDs. Algorithm-specific shader constants remain local to the implementation where they are part of the generator itself rather than deployment/editor configuration.
 
 ## Project persistence
 
@@ -139,7 +150,9 @@ Initial persistence:
 
 - localStorage autosave
 - JSON export/import
-- migration of older Phase 1 JSON that predates physical-surface settings
+- strict runtime validation of project structure, enums, ranges, IDs and colors
+- migration of older Phase 1 JSON that predates advanced physical-surface settings
+- coalesced undo history for continuous editor changes
 
 Later:
 
@@ -157,6 +170,7 @@ src/
   app/
     App.ts
     AppState.ts
+    ProjectFile.ts
     constants.ts
   config/
     labConfig.ts
@@ -164,6 +178,7 @@ src/
     LabRenderer.ts
     MeshFactory.ts
     ModelLoader.ts
+    ObjectResources.ts
   materials/
     MaterialCompiler.ts
     PhysicalMaterial.ts
@@ -178,18 +193,22 @@ src/
     Shell.ts
   utils/
     download.ts
+    html.ts
     ids.ts
   styles/
     app.css
+    refinements.css
 ```
 
 Rules:
 
 - UI does not mutate Three.js scene objects directly.
 - `AppState` is the source of truth for the editable project.
+- Untrusted project/import data is validated before entering application state or resource loading.
 - Engine code reacts to explicit state changes.
 - Material compilation is isolated and deterministic for a given layer stack.
-- User/editor defaults are sourced from YAML configuration.
+- Three.js resources replaced by the lab are explicitly disposed.
+- User/editor defaults are sourced from validated YAML configuration.
 - No UI framework is required for Phase 1; TypeScript + DOM keeps the first implementation small and transparent.
 
 ## Delivery phases
@@ -201,19 +220,21 @@ Implemented in `main`:
 - Professional responsive shell
 - Procedural primitives
 - GLB/self-contained GLTF import and drag/drop
+- Input/container validation and stale-import protection
 - Layer stack with seven procedural layer types
 - Live physical shader composition
 - Compact layer and physical-surface inspector
-- Desktop + touch radial menu
+- Desktop + touch + keyboard radial menu
 - Material presets
-- JSON project import/export
+- Strict JSON project import/export
 - local autosave
-- undo/redo and keyboard shortcuts
+- coalesced undo/redo and keyboard shortcuts
 - PNG viewport capture
-- YAML application configuration
+- Validated YAML application/UI configuration
 - CI build workflow
+- Three.js resource cleanup for replaced/imported preview assets
 
-Build/runtime verification still needs a real dependency install/browser run after checkout; the repository includes CI for that verification.
+Build/runtime verification still needs a dependency install/browser run in an environment with package-registry access; the repository includes CI for that verification.
 
 ### Phase 2 — Material depth
 
@@ -224,7 +245,7 @@ Build/runtime verification still needs a real dependency install/browser run aft
 - better procedural vessel branching
 - environment/HDRI library
 - per-mesh selection and material assignment for imported scenes
-- tangent/normal strategy for stronger displacement on arbitrary imported meshes
+- displaced-normal and shadow-depth strategy for stronger displacement on arbitrary imported meshes
 - multi-file GLTF asset bundles
 
 ### Phase 3 — Production export
@@ -245,6 +266,7 @@ Build/runtime verification still needs a real dependency install/browser run aft
 - Global PBR controls update the same material independently of layer roughness deltas.
 - User can switch among built-in meshes.
 - User can drag/drop or import GLB/self-contained GLTF.
+- Unsupported external GLTF resources fail explicitly instead of causing hidden network requests.
 - Radial menu works with mouse, keyboard and touch long press.
-- Project JSON can be exported and imported.
+- Project JSON can be exported and safely imported.
 - Layout remains usable on desktop, tablet and narrow mobile screens.
