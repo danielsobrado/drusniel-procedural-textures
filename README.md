@@ -12,7 +12,7 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - GLB/GLTF import plus viewport drag/drop
 - Automatic model normalization and framing
 - Professional compact desktop/tablet/mobile layout
-- Context radial menu on right click or `Space`
+- Context radial menu on right click, `Space`, or touch long press
 - Draggable material layer ordering
 - Material preset library including biological/adipose, marble, molten rock and alien dermis
 - Undo/redo
@@ -42,7 +42,7 @@ npm run preview
 | Orbit | Left drag |
 | Pan | Right drag when radial menu is not open / OrbitControls gesture |
 | Zoom | Wheel / pinch |
-| Radial menu | Right click or `Space` |
+| Radial menu | Right click, `Space`, or touch long press |
 | Frame object | `F` |
 | Wireframe | `W` |
 | Undo | `Ctrl/Cmd + Z` |
