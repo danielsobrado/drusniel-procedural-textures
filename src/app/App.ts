@@ -1,10 +1,10 @@
 import {
   AUTOSAVE_DELAY_MS,
-  DEFAULT_PHYSICAL,
   OBJECT_PRESETS,
   STORAGE_KEY
 } from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
+import { normalizeProject } from './ProjectFile';
 import { LabRenderer } from '../engine/LabRenderer';
 import { ModelLoader } from '../engine/ModelLoader';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
@@ -22,25 +22,6 @@ function isEditableTarget(target: EventTarget | null): boolean {
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable);
-}
-
-function normalizeProject(value: unknown): ProjectState {
-  if (typeof value !== 'object' || value === null) {
-    throw new Error('Project file does not contain an object.');
-  }
-
-  const project = value as Partial<ProjectState>;
-  if (project.version !== 1 || !Array.isArray(project.layers) || project.layers.length === 0) {
-    throw new Error('Invalid Procedural Texture Lab project.');
-  }
-
-  return {
-    ...project,
-    physical: {
-      ...DEFAULT_PHYSICAL,
-      ...(project.physical ?? {})
-    }
-  } as ProjectState;
 }
 
 function loadInitialProject(): ProjectState {
@@ -116,7 +97,9 @@ export class App {
     state: Readonly<ProjectState>,
     reason: StateChangeReason
   ): void {
-    this.syncMaterial(state);
+    if (reason === 'layers' || reason === 'viewport' || reason === 'project') {
+      this.syncMaterial(state);
+    }
 
     if (reason === 'layers' || reason === 'selection' || reason === 'project') {
       this.layers.render(state);
