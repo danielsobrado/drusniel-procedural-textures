@@ -11,6 +11,15 @@ interface ObjectCatalogItem extends CatalogItem<ObjectPreset> {
   glyph: string;
 }
 
+interface UiConfig {
+  longPressDelayMs: number;
+  longPressMoveTolerancePx: number;
+  radialRadiusPx: number;
+  radialEdgePaddingPx: number;
+  toastInfoMs: number;
+  toastErrorMs: number;
+}
+
 interface RendererConfig {
   maxPixelRatio: number;
   cameraFov: number;
@@ -31,6 +40,7 @@ interface LabConfig {
     historyCoalesceMs: number;
     autosaveDelayMs: number;
   };
+  ui: UiConfig;
   defaults: {
     background: string;
     object: ObjectPreset;
@@ -240,6 +250,28 @@ function parsePhysical(value: unknown): PhysicalSettings {
   };
 }
 
+function parseUi(value: unknown): UiConfig {
+  const ui = asRecord(value, 'ui');
+  return {
+    longPressDelayMs: asInteger(ui.longPressDelayMs, 'ui.longPressDelayMs', 100, 5000),
+    longPressMoveTolerancePx: asNumber(
+      ui.longPressMoveTolerancePx,
+      'ui.longPressMoveTolerancePx',
+      1,
+      100
+    ),
+    radialRadiusPx: asNumber(ui.radialRadiusPx, 'ui.radialRadiusPx', 40, 300),
+    radialEdgePaddingPx: asNumber(
+      ui.radialEdgePaddingPx,
+      'ui.radialEdgePaddingPx',
+      20,
+      200
+    ),
+    toastInfoMs: asInteger(ui.toastInfoMs, 'ui.toastInfoMs', 250, 30000),
+    toastErrorMs: asInteger(ui.toastErrorMs, 'ui.toastErrorMs', 250, 30000)
+  };
+}
+
 function parseRenderer(value: unknown): RendererConfig {
   const renderer = asRecord(value, 'renderer');
   const position = renderer.cameraPosition;
@@ -302,6 +334,7 @@ function parseConfig(value: unknown): LabConfig {
       historyCoalesceMs: asInteger(app.historyCoalesceMs, 'app.historyCoalesceMs', 0, 5000),
       autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000)
     },
+    ui: parseUi(root.ui),
     defaults: {
       background: asColor(defaults.background, 'defaults.background'),
       object: defaultObject,
