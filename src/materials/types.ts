@@ -45,6 +45,13 @@ export interface PhysicalSettings {
   clearcoatRoughness: number;
   specularIntensity: number;
   ior: number;
+  sheen: number;
+  sheenRoughness: number;
+  sheenColor: string;
+  transmission: number;
+  thickness: number;
+  attenuationDistance: number;
+  attenuationColor: string;
 }
 
 export interface ProjectState {
