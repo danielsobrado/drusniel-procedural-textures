@@ -9,12 +9,13 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - Normal, multiply, add, screen and overlay blending
 - Per-layer color, opacity, scale, strength, seed, roughness and displacement
 - Global physical surface controls for roughness, metalness, clearcoat, clearcoat roughness, specular intensity and IOR
+- Advanced physical controls for sheen, transmission, thickness and volumetric attenuation color/distance
 - Built-in sphere, icosphere, cube, rounded cube, torus and plane targets
 - GLB/self-contained GLTF import plus viewport drag/drop
 - Automatic model normalization and framing
 - Professional compact desktop/tablet/mobile layout
 - Context radial menu on right click, `Space`, or touch long press
-- Draggable material layer ordering
+- Drag-and-drop layer ordering plus touch-friendly move controls
 - Material preset library including biological/adipose, marble, molten rock and alien dermis
 - Undo/redo
 - Wireframe preview
@@ -66,7 +67,7 @@ The editor state, Three.js renderer, material compiler and UI are intentionally 
 - `src/ui` — compact panels, layer dock and radial menu
 - `src/utils` — small browser helpers
 
-The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. The physical inspector controls the underlying PBR response independently from per-layer roughness contributions.
+The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. The physical inspector controls the underlying PBR response independently from per-layer roughness contributions and can enable sheen/transmission volume features when required.
 
 ## Project format
 
@@ -76,4 +77,4 @@ External-resource GLTF bundles are not yet imported as a multi-file package. Use
 
 ## Roadmap
 
-See [`docs/PLAN.md`](docs/PLAN.md) for the implementation plan. Next material-focused milestones are masks/groups, biological SSS, wet-film layers, environment libraries, texture baking and optimized GLB export.
+See [`docs/PLAN.md`](docs/PLAN.md) for the implementation plan. Next material-focused milestones are masks/groups, dedicated biological SSS, procedural wet-film masks, environment libraries, texture baking and optimized GLB export.
