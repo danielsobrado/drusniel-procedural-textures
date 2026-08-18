@@ -5,6 +5,7 @@ export const APP_NAME = labConfig.app.name;
 export const STORAGE_KEY = labConfig.app.storageKey;
 export const MAX_LAYERS = labConfig.app.maxLayers;
 export const HISTORY_LIMIT = labConfig.app.historyLimit;
+export const HISTORY_COALESCE_MS = labConfig.app.historyCoalesceMs;
 export const AUTOSAVE_DELAY_MS = labConfig.app.autosaveDelayMs;
 
 export const OBJECT_PRESETS: ReadonlyArray<{ id: ObjectPreset; label: string; glyph: string }> =
