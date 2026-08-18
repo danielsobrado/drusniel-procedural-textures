@@ -1,5 +1,6 @@
 import './styles/app.css';
 import { App } from './app/App';
+import { installLongPressContextMenu } from './ui/LongPressContextMenu';
 
 const root = document.querySelector<HTMLElement>('#app');
 
@@ -8,3 +9,4 @@ if (root === null) {
 }
 
 new App(root);
+installLongPressContextMenu();
