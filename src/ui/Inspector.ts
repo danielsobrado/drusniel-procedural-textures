@@ -1,5 +1,5 @@
 import { BLEND_MODES, LAYER_KINDS } from '../app/constants';
-import type { MaterialLayer, ProjectState } from '../materials/types';
+import type { MaterialLayer, PhysicalSettings, ProjectState } from '../materials/types';
 
 export interface InspectorCallbacks {
   onLayerPatch: (id: string, patch: Partial<MaterialLayer>) => void;
@@ -7,10 +7,19 @@ export interface InspectorCallbacks {
   onRemove: (id: string) => void;
   onBackground: (color: string) => void;
   onWireframe: (enabled: boolean) => void;
+  onPhysical: (patch: Partial<PhysicalSettings>) => void;
 }
 
 interface NumericField {
   key: keyof Pick<MaterialLayer, 'opacity' | 'scale' | 'strength' | 'seed' | 'roughness' | 'displacement'>;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+}
+
+interface PhysicalField {
+  key: keyof PhysicalSettings;
   label: string;
   min: number;
   max: number;
@@ -24,6 +33,15 @@ const NUMERIC_FIELDS: readonly NumericField[] = [
   { key: 'seed', label: 'Seed', min: 0, max: 100, step: 1 },
   { key: 'roughness', label: 'Roughness Δ', min: -0.5, max: 0.5, step: 0.01 },
   { key: 'displacement', label: 'Displace', min: -0.18, max: 0.18, step: 0.001 }
+];
+
+const PHYSICAL_FIELDS: readonly PhysicalField[] = [
+  { key: 'roughness', label: 'Base roughness', min: 0.02, max: 1, step: 0.01 },
+  { key: 'metalness', label: 'Metalness', min: 0, max: 1, step: 0.01 },
+  { key: 'clearcoat', label: 'Clearcoat', min: 0, max: 1, step: 0.01 },
+  { key: 'clearcoatRoughness', label: 'Coat roughness', min: 0, max: 1, step: 0.01 },
+  { key: 'specularIntensity', label: 'Specular', min: 0, max: 1, step: 0.01 },
+  { key: 'ior', label: 'IOR', min: 1, max: 2.33, step: 0.01 }
 ];
 
 export class Inspector {
@@ -113,6 +131,13 @@ export class Inspector {
       </section>
 
       <details class="inspector-section advanced-section" open>
+        <summary>Physical surface</summary>
+        <div class="physical-controls">
+          ${PHYSICAL_FIELDS.map((field) => this.physicalRow(field, state.physical[field.key])).join('')}
+        </div>
+      </details>
+
+      <details class="inspector-section advanced-section" open>
         <summary>Viewport</summary>
         <label class="field-row compact-field">
           <span>Background</span>
@@ -146,6 +171,17 @@ export class Inspector {
       }
     }
 
+    const physicalFields = this.container.querySelectorAll<HTMLInputElement>('[data-physical-field]');
+    for (const field of physicalFields) {
+      if (field === document.activeElement) {
+        continue;
+      }
+      const key = field.dataset.physicalField as keyof PhysicalSettings | undefined;
+      if (key !== undefined) {
+        field.value = String(state.physical[key]);
+      }
+    }
+
     const background = this.container.querySelector<HTMLInputElement>('[data-viewport-field="background"]');
     if (background !== null && background !== document.activeElement) {
       background.value = state.background;
@@ -167,14 +203,34 @@ export class Inspector {
     `;
   }
 
+  private physicalRow(field: PhysicalField, value: number): string {
+    return `
+      <div class="parameter-row">
+        <span>${field.label}</span>
+        <input data-physical-field="${field.key}" data-physical-peer="range" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input class="number-input" data-physical-field="${field.key}" data-physical-peer="number" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+      </div>
+    `;
+  }
+
   private handleInput(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
       return;
     }
 
-    const layerId = this.currentLayerId;
-    if (layerId === null) {
+    const physicalField = target.dataset.physicalField as keyof PhysicalSettings | undefined;
+    if (physicalField !== undefined) {
+      const value = Number(target.value);
+      if (Number.isFinite(value)) {
+        const peers = this.container.querySelectorAll<HTMLInputElement>(`[data-physical-field="${physicalField}"]`);
+        for (const peer of peers) {
+          if (peer !== target) {
+            peer.value = target.value;
+          }
+        }
+        this.callbacks.onPhysical({ [physicalField]: value });
+      }
       return;
     }
 
@@ -186,6 +242,11 @@ export class Inspector {
 
     if (viewportField === 'wireframe' && target instanceof HTMLInputElement) {
       this.callbacks.onWireframe(target.checked);
+      return;
+    }
+
+    const layerId = this.currentLayerId;
+    if (layerId === null) {
       return;
     }
 
