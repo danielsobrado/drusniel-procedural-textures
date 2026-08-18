@@ -1,4 +1,4 @@
-import type { BlendMode, LayerKind, ObjectPreset } from '../materials/types';
+import type { BlendMode, LayerKind, ObjectPreset, PhysicalSettings } from '../materials/types';
 
 export const APP_NAME = 'Procedural Texture Lab';
 export const STORAGE_KEY = 'procedural-texture-lab.project.v1';
@@ -32,6 +32,15 @@ export const BLEND_MODES: ReadonlyArray<{ id: BlendMode; label: string }> = [
   { id: 'screen', label: 'Screen' },
   { id: 'overlay', label: 'Overlay' }
 ];
+
+export const DEFAULT_PHYSICAL: Readonly<PhysicalSettings> = {
+  roughness: 0.34,
+  metalness: 0,
+  clearcoat: 0.34,
+  clearcoatRoughness: 0.18,
+  specularIntensity: 0.62,
+  ior: 1.42
+};
 
 export const DEFAULT_BACKGROUND = '#111318';
 export const DEFAULT_OBJECT: ObjectPreset = 'sphere';
