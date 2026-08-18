@@ -1,0 +1,75 @@
+app:
+  name: Procedural Texture Lab
+  storageKey: procedural-texture-lab.project.v1
+  maxLayers: 12
+  historyLimit: 80
+  autosaveDelayMs: 250
+
+defaults:
+  background: '#111318'
+  object: sphere
+  physical:
+    roughness: 0.34
+    metalness: 0.0
+    clearcoat: 0.34
+    clearcoatRoughness: 0.18
+    specularIntensity: 0.62
+    ior: 1.42
+
+objects:
+  - id: sphere
+    label: Sphere
+    glyph: '●'
+  - id: icosphere
+    label: Icosphere
+    glyph: '⬢'
+  - id: cube
+    label: Cube
+    glyph: '■'
+  - id: rounded-cube
+    label: Rounded
+    glyph: '▣'
+  - id: torus
+    label: Torus
+    glyph: '◉'
+  - id: plane
+    label: Plane
+    glyph: '▱'
+
+layerKinds:
+  - id: base
+    label: Base color
+  - id: fbm
+    label: FBM noise
+  - id: cellular
+    label: Cellular
+  - id: ridges
+    label: Ridges
+  - id: spots
+    label: Spots
+  - id: veins
+    label: Veins
+  - id: gradient
+    label: Gradient
+
+blendModes:
+  - id: normal
+    label: Normal
+  - id: multiply
+    label: Multiply
+  - id: add
+    label: Add
+  - id: screen
+    label: Screen
+  - id: overlay
+    label: Overlay
+
+renderer:
+  maxPixelRatio: 2.0
+  cameraFov: 34
+  cameraNear: 0.05
+  cameraFar: 100.0
+  cameraPosition: [0.0, 0.35, 3.6]
+  minDistance: 1.3
+  maxDistance: 12.0
+  toneMappingExposure: 1.0
