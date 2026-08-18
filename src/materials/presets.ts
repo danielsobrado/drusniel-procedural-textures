@@ -29,6 +29,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'adipose-v7',
     name: 'Adipose Tissue',
     description: 'Warm layered biological tissue with fascia, lobules and vascular detail.',
+    physical: {
+      roughness: 0.31,
+      metalness: 0,
+      clearcoat: 0.82,
+      clearcoatRoughness: 0.12,
+      specularIntensity: 0.78,
+      ior: 1.38
+    },
     layers: [
       layer('preset-adipose-base', 'Deep fat', 'base', {
         colorA: '#d78b25',
@@ -85,6 +93,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'storm-marble',
     name: 'Storm Marble',
     description: 'Dark stone with layered mineral veins and soft depth.',
+    physical: {
+      roughness: 0.24,
+      metalness: 0,
+      clearcoat: 0.18,
+      clearcoatRoughness: 0.2,
+      specularIntensity: 0.68,
+      ior: 1.5
+    },
     layers: [
       layer('preset-marble-base', 'Stone', 'base', {
         colorA: '#181c21',
@@ -118,6 +134,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'molten-rock',
     name: 'Molten Rock',
     description: 'Cracked dark crust with hot procedural fissures.',
+    physical: {
+      roughness: 0.48,
+      metalness: 0,
+      clearcoat: 0.08,
+      clearcoatRoughness: 0.48,
+      specularIntensity: 0.46,
+      ior: 1.46
+    },
     layers: [
       layer('preset-lava-base', 'Crust', 'base', {
         colorA: '#100d0c',
@@ -151,6 +175,14 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'alien-dermis',
     name: 'Alien Dermis',
     description: 'Organic cool dermis with spots, ridges and subtle veins.',
+    physical: {
+      roughness: 0.36,
+      metalness: 0,
+      clearcoat: 0.5,
+      clearcoatRoughness: 0.16,
+      specularIntensity: 0.7,
+      ior: 1.4
+    },
     layers: [
       layer('preset-alien-base', 'Dermis', 'base', {
         colorA: '#233a3b',
