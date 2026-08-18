@@ -18,8 +18,11 @@ interface NumericField {
   step: number;
 }
 
+type NumericPhysicalKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
+type ColorPhysicalKey = Extract<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
+
 interface PhysicalField {
-  key: keyof PhysicalSettings;
+  key: NumericPhysicalKey;
   label: string;
   min: number;
   max: number;
@@ -41,7 +44,12 @@ const PHYSICAL_FIELDS: readonly PhysicalField[] = [
   { key: 'clearcoat', label: 'Clearcoat', min: 0, max: 1, step: 0.01 },
   { key: 'clearcoatRoughness', label: 'Coat roughness', min: 0, max: 1, step: 0.01 },
   { key: 'specularIntensity', label: 'Specular', min: 0, max: 1, step: 0.01 },
-  { key: 'ior', label: 'IOR', min: 1, max: 2.33, step: 0.01 }
+  { key: 'ior', label: 'IOR', min: 1, max: 2.33, step: 0.01 },
+  { key: 'sheen', label: 'Sheen', min: 0, max: 1, step: 0.01 },
+  { key: 'sheenRoughness', label: 'Sheen roughness', min: 0, max: 1, step: 0.01 },
+  { key: 'transmission', label: 'Transmission', min: 0, max: 1, step: 0.01 },
+  { key: 'thickness', label: 'Thickness', min: 0, max: 3, step: 0.01 },
+  { key: 'attenuationDistance', label: 'Absorb distance', min: 0.05, max: 10, step: 0.05 }
 ];
 
 export class Inspector {
@@ -135,6 +143,10 @@ export class Inspector {
         <div class="physical-controls">
           ${PHYSICAL_FIELDS.map((field) => this.physicalRow(field, state.physical[field.key])).join('')}
         </div>
+        <div class="color-pair physical-color-pair">
+          ${this.physicalColor('sheenColor', 'Sheen tint', state.physical.sheenColor)}
+          ${this.physicalColor('attenuationColor', 'Absorption', state.physical.attenuationColor)}
+        </div>
       </details>
 
       <details class="inspector-section advanced-section" open>
@@ -176,9 +188,20 @@ export class Inspector {
       if (field === document.activeElement) {
         continue;
       }
-      const key = field.dataset.physicalField as keyof PhysicalSettings | undefined;
+      const key = field.dataset.physicalField as NumericPhysicalKey | undefined;
       if (key !== undefined) {
         field.value = String(state.physical[key]);
+      }
+    }
+
+    const physicalColors = this.container.querySelectorAll<HTMLInputElement>('[data-physical-color]');
+    for (const field of physicalColors) {
+      if (field === document.activeElement) {
+        continue;
+      }
+      const key = field.dataset.physicalColor as ColorPhysicalKey | undefined;
+      if (key !== undefined) {
+        field.value = state.physical[key];
       }
     }
 
@@ -213,13 +236,28 @@ export class Inspector {
     `;
   }
 
+  private physicalColor(key: ColorPhysicalKey, label: string, value: string): string {
+    return `
+      <label class="color-field">
+        <input data-physical-color="${key}" type="color" value="${value}">
+        <span>${label}</span>
+      </label>
+    `;
+  }
+
   private handleInput(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
       return;
     }
 
-    const physicalField = target.dataset.physicalField as keyof PhysicalSettings | undefined;
+    const physicalColor = target.dataset.physicalColor as ColorPhysicalKey | undefined;
+    if (physicalColor !== undefined) {
+      this.callbacks.onPhysical({ [physicalColor]: target.value });
+      return;
+    }
+
+    const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;
     if (physicalField !== undefined) {
       const value = Number(target.value);
       if (Number.isFinite(value)) {
