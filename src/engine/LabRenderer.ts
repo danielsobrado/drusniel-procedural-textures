@@ -76,14 +76,31 @@ export class LabRenderer {
   }
 
   public setImported(root: THREE.Object3D): void {
+    const replacedMaterials = new Set<THREE.Material>();
+
     root.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        object.material = this.compiler.material;
-        object.castShadow = true;
-        object.receiveShadow = true;
+      if (!(object instanceof THREE.Mesh)) {
+        return;
       }
+
+      if (
+        object.geometry.getAttribute('position') !== undefined &&
+        object.geometry.getAttribute('normal') === undefined
+      ) {
+        object.geometry.computeVertexNormals();
+      }
+
+      const sourceMaterials = Array.isArray(object.material)
+        ? object.material
+        : [object.material];
+      sourceMaterials.forEach((material) => replacedMaterials.add(material));
+
+      object.material = this.compiler.material;
+      object.castShadow = true;
+      object.receiveShadow = true;
     });
 
+    this.disposeMaterials(replacedMaterials);
     this.replaceRoot(root);
   }
 
@@ -107,8 +124,13 @@ export class LabRenderer {
     const distance = (radius / Math.tan(halfFov)) * 1.28;
     const direction = this.camera.position
       .clone()
-      .sub(this.controls.target)
-      .normalize();
+      .sub(this.controls.target);
+
+    if (direction.lengthSq() < 1e-8) {
+      direction.set(0, 0, 1);
+    } else {
+      direction.normalize();
+    }
 
     this.controls.target.copy(sphere.center);
     this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
@@ -190,6 +212,27 @@ export class LabRenderer {
 
     for (const geometry of geometries) {
       geometry.dispose();
+    }
+  }
+
+  private disposeMaterials(materials: ReadonlySet<THREE.Material>): void {
+    const textures = new Set<THREE.Texture>();
+
+    for (const material of materials) {
+      for (const value of Object.values(material as unknown as Record<string, unknown>)) {
+        if (value instanceof THREE.Texture) {
+          textures.add(value);
+        }
+      }
+      material.dispose();
+    }
+
+    for (const texture of textures) {
+      const image = texture.image as unknown;
+      texture.dispose();
+      if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
+        image.close();
+      }
     }
   }
 
