@@ -1,0 +1,206 @@
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import type { ObjectPreset } from '../materials/types';
+import { MaterialCompiler } from '../materials/MaterialCompiler';
+import { createProceduralMesh } from './MeshFactory';
+
+export class LabRenderer {
+  public readonly canvas: HTMLCanvasElement;
+
+  private readonly scene = new THREE.Scene();
+  private readonly camera = new THREE.PerspectiveCamera(34, 1, 0.05, 100);
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly controls: OrbitControls;
+  private readonly resizeObserver: ResizeObserver;
+  private readonly compiler: MaterialCompiler;
+  private currentRoot: THREE.Object3D | null = null;
+  private animationFrame = 0;
+
+  public constructor(container: HTMLElement, compiler: MaterialCompiler) {
+    this.compiler = compiler;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
+    this.canvas = this.renderer.domElement;
+    this.canvas.className = 'lab-canvas';
+    container.append(this.canvas);
+
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+    this.scene.background = new THREE.Color('#111318');
+
+    const environmentGenerator = new THREE.PMREMGenerator(this.renderer);
+    const environment = environmentGenerator.fromScene(new RoomEnvironment(), 0.04);
+    this.scene.environment = environment.texture;
+    environmentGenerator.dispose();
+
+    this.camera.position.set(0, 0.35, 3.6);
+    this.controls = new OrbitControls(this.camera, this.canvas);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.065;
+    this.controls.enablePan = true;
+    this.controls.minDistance = 1.3;
+    this.controls.maxDistance = 12;
+
+    this.addStudioLighting();
+
+    this.resizeObserver = new ResizeObserver(() => this.resize());
+    this.resizeObserver.observe(container);
+    this.resize();
+    this.start();
+  }
+
+  public setPrimitive(preset: ObjectPreset): void {
+    const mesh = createProceduralMesh(preset, this.compiler.material);
+    this.replaceRoot(mesh);
+  }
+
+  public setImported(root: THREE.Object3D): void {
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        object.material = this.compiler.material;
+        object.castShadow = true;
+        object.receiveShadow = true;
+      }
+    });
+
+    this.replaceRoot(root);
+  }
+
+  public setBackground(color: string): void {
+    this.scene.background = new THREE.Color(color);
+  }
+
+  public frameSelection(): void {
+    if (this.currentRoot === null) {
+      return;
+    }
+
+    const bounds = new THREE.Box3().setFromObject(this.currentRoot);
+    if (bounds.isEmpty()) {
+      return;
+    }
+
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(sphere.radius, 0.1);
+    const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
+    const distance = (radius / Math.tan(halfFov)) * 1.28;
+    const direction = this.camera.position
+      .clone()
+      .sub(this.controls.target)
+      .normalize();
+
+    this.controls.target.copy(sphere.center);
+    this.camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    this.camera.near = Math.max(distance / 100, 0.01);
+    this.camera.far = Math.max(distance * 20, 50);
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+  }
+
+  public resetView(): void {
+    this.camera.position.set(0, 0.35, 3.6);
+    this.controls.target.set(0, 0, 0);
+    this.camera.near = 0.05;
+    this.camera.far = 100;
+    this.camera.updateProjectionMatrix();
+    this.controls.update();
+    this.frameSelection();
+  }
+
+  public capturePng(): string {
+    this.renderer.render(this.scene, this.camera);
+    return this.canvas.toDataURL('image/png');
+  }
+
+  public dispose(): void {
+    cancelAnimationFrame(this.animationFrame);
+    this.resizeObserver.disconnect();
+    this.controls.dispose();
+    this.disposeRoot(this.currentRoot);
+    this.compiler.material.dispose();
+    this.scene.environment?.dispose();
+    this.renderer.dispose();
+  }
+
+  private addStudioLighting(): void {
+    const hemisphere = new THREE.HemisphereLight('#edf4ff', '#231d1a', 1.2);
+    this.scene.add(hemisphere);
+
+    const key = new THREE.DirectionalLight('#fff3e4', 3.1);
+    key.position.set(-3.5, 4.2, 4.5);
+    key.castShadow = true;
+    key.shadow.mapSize.set(1024, 1024);
+    key.shadow.camera.near = 0.1;
+    key.shadow.camera.far = 15;
+    key.shadow.bias = -0.0002;
+    this.scene.add(key);
+
+    const fill = new THREE.DirectionalLight('#b8d5ff', 1.15);
+    fill.position.set(4, 1.5, 2.5);
+    this.scene.add(fill);
+
+    const rim = new THREE.DirectionalLight('#ffb18f', 1.35);
+    rim.position.set(-2.5, -1, -4);
+    this.scene.add(rim);
+  }
+
+  private replaceRoot(root: THREE.Object3D): void {
+    if (this.currentRoot !== null) {
+      this.scene.remove(this.currentRoot);
+      this.disposeRoot(this.currentRoot);
+    }
+
+    this.currentRoot = root;
+    this.scene.add(root);
+    this.frameSelection();
+  }
+
+  private disposeRoot(root: THREE.Object3D | null): void {
+    if (root === null) {
+      return;
+    }
+
+    const geometries = new Set<THREE.BufferGeometry>();
+    root.traverse((object) => {
+      if (object instanceof THREE.Mesh) {
+        geometries.add(object.geometry);
+      }
+    });
+
+    for (const geometry of geometries) {
+      geometry.dispose();
+    }
+  }
+
+  private resize(): void {
+    const parent = this.canvas.parentElement;
+    if (parent === null) {
+      return;
+    }
+
+    const width = Math.max(parent.clientWidth, 1);
+    const height = Math.max(parent.clientHeight, 1);
+    this.renderer.setSize(width, height, false);
+    this.camera.aspect = width / height;
+    this.camera.updateProjectionMatrix();
+  }
+
+  private start(): void {
+    const render = (): void => {
+      this.animationFrame = requestAnimationFrame(render);
+      this.controls.update();
+      this.renderer.render(this.scene, this.camera);
+    };
+
+    render();
+  }
+}
