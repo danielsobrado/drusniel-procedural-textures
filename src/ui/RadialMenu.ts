@@ -1,3 +1,5 @@
+import { UI_CONFIG } from '../app/constants';
+
 export type RadialCommand =
   | 'add-noise'
   | 'add-cells'
@@ -42,8 +44,8 @@ export class RadialMenu {
   }
 
   public open(x: number, y: number, focusFirst = false): void {
-    const radius = 104;
-    const margin = radius + 58;
+    const radius = UI_CONFIG.radialRadiusPx;
+    const margin = radius + UI_CONFIG.radialEdgePaddingPx;
     const safeX = Math.max(margin, Math.min(window.innerWidth - margin, x));
     const safeY = Math.max(margin, Math.min(window.innerHeight - margin, y));
 
