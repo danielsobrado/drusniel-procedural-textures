@@ -38,6 +38,15 @@ export interface MaterialLayer {
   displacement: number;
 }
 
+export interface PhysicalSettings {
+  roughness: number;
+  metalness: number;
+  clearcoat: number;
+  clearcoatRoughness: number;
+  specularIntensity: number;
+  ior: number;
+}
+
 export interface ProjectState {
   version: 1;
   selectedObject: ObjectPreset;
@@ -45,6 +54,7 @@ export interface ProjectState {
   importedAssetName: string | null;
   background: string;
   wireframe: boolean;
+  physical: PhysicalSettings;
   layers: MaterialLayer[];
 }
 
