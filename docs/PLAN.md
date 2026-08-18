@@ -13,19 +13,19 @@ The first implementation focuses on a fast professional editing workflow rather 
 - **Top command bar** — project/preset actions, viewport mode, import, export, undo/redo.
 - **Left compact library** — material presets, procedural object presets, imported assets.
 - **Center viewport** — Three.js realtime preview with orbit controls and drag/drop GLB support.
-- **Right inspector** — parameters for the selected material layer, object, and renderer.
-- **Bottom layer strip** — reorder, enable/disable, duplicate, blend mode, opacity and quick layer creation.
-- **Radial menu** — right click or `Space` for contextual high-frequency actions: add layer, add primitive, import mesh, frame selection, reset view, duplicate layer, toggle wireframe.
+- **Right inspector** — parameters for the selected material layer, physical surface and renderer.
+- **Bottom layer strip** — reorder, enable/disable, duplicate and quick layer creation.
+- **Radial menu** — right click, `Space`, or touch long press for high-frequency contextual actions.
 
 ### Interaction principles
 
-- Progressive disclosure: advanced parameters stay collapsed until requested.
+- Progressive disclosure: advanced parameters stay grouped until requested.
 - Most-used controls remain within one click.
 - Numeric fields support direct entry and sliders.
-- Layer reordering is drag-and-drop.
+- Layer reordering is drag-and-drop on desktop; touch can still edit/select/add through compact controls and the radial menu.
 - Every material update is previewed immediately.
 - Keyboard shortcuts cover the common workflow.
-- UI remains usable on tablet/mobile by collapsing side panels into drawers.
+- Narrow layouts reorganize panels without removing authoring features.
 
 ## Material model
 
@@ -61,7 +61,16 @@ Initial blend modes:
 - screen
 - overlay
 
-The shader compiler emits GLSL from the active stack. Color, roughness and displacement use the same procedural field so the material reads as one coherent surface rather than disconnected texture channels.
+The shader compiler evaluates the active stack inside `MeshPhysicalMaterial`. Color, roughness and displacement use the same procedural fields so layers remain spatially coherent.
+
+Global physical controls are independent from layer contributions:
+
+- base roughness
+- metalness
+- clearcoat
+- clearcoat roughness
+- specular intensity
+- IOR
 
 ## Geometry
 
@@ -77,29 +86,44 @@ Built-in procedural targets:
 Imported targets:
 
 - GLB
-- GLTF
+- self-contained GLTF
 
 Imported mesh handling:
 
 - traverse all meshes
-- preserve transforms
-- optionally normalize to a preview volume
-- apply the lab material to all or selected mesh nodes
+- preserve model hierarchy/transforms
+- normalize to a preview volume
+- apply the lab material to mesh nodes
 - frame imported content automatically
+
+Multi-file GLTF packages with external buffers/textures are deferred until the importer can accept a complete asset bundle rather than silently resolving missing files.
 
 ## Rendering
 
-Initial renderer:
+Phase 1 renderer:
 
 - Three.js WebGLRenderer
 - ACES filmic tone mapping
-- physically useful key/fill/rim studio lighting
+- PMREM `RoomEnvironment` for neutral PBR reflections
+- key/fill/rim studio lighting
 - configurable background
 - optional wireframe
-- procedural displacement in the vertex shader
-- derivative-based displaced normals in the fragment shader
+- procedural vertex displacement
+- physical material controls
 
-The architecture keeps renderer/material services isolated so WebGPU/TSL can be added later without rewriting the UI or project model.
+The architecture keeps renderer/material services isolated so WebGPU/TSL, improved displaced normals and dedicated biological scattering can be added without rewriting the UI or project model.
+
+## Configuration
+
+Editable application and renderer defaults live in `config/lab.yaml` rather than being spread through feature code. The YAML configuration owns:
+
+- application limits and persistence timing
+- object/layer/blend catalogs
+- default physical material values
+- default viewport/background
+- camera and renderer limits
+
+Algorithm-specific shader constants remain local to the implementation where they are part of the generator itself rather than deployment/editor configuration.
 
 ## Project persistence
 
@@ -107,6 +131,7 @@ A project document contains:
 
 - selected object preset
 - viewport configuration
+- physical material settings
 - material layer stack
 - imported asset metadata
 
@@ -114,9 +139,11 @@ Initial persistence:
 
 - localStorage autosave
 - JSON export/import
+- migration of older Phase 1 JSON that predates physical-surface settings
 
 Later:
 
+- bundled external asset references
 - GLB material bake/export
 - texture baking (albedo/roughness/normal/displacement)
 - shareable project files
@@ -124,23 +151,29 @@ Later:
 ## Architecture
 
 ```text
+config/
+  lab.yaml
 src/
   app/
     App.ts
     AppState.ts
     constants.ts
+  config/
+    labConfig.ts
   engine/
     LabRenderer.ts
     MeshFactory.ts
     ModelLoader.ts
   materials/
     MaterialCompiler.ts
+    PhysicalMaterial.ts
     presets.ts
     types.ts
   ui/
     Inspector.ts
     LayerStrip.ts
     LibraryPanel.ts
+    LongPressContextMenu.ts
     RadialMenu.ts
     Shell.ts
   utils/
@@ -152,38 +185,47 @@ src/
 
 Rules:
 
-- UI does not mutate Three.js objects directly.
+- UI does not mutate Three.js scene objects directly.
 - `AppState` is the source of truth for the editable project.
 - Engine code reacts to explicit state changes.
-- Material compilation is isolated and deterministic.
-- Constants live outside feature logic.
-- No framework is required for the first version; TypeScript + DOM keeps the bundle and concepts small.
+- Material compilation is isolated and deterministic for a given layer stack.
+- User/editor defaults are sourced from YAML configuration.
+- No UI framework is required for Phase 1; TypeScript + DOM keeps the first implementation small and transparent.
 
 ## Delivery phases
 
 ### Phase 1 — Working lab
 
+Implemented in `main`:
+
 - Professional responsive shell
 - Procedural primitives
-- GLB/GLTF import and drag/drop
+- GLB/self-contained GLTF import and drag/drop
 - Layer stack with seven procedural layer types
-- Live shader compilation
-- Compact inspector
-- Radial menu
-- Presets
+- Live physical shader composition
+- Compact layer and physical-surface inspector
+- Desktop + touch radial menu
+- Material presets
 - JSON project import/export
 - local autosave
-- keyboard shortcuts
+- undo/redo and keyboard shortcuts
+- PNG viewport capture
+- YAML application configuration
+- CI build workflow
+
+Build/runtime verification still needs a real dependency install/browser run after checkout; the repository includes CI for that verification.
 
 ### Phase 2 — Material depth
 
 - channel routing per layer
-- masks and nested groups
-- SSS/transmission biological layer
-- wet-film/clearcoat layer
-- better procedural vessels
+- layer masks and nested groups
+- dedicated SSS/transmission biological layer
+- wet-film/clearcoat layer type
+- better procedural vessel branching
 - environment/HDRI library
-- per-mesh material assignment for imported scenes
+- per-mesh selection and material assignment for imported scenes
+- tangent/normal strategy for stronger displacement on arbitrary imported meshes
+- multi-file GLTF asset bundles
 
 ### Phase 3 — Production export
 
@@ -200,8 +242,9 @@ Rules:
 - Default material renders immediately.
 - User can add, remove, reorder, enable and edit layers.
 - Procedural changes update the mesh in real time.
+- Global PBR controls update the same material independently of layer roughness deltas.
 - User can switch among built-in meshes.
-- User can drag/drop or import GLB/GLTF.
-- Radial menu works with mouse/touch-compatible pointer input.
+- User can drag/drop or import GLB/self-contained GLTF.
+- Radial menu works with mouse, keyboard and touch long press.
 - Project JSON can be exported and imported.
-- Layout works on desktop and collapses cleanly on narrow screens.
+- Layout remains usable on desktop, tablet and narrow mobile screens.
