@@ -1,4 +1,4 @@
-import { APP_NAME } from '../app/constants';
+import { APP_NAME, UI_CONFIG } from '../app/constants';
 import { escapeHtml } from '../utils/html';
 
 export interface ShellElements {
@@ -130,6 +130,6 @@ export class Shell {
     this.toastTimer = window.setTimeout(() => {
       this.toastElement.classList.remove('is-visible');
       this.toastTimer = null;
-    }, kind === 'error' ? 4200 : 2600);
+    }, kind === 'error' ? UI_CONFIG.toastErrorMs : UI_CONFIG.toastInfoMs);
   }
 }
