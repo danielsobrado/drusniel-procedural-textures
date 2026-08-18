@@ -11,6 +11,11 @@
   flex: 1;
 }
 
+.preset-card[hidden],
+.empty-state[hidden] {
+  display: none !important;
+}
+
 @media (max-width: 600px) {
   .toolbar-project .compact-button[data-command="open-project"],
   .toolbar-project .compact-button[data-command="save-project"] {
