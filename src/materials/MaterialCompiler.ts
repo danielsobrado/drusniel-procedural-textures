@@ -206,19 +206,22 @@ LabSurface labEvaluateSurface(vec3 position) {
       continue;
     }
 
+    int kind = uLabLayerKind[i];
     float field = labLayerField(
-      uLabLayerKind[i],
+      kind,
       position,
       uLabScale[i],
       uLabSeed[i]
     );
 
     float shaped = clamp(field * max(uLabStrength[i], 0.0), 0.0, 1.0);
-    float opacity = clamp(uLabOpacity[i] * mix(0.55, 1.0, shaped), 0.0, 1.0);
+    float coverage = kind == 0 ? 1.0 : mix(0.55, 1.0, shaped);
+    float opacity = clamp(uLabOpacity[i] * coverage, 0.0, 1.0);
+    float roughnessWeight = kind == 0 ? 1.0 : mix(0.45, 1.0, shaped);
     vec3 layerColor = mix(uLabColorA[i], uLabColorB[i], shaped);
 
     surface.color = labBlend(surface.color, layerColor, uLabBlendMode[i], opacity);
-    surface.roughness += uLabRoughness[i] * opacity * mix(0.45, 1.0, shaped);
+    surface.roughness += uLabRoughness[i] * opacity * roughnessWeight;
   }
 
   return surface;
@@ -264,7 +267,7 @@ export class MaterialCompiler {
         )
         .replace(
           '#include <begin_vertex>',
-          `vec3 transformed = vec3(position);\nfloat labDisplacement = labEvaluateDisplacement(transformed);\ntransformed += objectNormal * labDisplacement;\nvLabPosition = transformed;`
+          `vec3 transformed = vec3(position);\nvec3 labPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;\nfloat labDisplacement = labEvaluateDisplacement(labPosition);\nfloat labNormalScale = max(length(mat3(modelMatrix) * objectNormal), 0.00001);\ntransformed += objectNormal * (labDisplacement / labNormalScale);\nvLabPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
         );
 
       shader.fragmentShader = shader.fragmentShader
@@ -282,7 +285,7 @@ export class MaterialCompiler {
         );
     };
 
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-v1';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-v2';
   }
 
   public sync(layers: readonly MaterialLayer[], wireframe: boolean): void {
