@@ -1,5 +1,6 @@
 import { BLEND_MODES, LAYER_KINDS } from '../app/constants';
 import type { MaterialLayer, PhysicalSettings, ProjectState } from '../materials/types';
+import { escapeHtml } from '../utils/html';
 
 export interface InspectorCallbacks {
   onLayerPatch: (id: string, patch: Partial<MaterialLayer>) => void;
@@ -93,31 +94,31 @@ export class Inspector {
       <div class="panel-header inspector-heading">
         <div>
           <span class="eyebrow">Inspector</span>
-          <h2 data-role="inspector-title">${this.escape(layer.name)}</h2>
+          <h2 data-role="inspector-title">${escapeHtml(layer.name)}</h2>
         </div>
         <div class="inline-actions">
-          <button class="mini-button" data-action="duplicate" title="Duplicate layer">⧉</button>
-          <button class="mini-button danger" data-action="remove" title="Delete layer">×</button>
+          <button class="mini-button" data-action="duplicate" aria-label="Duplicate layer" title="Duplicate layer">⧉</button>
+          <button class="mini-button danger" data-action="remove" aria-label="Delete layer" title="Delete layer">×</button>
         </div>
       </div>
 
       <section class="inspector-section">
         <label class="field-row field-row-text">
           <span>Name</span>
-          <input data-field="name" type="text" maxlength="${MAX_LAYER_NAME_LENGTH}" value="${this.escape(layer.name)}">
+          <input data-field="name" type="text" maxlength="${MAX_LAYER_NAME_LENGTH}" value="${escapeHtml(layer.name)}">
         </label>
 
         <div class="field-columns">
           <label class="field-stack">
             <span>Generator</span>
             <select data-field="kind">
-              ${LAYER_KINDS.map((item) => `<option value="${item.id}" ${item.id === layer.kind ? 'selected' : ''}>${item.label}</option>`).join('')}
+              ${LAYER_KINDS.map((item) => `<option value="${item.id}" ${item.id === layer.kind ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
             </select>
           </label>
           <label class="field-stack">
             <span>Blend</span>
             <select data-field="blendMode">
-              ${BLEND_MODES.map((item) => `<option value="${item.id}" ${item.id === layer.blendMode ? 'selected' : ''}>${item.label}</option>`).join('')}
+              ${BLEND_MODES.map((item) => `<option value="${item.id}" ${item.id === layer.blendMode ? 'selected' : ''}>${escapeHtml(item.label)}</option>`).join('')}
             </select>
           </label>
         </div>
@@ -361,13 +362,5 @@ export class Inspector {
     if (target.closest('[data-action="remove"]') !== null) {
       this.callbacks.onRemove(this.currentLayerId);
     }
-  }
-
-  private escape(value: string): string {
-    return value
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;');
   }
 }
