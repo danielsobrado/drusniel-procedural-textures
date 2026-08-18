@@ -1,6 +1,7 @@
 import {
   DEFAULT_BACKGROUND,
   DEFAULT_OBJECT,
+  DEFAULT_PHYSICAL,
   HISTORY_LIMIT,
   MAX_LAYERS
 } from './constants';
@@ -8,6 +9,7 @@ import type {
   MaterialLayer,
   MaterialPreset,
   ObjectPreset,
+  PhysicalSettings,
   ProjectState
 } from '../materials/types';
 import { createId } from '../utils/ids';
@@ -85,6 +87,7 @@ export function createDefaultProject(): ProjectState {
     importedAssetName: null,
     background: DEFAULT_BACKGROUND,
     wireframe: false,
+    physical: { ...DEFAULT_PHYSICAL },
     layers: [base, noise]
   };
 }
@@ -229,14 +232,31 @@ export class AppState {
   }
 
   public setBackground(color: string): void {
+    if (this.project.background === color) {
+      return;
+    }
+
     this.commit();
     this.project.background = color;
     this.emit('viewport');
   }
 
   public setWireframe(enabled: boolean): void {
+    if (this.project.wireframe === enabled) {
+      return;
+    }
+
     this.commit();
     this.project.wireframe = enabled;
+    this.emit('viewport');
+  }
+
+  public setPhysical(patch: Partial<PhysicalSettings>): void {
+    this.commit();
+    this.project.physical = {
+      ...this.project.physical,
+      ...patch
+    };
     this.emit('viewport');
   }
 
@@ -300,6 +320,10 @@ export class AppState {
 
     if (project.layers.length > MAX_LAYERS) {
       throw new Error(`Project exceeds the ${MAX_LAYERS} layer limit.`);
+    }
+
+    if (project.physical === undefined) {
+      throw new Error('Project is missing physical material settings.');
     }
   }
 }
