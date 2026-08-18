@@ -5,6 +5,11 @@ import { DEFAULT_BACKGROUND, RENDERER_CONFIG } from '../app/constants';
 import type { ObjectPreset } from '../materials/types';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { createProceduralMesh } from './MeshFactory';
+import {
+  collectObjectMaterials,
+  disposeMaterialResources,
+  disposeObjectGeometries
+} from './ObjectResources';
 
 export class LabRenderer {
   public readonly canvas: HTMLCanvasElement;
@@ -76,7 +81,7 @@ export class LabRenderer {
   }
 
   public setImported(root: THREE.Object3D): void {
-    const replacedMaterials = new Set<THREE.Material>();
+    const replacedMaterials = collectObjectMaterials(root);
 
     root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
@@ -90,17 +95,12 @@ export class LabRenderer {
         object.geometry.computeVertexNormals();
       }
 
-      const sourceMaterials = Array.isArray(object.material)
-        ? object.material
-        : [object.material];
-      sourceMaterials.forEach((material) => replacedMaterials.add(material));
-
       object.material = this.compiler.material;
       object.castShadow = true;
       object.receiveShadow = true;
     });
 
-    this.disposeMaterials(replacedMaterials);
+    disposeMaterialResources(replacedMaterials);
     this.replaceRoot(root);
   }
 
@@ -199,40 +199,8 @@ export class LabRenderer {
   }
 
   private disposeRoot(root: THREE.Object3D | null): void {
-    if (root === null) {
-      return;
-    }
-
-    const geometries = new Set<THREE.BufferGeometry>();
-    root.traverse((object) => {
-      if (object instanceof THREE.Mesh) {
-        geometries.add(object.geometry);
-      }
-    });
-
-    for (const geometry of geometries) {
-      geometry.dispose();
-    }
-  }
-
-  private disposeMaterials(materials: ReadonlySet<THREE.Material>): void {
-    const textures = new Set<THREE.Texture>();
-
-    for (const material of materials) {
-      for (const value of Object.values(material as unknown as Record<string, unknown>)) {
-        if (value instanceof THREE.Texture) {
-          textures.add(value);
-        }
-      }
-      material.dispose();
-    }
-
-    for (const texture of textures) {
-      const image = texture.image as unknown;
-      texture.dispose();
-      if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
-        image.close();
-      }
+    if (root !== null) {
+      disposeObjectGeometries(root);
     }
   }
 
