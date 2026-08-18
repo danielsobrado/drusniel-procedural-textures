@@ -1,8 +1,14 @@
-import { AUTOSAVE_DELAY_MS, OBJECT_PRESETS, STORAGE_KEY } from './constants';
+import {
+  AUTOSAVE_DELAY_MS,
+  DEFAULT_PHYSICAL,
+  OBJECT_PRESETS,
+  STORAGE_KEY
+} from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
 import { LabRenderer } from '../engine/LabRenderer';
 import { ModelLoader } from '../engine/ModelLoader';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
+import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
 import type { LayerKind, ProjectState } from '../materials/types';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
@@ -18,6 +24,25 @@ function isEditableTarget(target: EventTarget | null): boolean {
     (target instanceof HTMLElement && target.isContentEditable);
 }
 
+function normalizeProject(value: unknown): ProjectState {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error('Project file does not contain an object.');
+  }
+
+  const project = value as Partial<ProjectState>;
+  if (project.version !== 1 || !Array.isArray(project.layers) || project.layers.length === 0) {
+    throw new Error('Invalid Procedural Texture Lab project.');
+  }
+
+  return {
+    ...project,
+    physical: {
+      ...DEFAULT_PHYSICAL,
+      ...(project.physical ?? {})
+    }
+  } as ProjectState;
+}
+
 function loadInitialProject(): ProjectState {
   try {
     const serialized = localStorage.getItem(STORAGE_KEY);
@@ -25,12 +50,7 @@ function loadInitialProject(): ProjectState {
       return createDefaultProject();
     }
 
-    const project = JSON.parse(serialized) as Partial<ProjectState>;
-    if (project.version !== 1 || !Array.isArray(project.layers) || project.layers.length === 0) {
-      return createDefaultProject();
-    }
-
-    return project as ProjectState;
+    return normalizeProject(JSON.parse(serialized));
   } catch (error) {
     console.warn('Ignoring invalid autosaved project.', error);
     return createDefaultProject();
@@ -66,7 +86,8 @@ export class App {
       onDuplicate: (id) => this.runSafely(() => this.state.duplicateLayer(id)),
       onRemove: (id) => this.runSafely(() => this.state.removeLayer(id)),
       onBackground: (color) => this.runSafely(() => this.state.setBackground(color)),
-      onWireframe: (enabled) => this.runSafely(() => this.state.setWireframe(enabled))
+      onWireframe: (enabled) => this.runSafely(() => this.state.setWireframe(enabled)),
+      onPhysical: (patch) => this.runSafely(() => this.state.setPhysical(patch))
     });
 
     this.layers = new LayerStrip(this.shell.elements.layers, {
@@ -88,11 +109,6 @@ export class App {
     this.bindFiles();
     this.bindViewportGestures();
     this.bindKeyboard();
-
-    this.shell.elements.library.addEventListener('library-filter', () => {
-      this.library.render(this.state.snapshot);
-    });
-
     this.syncAll(this.state.snapshot);
   }
 
@@ -100,7 +116,7 @@ export class App {
     state: Readonly<ProjectState>,
     reason: StateChangeReason
   ): void {
-    this.compiler.sync(state.layers, state.wireframe);
+    this.syncMaterial(state);
 
     if (reason === 'layers' || reason === 'selection' || reason === 'project') {
       this.layers.render(state);
@@ -122,13 +138,18 @@ export class App {
   }
 
   private syncAll(state: Readonly<ProjectState>): void {
-    this.compiler.sync(state.layers, state.wireframe);
+    this.syncMaterial(state);
     this.renderer.setBackground(state.background);
     this.syncObject(state);
     this.library.render(state);
     this.inspector.render(state);
     this.layers.render(state);
     this.shell.setStatus(`${state.layers.length} layers · Physical`);
+  }
+
+  private syncMaterial(state: Readonly<ProjectState>): void {
+    this.compiler.sync(state.layers, state.wireframe);
+    applyPhysicalSettings(this.compiler.material, state.physical);
   }
 
   private syncObject(state: Readonly<ProjectState>): void {
@@ -303,7 +324,7 @@ export class App {
 
   private async importProject(file: File): Promise<void> {
     try {
-      const project = JSON.parse(await file.text()) as ProjectState;
+      const project = normalizeProject(JSON.parse(await file.text()));
       this.activeImportedName = null;
       this.state.replaceProject(project);
       this.shell.toast(`Opened ${file.name}`);
