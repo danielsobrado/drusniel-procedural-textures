@@ -15,6 +15,13 @@ defaults:
     clearcoatRoughness: 0.18
     specularIntensity: 0.62
     ior: 1.42
+    sheen: 0.0
+    sheenRoughness: 0.7
+    sheenColor: '#ffffff'
+    transmission: 0.0
+    thickness: 0.0
+    attenuationDistance: 2.0
+    attenuationColor: '#ffffff'
 
 objects:
   - id: sphere
