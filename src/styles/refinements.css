@@ -1,0 +1,23 @@
+.layer-card-actions {
+  align-items: center;
+}
+
+.layer-card-actions button:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+.layer-action-spacer {
+  flex: 1;
+}
+
+@media (max-width: 600px) {
+  .toolbar-project [data-command="open-project"],
+  .toolbar-project [data-command="save-project"] {
+    display: none;
+  }
+
+  .toolbar-project [data-command="import-model"] {
+    display: inline-flex;
+  }
+}
