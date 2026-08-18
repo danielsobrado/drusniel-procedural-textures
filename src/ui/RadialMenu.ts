@@ -27,6 +27,13 @@ const ITEMS: readonly RadialItem[] = [
   { command: 'wireframe', label: 'Wire', glyph: '◇' }
 ];
 
+function safeCenter(position: number, extent: number, margin: number): number {
+  const center = extent / 2;
+  const minimum = Math.min(margin, center);
+  const maximum = Math.max(extent - margin, center);
+  return Math.max(minimum, Math.min(maximum, position));
+}
+
 export class RadialMenu {
   private visible = false;
   private previousFocus: HTMLElement | null = null;
@@ -46,8 +53,8 @@ export class RadialMenu {
   public open(x: number, y: number, focusFirst = false): void {
     const radius = UI_CONFIG.radialRadiusPx;
     const margin = radius + UI_CONFIG.radialEdgePaddingPx;
-    const safeX = Math.max(margin, Math.min(window.innerWidth - margin, x));
-    const safeY = Math.max(margin, Math.min(window.innerHeight - margin, y));
+    const safeX = safeCenter(x, window.innerWidth, margin);
+    const safeY = safeCenter(y, window.innerHeight, margin);
 
     this.previousFocus = focusFirst && document.activeElement instanceof HTMLElement
       ? document.activeElement
