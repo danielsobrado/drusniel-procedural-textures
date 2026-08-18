@@ -1,0 +1,132 @@
+import { APP_NAME } from '../app/constants';
+
+export interface ShellElements {
+  viewport: HTMLElement;
+  library: HTMLElement;
+  inspector: HTMLElement;
+  layers: HTMLElement;
+  radial: HTMLElement;
+  modelInput: HTMLInputElement;
+  projectInput: HTMLInputElement;
+  objectLabel: HTMLElement;
+  status: HTMLElement;
+}
+
+function required<T extends Element>(root: ParentNode, selector: string): T {
+  const element = root.querySelector<T>(selector);
+  if (element === null) {
+    throw new Error(`Missing required UI element: ${selector}`);
+  }
+  return element;
+}
+
+export class Shell {
+  public readonly elements: ShellElements;
+
+  private readonly root: HTMLElement;
+  private readonly toastElement: HTMLElement;
+  private toastTimer: number | null = null;
+
+  public constructor(root: HTMLElement) {
+    this.root = root;
+    this.root.innerHTML = `
+      <div class="app-shell">
+        <header class="topbar">
+          <div class="brand" title="${APP_NAME}">
+            <span class="brand-mark">PTL</span>
+            <div class="brand-copy">
+              <strong>Procedural Texture Lab</strong>
+              <span>Realtime material authoring</span>
+            </div>
+          </div>
+
+          <div class="toolbar-group toolbar-project" aria-label="Project commands">
+            <button class="icon-button" data-command="undo" title="Undo (Ctrl/Cmd+Z)">↶</button>
+            <button class="icon-button" data-command="redo" title="Redo (Ctrl/Cmd+Shift+Z)">↷</button>
+            <span class="toolbar-divider"></span>
+            <button class="compact-button" data-command="import-model">Import mesh</button>
+            <button class="compact-button" data-command="open-project">Open</button>
+            <button class="compact-button" data-command="save-project">Save</button>
+          </div>
+
+          <div class="toolbar-group toolbar-view" aria-label="Viewport commands">
+            <span class="status-pill" data-role="status">Physical · WebGL</span>
+            <button class="icon-button" data-command="frame" title="Frame selection (F)">⌗</button>
+            <button class="icon-button" data-command="wireframe" title="Toggle wireframe (W)">◇</button>
+            <button class="icon-button" data-command="snapshot" title="Save PNG">◫</button>
+          </div>
+        </header>
+
+        <aside class="panel library-panel" data-role="library"></aside>
+
+        <main class="viewport" data-role="viewport">
+          <div class="viewport-badge">
+            <span class="live-dot"></span>
+            <span data-role="object-label">Sphere</span>
+          </div>
+          <div class="viewport-help">Right click / Space · radial menu</div>
+          <div class="drop-overlay">Drop GLB / GLTF</div>
+        </main>
+
+        <aside class="panel inspector-panel" data-role="inspector"></aside>
+
+        <section class="layer-dock" data-role="layers"></section>
+
+        <div class="radial-host" data-role="radial"></div>
+        <div class="toast" data-role="toast" aria-live="polite"></div>
+
+        <input class="visually-hidden" data-role="model-input" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json">
+        <input class="visually-hidden" data-role="project-input" type="file" accept=".json,application/json">
+      </div>
+    `;
+
+    this.elements = {
+      viewport: required(this.root, '[data-role="viewport"]'),
+      library: required(this.root, '[data-role="library"]'),
+      inspector: required(this.root, '[data-role="inspector"]'),
+      layers: required(this.root, '[data-role="layers"]'),
+      radial: required(this.root, '[data-role="radial"]'),
+      modelInput: required(this.root, '[data-role="model-input"]'),
+      projectInput: required(this.root, '[data-role="project-input"]'),
+      objectLabel: required(this.root, '[data-role="object-label"]'),
+      status: required(this.root, '[data-role="status"]')
+    };
+
+    this.toastElement = required(this.root, '[data-role="toast"]');
+  }
+
+  public onCommand(command: string, callback: () => void): void {
+    const button = this.root.querySelector<HTMLElement>(`[data-command="${command}"]`);
+    if (button === null) {
+      throw new Error(`Unknown shell command: ${command}`);
+    }
+    button.addEventListener('click', callback);
+  }
+
+  public setObjectLabel(label: string): void {
+    this.elements.objectLabel.textContent = label;
+  }
+
+  public setStatus(status: string): void {
+    this.elements.status.textContent = status;
+  }
+
+  public setDragging(active: boolean): void {
+    this.elements.viewport.classList.toggle('is-dragging', active);
+  }
+
+  public toast(message: string, kind: 'info' | 'error' = 'info'): void {
+    if (this.toastTimer !== null) {
+      window.clearTimeout(this.toastTimer);
+    }
+
+    this.toastElement.textContent = message;
+    this.toastElement.dataset.kind = kind;
+    this.toastElement.classList.add('is-visible');
+
+    this.toastTimer = window.setTimeout(() => {
+      this.toastElement.classList.remove('is-visible');
+      this.toastTimer = null;
+    }, kind === 'error' ? 4200 : 2600);
+  }
+}
