@@ -62,5 +62,6 @@ export interface MaterialPreset {
   id: string;
   name: string;
   description: string;
+  physical?: Partial<PhysicalSettings>;
   layers: MaterialLayer[];
 }
