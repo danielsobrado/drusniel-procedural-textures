@@ -57,6 +57,9 @@ export class LayerStrip {
               </span>
             </button>
             <div class="layer-card-actions">
+              <button data-action="move-left" title="Move layer left" ${index === 0 ? 'disabled' : ''}>‹</button>
+              <button data-action="move-right" title="Move layer right" ${index === state.layers.length - 1 ? 'disabled' : ''}>›</button>
+              <span class="layer-action-spacer"></span>
               <button data-action="duplicate" title="Duplicate">⧉</button>
               <button data-action="remove" title="Delete">×</button>
             </div>
@@ -84,6 +87,7 @@ export class LayerStrip {
 
     const card = target.closest<HTMLElement>('[data-layer-id]');
     const layerId = card?.dataset.layerId;
+    const layerIndex = Number(card?.dataset.layerIndex);
     if (layerId === undefined) {
       return;
     }
@@ -91,6 +95,10 @@ export class LayerStrip {
     const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
     if (action === 'toggle') {
       this.callbacks.onToggle(layerId, card?.classList.contains('is-disabled') ?? false);
+    } else if (action === 'move-left' && Number.isInteger(layerIndex)) {
+      this.callbacks.onReorder(layerId, layerIndex - 1);
+    } else if (action === 'move-right' && Number.isInteger(layerIndex)) {
+      this.callbacks.onReorder(layerId, layerIndex + 1);
     } else if (action === 'duplicate') {
       this.callbacks.onDuplicate(layerId);
     } else if (action === 'remove') {
