@@ -29,6 +29,8 @@ interface PhysicalField {
   step: number;
 }
 
+const MAX_LAYER_NAME_LENGTH = 120;
+
 const NUMERIC_FIELDS: readonly NumericField[] = [
   { key: 'opacity', label: 'Opacity', min: 0, max: 1, step: 0.01 },
   { key: 'scale', label: 'Scale', min: 0.1, max: 20, step: 0.1 },
@@ -60,7 +62,6 @@ export class Inspector {
     private readonly callbacks: InspectorCallbacks
   ) {
     this.container.addEventListener('input', (event) => this.handleInput(event));
-    this.container.addEventListener('change', (event) => this.handleInput(event));
     this.container.addEventListener('click', (event) => this.handleClick(event));
   }
 
@@ -92,7 +93,7 @@ export class Inspector {
       <div class="panel-header inspector-heading">
         <div>
           <span class="eyebrow">Inspector</span>
-          <h2>${this.escape(layer.name)}</h2>
+          <h2 data-role="inspector-title">${this.escape(layer.name)}</h2>
         </div>
         <div class="inline-actions">
           <button class="mini-button" data-action="duplicate" title="Duplicate layer">⧉</button>
@@ -103,7 +104,7 @@ export class Inspector {
       <section class="inspector-section">
         <label class="field-row field-row-text">
           <span>Name</span>
-          <input data-field="name" type="text" value="${this.escape(layer.name)}">
+          <input data-field="name" type="text" maxlength="${MAX_LAYER_NAME_LENGTH}" value="${this.escape(layer.name)}">
         </label>
 
         <div class="field-columns">
@@ -164,6 +165,11 @@ export class Inspector {
   }
 
   private sync(layer: MaterialLayer, state: Readonly<ProjectState>): void {
+    const title = this.container.querySelector<HTMLElement>('[data-role="inspector-title"]');
+    if (title !== null) {
+      title.textContent = layer.name;
+    }
+
     const fields = this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]');
     for (const field of fields) {
       if (field === document.activeElement) {
@@ -245,6 +251,23 @@ export class Inspector {
     `;
   }
 
+  private readBoundedNumber(target: HTMLInputElement): number | null {
+    if (target.value.trim() === '') {
+      return null;
+    }
+
+    const parsed = Number(target.value);
+    if (!Number.isFinite(parsed)) {
+      return null;
+    }
+
+    const min = target.min === '' ? Number.NEGATIVE_INFINITY : Number(target.min);
+    const max = target.max === '' ? Number.POSITIVE_INFINITY : Number(target.max);
+    const value = Math.max(min, Math.min(max, parsed));
+    target.value = String(value);
+    return value;
+  }
+
   private handleInput(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
@@ -258,9 +281,9 @@ export class Inspector {
     }
 
     const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;
-    if (physicalField !== undefined) {
-      const value = Number(target.value);
-      if (Number.isFinite(value)) {
+    if (physicalField !== undefined && target instanceof HTMLInputElement) {
+      const value = this.readBoundedNumber(target);
+      if (value !== null) {
         const peers = this.container.querySelectorAll<HTMLInputElement>(`[data-physical-field="${physicalField}"]`);
         for (const peer of peers) {
           if (peer !== target) {
@@ -293,15 +316,6 @@ export class Inspector {
       return;
     }
 
-    if (target.dataset.peer !== undefined) {
-      const peers = this.container.querySelectorAll<HTMLInputElement>(`[data-field="${field}"]`);
-      for (const peer of peers) {
-        if (peer !== target) {
-          peer.value = target.value;
-        }
-      }
-    }
-
     if (
       field === 'opacity' ||
       field === 'scale' ||
@@ -310,10 +324,23 @@ export class Inspector {
       field === 'roughness' ||
       field === 'displacement'
     ) {
-      const value = Number(target.value);
-      if (Number.isFinite(value)) {
-        this.callbacks.onLayerPatch(layerId, { [field]: value });
+      if (!(target instanceof HTMLInputElement)) {
+        return;
       }
+
+      const value = this.readBoundedNumber(target);
+      if (value === null) {
+        return;
+      }
+
+      const peers = this.container.querySelectorAll<HTMLInputElement>(`[data-field="${field}"]`);
+      for (const peer of peers) {
+        if (peer !== target) {
+          peer.value = target.value;
+        }
+      }
+
+      this.callbacks.onLayerPatch(layerId, { [field]: value });
       return;
     }
 
