@@ -8,6 +8,7 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - Base, FBM, cellular, ridges, spots, veins and gradient generators
 - Normal, multiply, add, screen and overlay blending
 - Per-layer color, opacity, scale, strength, seed, roughness and displacement
+- Global physical surface controls for roughness, metalness, clearcoat, clearcoat roughness, specular intensity and IOR
 - Built-in sphere, icosphere, cube, rounded cube, torus and plane targets
 - GLB/GLTF import plus viewport drag/drop
 - Automatic model normalization and framing
@@ -54,15 +55,15 @@ The editor state, Three.js renderer, material compiler and UI are intentionally 
 
 - `src/app` — project state and application orchestration
 - `src/engine` — viewport, procedural geometry and model loading
-- `src/materials` — material domain types, presets and GLSL compiler
+- `src/materials` — material domain types, presets, physical settings and GLSL compiler
 - `src/ui` — compact panels, layer dock and radial menu
 - `src/utils` — small browser helpers
 
-The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement.
+The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. The physical inspector then controls the underlying PBR response independently from per-layer roughness contributions.
 
 ## Project format
 
-Projects are JSON documents containing the material stack and viewport state. Imported model bytes are intentionally not embedded in Phase 1 project JSON; re-import the referenced GLB/GLTF when reopening a project that used an external model.
+Projects are JSON documents containing the material stack, physical material settings and viewport state. Imported model bytes are intentionally not embedded in Phase 1 project JSON; re-import the referenced GLB/GLTF when reopening a project that used an external model.
 
 ## Roadmap
 
