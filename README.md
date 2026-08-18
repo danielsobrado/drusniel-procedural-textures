@@ -12,17 +12,18 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - Advanced physical controls for sheen, transmission, thickness and volumetric attenuation color/distance
 - Built-in sphere, icosphere, cube, rounded cube, torus and plane targets
 - GLB/self-contained GLTF import plus viewport drag/drop
-- Automatic model normalization and framing
+- Automatic model normalization, stale-import cancellation and GPU resource cleanup
+- Strict project JSON validation with migration of older physical settings
 - Professional compact desktop/tablet/mobile layout
 - Context radial menu on right click, `Space`, or touch long press
 - Drag-and-drop layer ordering plus touch-friendly move controls
 - Material preset library including biological/adipose, marble, molten rock and alien dermis
-- Undo/redo
+- Coalesced undo/redo for continuous slider and color edits
 - Wireframe preview
 - PNG viewport capture
 - Project JSON import/export
 - localStorage autosave
-- YAML configuration for editor, catalog, material and renderer defaults
+- Validated YAML configuration for editor, interaction, catalog, material and renderer defaults
 
 ## Run locally
 
@@ -40,7 +41,7 @@ npm run preview
 
 ## Configuration
 
-Editor defaults live in `config/lab.yaml`. It contains application limits, object/layer/blend catalogs, physical surface defaults and renderer/camera settings. The configuration is parsed and validated at startup.
+Editor defaults live in `config/lab.yaml`. It contains application limits, history/autosave timing, radial/touch interaction values, object/layer/blend catalogs, physical surface defaults and renderer/camera settings. The configuration is parsed and validated at startup; invalid or incomplete configuration fails explicitly instead of being cast into the runtime types.
 
 ## Controls
 
@@ -55,25 +56,31 @@ Editor defaults live in `config/lab.yaml`. It contains application limits, objec
 | Undo | `Ctrl/Cmd + Z` |
 | Redo | `Ctrl/Cmd + Shift + Z` |
 
+Native text-field undo is preserved while an editor input is focused.
+
 ## Architecture
 
 The editor state, Three.js renderer, material compiler and UI are intentionally separated.
 
-- `config/lab.yaml` — editable application and renderer configuration
+- `config/lab.yaml` — editable application, interaction, material and renderer configuration
 - `src/config` — typed YAML parsing and validation
-- `src/app` — project state and application orchestration
-- `src/engine` — viewport, procedural geometry and model loading
+- `src/app` — project state, project-file validation and application orchestration
+- `src/engine` — viewport, procedural geometry, model loading and Three.js resource cleanup
 - `src/materials` — material domain types, presets, physical settings and GLSL compiler
-- `src/ui` — compact panels, layer dock and radial menu
-- `src/utils` — small browser helpers
+- `src/ui` — compact panels, layer dock, touch interaction and radial menu
+- `src/utils` — browser downloads, IDs and safe HTML helpers
 
-The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. The physical inspector controls the underlying PBR response independently from per-layer roughness contributions and can enable sheen/transmission volume features when required.
+The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. Procedural coordinates are evaluated in normalized world space so imported mesh transforms and source units do not unexpectedly change texture scale. The physical inspector controls the underlying PBR response independently from per-layer roughness contributions and can enable sheen/transmission volume features when required.
 
 ## Project format
 
-Projects are JSON documents containing the material stack, physical material settings and viewport state. Imported model bytes are intentionally not embedded in Phase 1 project JSON; re-import the referenced GLB/GLTF when reopening a project that used an external model.
+Projects are JSON documents containing the material stack, physical material settings and viewport state. Project files and autosaves are normalized and range-validated before entering application state. Imported model bytes are intentionally not embedded in Phase 1 project JSON; re-import the referenced GLB/GLTF when reopening a project that used an external model.
 
-External-resource GLTF bundles are not yet imported as a multi-file package. Use GLB or a self-contained GLTF for Phase 1.
+External-resource GLTF bundles are rejected before loading. Use GLB or a self-contained GLTF for Phase 1. This avoids partially loaded models and unexpected external-resource requests.
+
+## Verification
+
+The repository includes a GitHub Actions workflow that installs dependencies and runs `npm run build` on pushes to `main` and pull requests. Local verification uses the same production build command above.
 
 ## Roadmap
 
