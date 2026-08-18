@@ -28,6 +28,7 @@ interface LabConfig {
     storageKey: string;
     maxLayers: number;
     historyLimit: number;
+    historyCoalesceMs: number;
     autosaveDelayMs: number;
   };
   defaults: {
@@ -298,6 +299,7 @@ function parseConfig(value: unknown): LabConfig {
       storageKey: asString(app.storageKey, 'app.storageKey'),
       maxLayers: asInteger(app.maxLayers, 'app.maxLayers', 1, 32),
       historyLimit: asInteger(app.historyLimit, 'app.historyLimit', 1, 1000),
+      historyCoalesceMs: asInteger(app.historyCoalesceMs, 'app.historyCoalesceMs', 0, 5000),
       autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000)
     },
     defaults: {
