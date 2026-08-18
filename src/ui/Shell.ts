@@ -1,4 +1,5 @@
 import { APP_NAME } from '../app/constants';
+import { escapeHtml } from '../utils/html';
 
 export interface ShellElements {
   viewport: HTMLElement;
@@ -29,13 +30,15 @@ export class Shell {
 
   public constructor(root: HTMLElement) {
     this.root = root;
+    const appName = escapeHtml(APP_NAME);
+
     this.root.innerHTML = `
       <div class="app-shell">
         <header class="topbar">
-          <div class="brand" title="${APP_NAME}">
+          <div class="brand" title="${appName}">
             <span class="brand-mark" aria-hidden="true">PTL</span>
             <div class="brand-copy">
-              <strong>${APP_NAME}</strong>
+              <strong>${appName}</strong>
               <span>Realtime material authoring</span>
             </div>
           </div>
