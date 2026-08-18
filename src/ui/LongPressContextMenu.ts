@@ -1,5 +1,4 @@
-const LONG_PRESS_DELAY_MS = 520;
-const MOVE_TOLERANCE_PX = 12;
+import { UI_CONFIG } from '../app/constants';
 
 interface LongPressState {
   pointerId: number;
@@ -45,7 +44,7 @@ export function installLongPressContextMenu(): () => void {
         clientY: startY
       }));
       active = null;
-    }, LONG_PRESS_DELAY_MS);
+    }, UI_CONFIG.longPressDelayMs);
 
     active = { pointerId, startX, startY, timer };
   };
@@ -56,7 +55,7 @@ export function installLongPressContextMenu(): () => void {
     }
 
     const distance = Math.hypot(event.clientX - active.startX, event.clientY - active.startY);
-    if (distance > MOVE_TOLERANCE_PX) {
+    if (distance > UI_CONFIG.longPressMoveTolerancePx) {
       cancel();
     }
   };
