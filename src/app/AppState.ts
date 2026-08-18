@@ -5,6 +5,7 @@ import {
   HISTORY_LIMIT,
   MAX_LAYERS
 } from './constants';
+import { normalizeProject } from './ProjectFile';
 import type {
   MaterialLayer,
   MaterialPreset,
@@ -99,7 +100,7 @@ export class AppState {
   private readonly redoStack: ProjectState[] = [];
 
   public constructor(initialProject: ProjectState = createDefaultProject()) {
-    this.project = cloneProject(initialProject);
+    this.project = cloneProject(normalizeProject(initialProject));
   }
 
   public get snapshot(): Readonly<ProjectState> {
@@ -125,16 +126,23 @@ export class AppState {
 
   public updateLayer(id: string, patch: Partial<MaterialLayer>): void {
     const index = this.project.layers.findIndex((layer) => layer.id === id);
-    if (index < 0) {
+    const current = this.project.layers[index];
+    if (index < 0 || current === undefined) {
+      return;
+    }
+
+    const next = {
+      ...current,
+      ...patch,
+      id
+    };
+
+    if (JSON.stringify(current) === JSON.stringify(next)) {
       return;
     }
 
     this.commit();
-    this.project.layers[index] = {
-      ...this.project.layers[index],
-      ...patch,
-      id
-    };
+    this.project.layers[index] = next;
     this.emit('layers');
   }
 
@@ -201,6 +209,9 @@ export class AppState {
     if (id !== null && !this.project.layers.some((layer) => layer.id === id)) {
       return;
     }
+    if (this.project.selectedLayerId === id) {
+      return;
+    }
 
     this.project.selectedLayerId = id;
     this.emit('selection');
@@ -211,14 +222,10 @@ export class AppState {
     const layers = preset.layers.slice(0, MAX_LAYERS).map(cloneLayer);
     this.project.layers = layers;
     this.project.selectedLayerId = layers.at(-1)?.id ?? null;
-
-    if (preset.physical !== undefined) {
-      this.project.physical = {
-        ...this.project.physical,
-        ...preset.physical
-      };
-    }
-
+    this.project.physical = {
+      ...DEFAULT_PHYSICAL,
+      ...(preset.physical ?? {})
+    };
     this.emit('layers');
   }
 
@@ -234,6 +241,10 @@ export class AppState {
   }
 
   public setImportedAsset(name: string): void {
+    if (this.project.importedAssetName === name) {
+      return;
+    }
+
     this.commit();
     this.project.importedAssetName = name;
     this.emit('object');
@@ -260,11 +271,17 @@ export class AppState {
   }
 
   public setPhysical(patch: Partial<PhysicalSettings>): void {
-    this.commit();
-    this.project.physical = {
+    const next = {
       ...this.project.physical,
       ...patch
     };
+
+    if (JSON.stringify(next) === JSON.stringify(this.project.physical)) {
+      return;
+    }
+
+    this.commit();
+    this.project.physical = next;
     this.emit('viewport');
   }
 
@@ -272,10 +289,10 @@ export class AppState {
     this.setWireframe(!this.project.wireframe);
   }
 
-  public replaceProject(project: ProjectState): void {
-    this.validateProject(project);
+  public replaceProject(project: unknown): void {
+    const normalized = normalizeProject(project);
     this.commit();
-    this.project = cloneProject(project);
+    this.project = cloneProject(normalized);
     this.emit('project');
   }
 
@@ -314,24 +331,6 @@ export class AppState {
   private emit(reason: StateChangeReason): void {
     for (const listener of this.listeners) {
       listener(this.project, reason);
-    }
-  }
-
-  private validateProject(project: ProjectState): void {
-    if (project.version !== 1) {
-      throw new Error(`Unsupported project version: ${String(project.version)}`);
-    }
-
-    if (!Array.isArray(project.layers) || project.layers.length === 0) {
-      throw new Error('Project material must contain at least one layer.');
-    }
-
-    if (project.layers.length > MAX_LAYERS) {
-      throw new Error(`Project exceeds the ${MAX_LAYERS} layer limit.`);
-    }
-
-    if (project.physical === undefined) {
-      throw new Error('Project is missing physical material settings.');
     }
   }
 }
