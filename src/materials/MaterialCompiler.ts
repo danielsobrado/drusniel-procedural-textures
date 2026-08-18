@@ -278,7 +278,7 @@ export class MaterialCompiler {
         )
         .replace(
           '#include <roughnessmap_fragment>',
-          `#include <roughnessmap_fragment>\nroughnessFactor = clamp(0.34 + labSurface.roughness, 0.045, 1.0);`
+          `#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + labSurface.roughness, 0.045, 1.0);`
         );
     };
 
