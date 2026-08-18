@@ -3,6 +3,7 @@ app:
   storageKey: procedural-texture-lab.project.v1
   maxLayers: 12
   historyLimit: 80
+  historyCoalesceMs: 350
   autosaveDelayMs: 250
 
 defaults:
