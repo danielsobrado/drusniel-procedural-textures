@@ -6,6 +6,14 @@ app:
   historyCoalesceMs: 350
   autosaveDelayMs: 250
 
+ui:
+  longPressDelayMs: 520
+  longPressMoveTolerancePx: 12
+  radialRadiusPx: 104
+  radialEdgePaddingPx: 58
+  toastInfoMs: 2600
+  toastErrorMs: 4200
+
 defaults:
   background: '#111318'
   object: sphere
