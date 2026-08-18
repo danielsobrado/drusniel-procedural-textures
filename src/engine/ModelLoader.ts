@@ -93,28 +93,47 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
 
 export class ModelLoader {
   private readonly loader = new GLTFLoader();
+  private loadSequence = 0;
 
-  public async load(file: File): Promise<THREE.Object3D> {
-    const extension = fileExtension(file.name);
-    if (!SUPPORTED_EXTENSIONS.has(extension)) {
-      throw new Error('Only GLB and GLTF files are supported.');
-    }
-
-    let payload: ArrayBuffer | string;
-    if (extension === 'glb') {
-      payload = await file.arrayBuffer();
-      assertNoExternalUris(readGlbJson(payload));
-    } else {
-      payload = await file.text();
-      assertNoExternalUris(parseGltfJson(payload));
-    }
-
-    const gltf = await this.loader.parseAsync(payload, '');
+  public async load(file: File): Promise<THREE.Object3D | null> {
+    const sequence = ++this.loadSequence;
 
     try {
-      return this.normalize(gltf.scene, file.name);
+      const extension = fileExtension(file.name);
+      if (!SUPPORTED_EXTENSIONS.has(extension)) {
+        throw new Error('Only GLB and GLTF files are supported.');
+      }
+
+      let payload: ArrayBuffer | string;
+      if (extension === 'glb') {
+        payload = await file.arrayBuffer();
+        assertNoExternalUris(readGlbJson(payload));
+      } else {
+        payload = await file.text();
+        assertNoExternalUris(parseGltfJson(payload));
+      }
+
+      if (sequence !== this.loadSequence) {
+        return null;
+      }
+
+      const gltf = await this.loader.parseAsync(payload, '');
+
+      try {
+        const normalized = this.normalize(gltf.scene, file.name);
+        if (sequence !== this.loadSequence) {
+          disposeObjectResources(normalized);
+          return null;
+        }
+        return normalized;
+      } catch (error) {
+        disposeObjectResources(gltf.scene);
+        throw error;
+      }
     } catch (error) {
-      disposeObjectResources(gltf.scene);
+      if (sequence !== this.loadSequence) {
+        return null;
+      }
       throw error;
     }
   }
