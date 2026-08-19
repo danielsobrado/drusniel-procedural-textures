@@ -1,147 +1,274 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
-import type { MeshAssignments, PhysicalSettings } from '../materials/types';
-import type { MaterialCompiler } from '../materials/MaterialCompiler';
-import { TextureBaker, type BakedTextureSet } from './TextureBaker';
+import { clone as cloneSkeletonSafe } from 'three/addons/utils/SkeletonUtils.js';
+import { MaterialCompiler } from '../materials/MaterialCompiler';
+import type { PhysicalSettings } from '../materials/types';
+import {
+  TextureBaker,
+  type BakeMeshSnapshot,
+  type BakedPbrTextureSet
+} from './TextureBaker';
 
-interface ExportOptions {
-  root: THREE.Object3D;
-  imported: boolean;
-  meshAssignments: Readonly<MeshAssignments>;
-  physical: Readonly<PhysicalSettings>;
-  compiler: MaterialCompiler;
-  textureSize: number;
+interface ExportResources {
+  materials: THREE.Material[];
+  textures: THREE.Texture[];
 }
 
-interface ExportSnapshot {
-  physical: PhysicalSettings;
-  meshAssignments: Readonly<Record<string, boolean>>;
-  bakeMaterial: THREE.ShaderMaterial;
-  displacementExtent: number;
+interface ExportMeshSnapshot {
+  assigned: boolean;
+  bake: BakeMeshSnapshot | null;
 }
 
-function clonePhysical(settings: Readonly<PhysicalSettings>): PhysicalSettings {
-  return structuredClone(settings);
+function collectMeshes(root: THREE.Object3D): THREE.Mesh[] {
+  const meshes: THREE.Mesh[] = [];
+  root.traverse((object) => {
+    if (object instanceof THREE.Mesh) meshes.push(object);
+  });
+  return meshes;
 }
 
-function cloneAssignments(assignments: Readonly<MeshAssignments>): Readonly<Record<string, boolean>> {
-  return Object.freeze({ ...assignments });
-}
-
-function sourceForExport(root: THREE.Object3D, imported: boolean): THREE.Object3D {
-  if (!imported || root.userData.labPreviewWrapper !== true) {
-    return root;
-  }
+function sourceForExport(root: THREE.Object3D): THREE.Object3D {
+  if (root.userData.labPreviewWrapper !== true) return root;
   const source = root.children[0];
   if (source === undefined) {
-    throw new Error('Imported model preview wrapper does not contain the source model.');
+    throw new Error('Imported preview wrapper does not contain its source model.');
   }
   return source;
 }
 
-function materialForBake(
-  baked: BakedTextureSet,
-  physical: Readonly<PhysicalSettings>
-): THREE.MeshPhysicalMaterial {
-  const material = new THREE.MeshPhysicalMaterial({
-    color: '#ffffff',
-    roughness: physical.roughness,
-    metalness: physical.metalness,
-    clearcoat: physical.clearcoat,
-    clearcoatRoughness: physical.clearcoatRoughness,
-    specularIntensity: physical.specularIntensity,
-    ior: physical.ior,
-    sheen: physical.sheen,
-    sheenRoughness: physical.sheenRoughness,
-    sheenColor: new THREE.Color(physical.sheenColor),
-    transmission: physical.transmission,
-    thickness: physical.thickness,
-    attenuationDistance: physical.attenuationDistance,
-    attenuationColor: new THREE.Color(physical.attenuationColor)
+function cleanLabMetadata(root: THREE.Object3D): void {
+  root.traverse((object) => {
+    delete object.userData.labMeshId;
+    delete object.userData.labMeshLabel;
+    delete object.userData.labImportedSource;
+    delete object.userData.labPreviewWrapper;
+    delete object.userData.labPreviewScale;
+    delete object.userData.labPreviewCenter;
   });
-  material.map = baked.albedo;
-  material.roughnessMap = baked.roughness;
-  material.normalMap = baked.normal;
-  material.clearcoatMap = baked.clearcoat;
-  material.clearcoatRoughnessMap = baked.clearcoatRoughness;
-  material.normalScale.set(1, 1);
-  material.needsUpdate = true;
+}
+
+function canvasTexture(
+  canvas: HTMLCanvasElement,
+  name: string,
+  colorSpace: THREE.ColorSpace,
+  resources: ExportResources
+): THREE.CanvasTexture {
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.name = name;
+  texture.colorSpace = colorSpace;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  resources.textures.push(texture);
+  return texture;
+}
+
+function createBakedMaterial(
+  maps: BakedPbrTextureSet,
+  settings: Readonly<PhysicalSettings>,
+  index: number,
+  resources: ExportResources
+): THREE.MeshPhysicalMaterial {
+  const prefix = `PTL export ${index + 1}`;
+  const material = new THREE.MeshPhysicalMaterial({
+    name: prefix,
+    color: 0xffffff,
+    map: canvasTexture(maps.albedo.canvas, `${prefix} albedo`, THREE.SRGBColorSpace, resources),
+    roughness: 1,
+    roughnessMap: canvasTexture(
+      maps.roughness.canvas,
+      `${prefix} roughness`,
+      THREE.NoColorSpace,
+      resources
+    ),
+    metalness: settings.metalness,
+    normalMap: canvasTexture(maps.normal.canvas, `${prefix} normal`, THREE.NoColorSpace, resources),
+    clearcoat: 1,
+    clearcoatMap: canvasTexture(
+      maps.clearcoat.canvas,
+      `${prefix} clearcoat`,
+      THREE.NoColorSpace,
+      resources
+    ),
+    clearcoatRoughness: 1,
+    clearcoatRoughnessMap: canvasTexture(
+      maps.clearcoatRoughness.canvas,
+      `${prefix} clearcoat roughness`,
+      THREE.NoColorSpace,
+      resources
+    ),
+    specularIntensity: settings.specularIntensity,
+    ior: settings.ior,
+    sheen: settings.sheen,
+    sheenRoughness: settings.sheenRoughness,
+    sheenColor: settings.sheenColor,
+    transmission: settings.transmission,
+    thickness: settings.thickness,
+    attenuationDistance: settings.attenuationDistance,
+    attenuationColor: settings.attenuationColor
+  });
+  resources.materials.push(material);
   return material;
 }
 
-function disposeMaterial(material: THREE.Material): void {
-  const candidate = material as THREE.Material & Record<string, unknown>;
-  for (const value of Object.values(candidate)) {
-    if (value instanceof THREE.Texture) value.dispose();
+function copyImageBitmap(image: ImageBitmap): HTMLCanvasElement {
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext('2d');
+  if (context === null) {
+    throw new Error('Browser cannot snapshot an imported texture for GLB export.');
   }
-  material.dispose();
+  context.drawImage(image, 0, 0);
+  return canvas;
+}
+
+function cloneTexture(texture: THREE.Texture, resources: ExportResources): THREE.Texture {
+  const clone = texture.clone();
+  if (typeof ImageBitmap !== 'undefined' && texture.image instanceof ImageBitmap) {
+    clone.image = copyImageBitmap(texture.image);
+  }
+  clone.needsUpdate = true;
+  resources.textures.push(clone);
+  return clone;
+}
+
+function cloneMaterial(material: THREE.Material, resources: ExportResources): THREE.Material {
+  const clone = material.clone();
+  const sourceValues = material as unknown as Record<string, unknown>;
+  const cloneValues = clone as unknown as Record<string, unknown>;
+  for (const [key, value] of Object.entries(sourceValues)) {
+    if (value instanceof THREE.Texture) {
+      cloneValues[key] = cloneTexture(value, resources);
+    }
+  }
+  resources.materials.push(clone);
+  return clone;
+}
+
+function cloneMaterialSet(
+  material: THREE.Material | THREE.Material[],
+  resources: ExportResources
+): THREE.Material | THREE.Material[] {
+  return Array.isArray(material)
+    ? material.map((item) => cloneMaterial(item, resources))
+    : cloneMaterial(material, resources);
+}
+
+function snapshotOriginalMaterials(
+  root: THREE.Object3D,
+  assignedMeshes: ReadonlySet<THREE.Mesh>,
+  resources: ExportResources
+): void {
+  root.traverse((object) => {
+    const renderable = object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points;
+    if (!renderable || (object instanceof THREE.Mesh && assignedMeshes.has(object))) return;
+    object.material = cloneMaterialSet(object.material, resources);
+  });
+}
+
+function disposeResources(resources: ExportResources): void {
+  resources.materials.forEach((material) => material.dispose());
+  resources.textures.forEach((texture) => texture.dispose());
 }
 
 export class GlbExporter {
-  public constructor(private readonly renderer: THREE.WebGLRenderer) {}
+  private readonly exporter = new GLTFExporter();
 
-  public async export(options: ExportOptions): Promise<Blob> {
-    const sourceRoot = sourceForExport(options.root, options.imported);
-    sourceRoot.updateMatrixWorld(true);
-    const exportRoot = sourceRoot.clone(true);
-    exportRoot.updateMatrixWorld(true);
+  public constructor(
+    private readonly baker: TextureBaker,
+    private readonly compiler: MaterialCompiler
+  ) {}
 
-    const physical = clonePhysical(options.physical);
-    const snapshot: ExportSnapshot = {
-      physical,
-      meshAssignments: cloneAssignments(options.meshAssignments),
-      bakeMaterial: options.compiler.createBakeMaterial(physical),
-      displacementExtent: options.compiler.displacementExtent
-    };
+  public async export(
+    previewRoot: THREE.Object3D,
+    settings: Readonly<PhysicalSettings>,
+    bakeResolution: number,
+    maxTextureSize: number
+  ): Promise<Blob> {
+    previewRoot.updateMatrixWorld(true);
+    const sourceRoot = sourceForExport(previewRoot);
+    const sourceMeshes = collectMeshes(sourceRoot);
+    if (sourceMeshes.length === 0) {
+      throw new Error('There is no mesh geometry to export.');
+    }
 
-    const baker = new TextureBaker(this.renderer);
-    const generatedMaterials: THREE.Material[] = [];
+    const physical = structuredClone(settings);
+    const bakeMaterial = this.compiler.createBakeMaterial(physical);
+    const meshSnapshots: ExportMeshSnapshot[] = [];
+    try {
+      for (const source of sourceMeshes) {
+        const assigned = source.material === this.compiler.material;
+        meshSnapshots.push({
+          assigned,
+          bake: assigned ? this.baker.snapshotMesh(source) : null
+        });
+      }
+    } catch (error) {
+      for (const snapshot of meshSnapshots) {
+        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
+      }
+      bakeMaterial.dispose();
+      throw error;
+    }
+
+    const exportRoot = cloneSkeletonSafe(sourceRoot);
+    const exportMeshes = collectMeshes(exportRoot);
+    if (exportMeshes.length !== sourceMeshes.length) {
+      for (const snapshot of meshSnapshots) {
+        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
+      }
+      bakeMaterial.dispose();
+      throw new Error('Export clone does not match the current mesh hierarchy.');
+    }
+
+    const resources: ExportResources = { materials: [], textures: [] };
+    const assignedTargets = new Set<THREE.Mesh>();
+    for (let index = 0; index < exportMeshes.length; index += 1) {
+      if (meshSnapshots[index]?.assigned === true && exportMeshes[index] !== undefined) {
+        assignedTargets.add(exportMeshes[index] as THREE.Mesh);
+      }
+    }
+    snapshotOriginalMaterials(exportRoot, assignedTargets, resources);
+    cleanLabMetadata(exportRoot);
 
     try {
-      const sourceMeshes = new Map<string, THREE.Mesh>();
-      sourceRoot.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return;
-        const id = object.userData.labMeshId;
-        if (typeof id === 'string') sourceMeshes.set(id, object);
-      });
+      for (let index = 0; index < meshSnapshots.length; index += 1) {
+        const snapshot = meshSnapshots[index];
+        const target = exportMeshes[index];
+        if (snapshot === undefined || target === undefined || !snapshot.assigned || snapshot.bake === null) continue;
 
-      const exportMeshes: THREE.Mesh[] = [];
-      exportRoot.traverse((object) => {
-        if (object instanceof THREE.Mesh) exportMeshes.push(object);
-      });
-
-      for (const mesh of exportMeshes) {
-        const id = mesh.userData.labMeshId;
-        const assigned = !options.imported || (typeof id === 'string' && snapshot.meshAssignments[id] !== false);
-        if (!assigned) continue;
-
-        const sourceMesh = typeof id === 'string' ? sourceMeshes.get(id) : undefined;
-        const bakeSource = sourceMesh ?? mesh;
-        const baked = await baker.bake({
-          mesh: bakeSource,
-          material: snapshot.bakeMaterial,
-          physical: snapshot.physical,
-          size: options.textureSize,
-          displacementExtent: snapshot.displacementExtent
-        });
-        const material = materialForBake(baked, snapshot.physical);
-        generatedMaterials.push(material);
-        mesh.material = material;
+        const maps = await this.baker.bakePbrSnapshot(
+          snapshot.bake,
+          physical,
+          bakeResolution,
+          bakeMaterial
+        );
+        target.material = createBakedMaterial(maps, physical, index, resources);
+        target.customDepthMaterial = undefined;
+        target.customDistanceMaterial = undefined;
       }
 
-      const exporter = new GLTFExporter();
-      const result = await exporter.parseAsync(exportRoot, {
+      const result = await this.exporter.parseAsync(exportRoot, {
         binary: true,
-        onlyVisible: true
+        embedImages: true,
+        onlyVisible: true,
+        truncateDrawRange: true,
+        forceIndices: true,
+        includeCustomExtensions: false,
+        maxTextureSize
       });
       if (!(result instanceof ArrayBuffer)) {
-        throw new Error('GLB exporter did not return binary output.');
+        throw new Error('GLB exporter returned an unexpected non-binary result.');
       }
       return new Blob([result], { type: 'model/gltf-binary' });
     } finally {
-      snapshot.bakeMaterial.dispose();
-      baker.dispose();
-      for (const material of generatedMaterials) disposeMaterial(material);
+      for (const snapshot of meshSnapshots) {
+        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
+      }
+      bakeMaterial.dispose();
+      disposeResources(resources);
     }
   }
 }
