@@ -113,12 +113,22 @@ export class App {
     state: Readonly<ProjectState>,
     reason: StateChangeReason
   ): void {
-    if (reason === 'layers' || reason === 'viewport' || reason === 'project') {
+    if (reason === 'layers' || reason === 'project') {
       this.syncMaterial(state);
+    } else if (reason === 'wireframe') {
+      this.compiler.sync(state.layers, state.wireframe);
+    } else if (reason === 'physical') {
+      applyPhysicalSettings(this.compiler.material, state.physical);
     }
 
     if (reason === 'layers' || reason === 'selection' || reason === 'project') {
       this.layers.render(state);
+      this.inspector.render(state);
+    } else if (
+      reason === 'background' ||
+      reason === 'wireframe' ||
+      reason === 'physical'
+    ) {
       this.inspector.render(state);
     }
 
@@ -127,9 +137,8 @@ export class App {
       this.library.render(state);
     }
 
-    if (reason === 'viewport' || reason === 'project') {
+    if (reason === 'background' || reason === 'project') {
       this.renderer.setBackground(state.background);
-      this.inspector.render(state);
     }
 
     this.shell.setStatus(`${state.layers.length} layers · Physical`);
