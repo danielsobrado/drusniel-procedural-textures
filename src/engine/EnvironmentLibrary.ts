@@ -62,6 +62,7 @@ export class EnvironmentLibrary {
   private readonly studioTarget: THREE.WebGLRenderTarget;
   private customTarget: THREE.WebGLRenderTarget | null = null;
   private customName: string | null = null;
+  private loadSequence = 0;
 
   public constructor(renderer: THREE.WebGLRenderer) {
     this.pmrem = new THREE.PMREMGenerator(renderer);
@@ -72,6 +73,10 @@ export class EnvironmentLibrary {
 
   public hasCustomEnvironment(name: string | null): boolean {
     return name !== null && this.customTarget !== null && this.customName === name;
+  }
+
+  public cancelPending(): void {
+    this.loadSequence += 1;
   }
 
   public apply(
@@ -91,26 +96,39 @@ export class EnvironmentLibrary {
     return profile;
   }
 
-  public async loadHdr(file: File): Promise<void> {
+  public async loadHdr(file: File): Promise<boolean> {
     if (!file.name.toLowerCase().endsWith('.hdr')) {
       throw new Error('Environment files must use the Radiance .hdr format.');
     }
 
+    const sequence = ++this.loadSequence;
     const url = URL.createObjectURL(file);
     try {
       const texture = await new RGBELoader().loadAsync(url);
+      if (sequence !== this.loadSequence) {
+        texture.dispose();
+        return false;
+      }
+
       texture.mapping = THREE.EquirectangularReflectionMapping;
       const target = this.pmrem.fromEquirectangular(texture);
       texture.dispose();
+      if (sequence !== this.loadSequence) {
+        target.dispose();
+        return false;
+      }
+
       this.customTarget?.dispose();
       this.customTarget = target;
       this.customName = file.name;
+      return true;
     } finally {
       URL.revokeObjectURL(url);
     }
   }
 
   public dispose(): void {
+    this.cancelPending();
     this.customTarget?.dispose();
     this.customTarget = null;
     this.customName = null;
