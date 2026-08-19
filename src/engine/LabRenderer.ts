@@ -120,8 +120,12 @@ export class LabRenderer {
 
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius, 0.1);
-    const halfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
-    const distance = (radius / Math.tan(halfFov)) * 1.28;
+    const verticalHalfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
+    const horizontalHalfFov = Math.atan(
+      Math.tan(verticalHalfFov) * Math.max(this.camera.aspect, 0.001)
+    );
+    const limitingHalfFov = Math.min(verticalHalfFov, horizontalHalfFov);
+    const distance = (radius / Math.tan(limitingHalfFov)) * 1.28;
     const direction = this.camera.position
       .clone()
       .sub(this.controls.target);
