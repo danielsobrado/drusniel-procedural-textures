@@ -93,6 +93,20 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   throw new Error('The GLB container does not contain a JSON chunk.');
 }
 
+function hasMeshGeometry(root: THREE.Object3D): boolean {
+  let found = false;
+  root.traverse((object) => {
+    if (
+      object instanceof THREE.Mesh &&
+      object.geometry.getAttribute('position')?.count !== undefined &&
+      object.geometry.getAttribute('position').count > 0
+    ) {
+      found = true;
+    }
+  });
+  return found;
+}
+
 export class ModelLoader {
   private readonly loader = new GLTFLoader();
   private loadSequence = 0;
@@ -147,6 +161,10 @@ export class ModelLoader {
 
   private normalize(root: THREE.Object3D, name: string): THREE.Object3D {
     root.updateMatrixWorld(true);
+
+    if (!hasMeshGeometry(root)) {
+      throw new Error('The imported model does not contain mesh geometry.');
+    }
 
     const bounds = new THREE.Box3().setFromObject(root);
     if (bounds.isEmpty()) {
