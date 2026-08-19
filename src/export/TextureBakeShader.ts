@@ -80,7 +80,10 @@ void main() {
 
   vec3 outputColor;
   if (uBakeMode == 0) {
-    outputColor = labLinearToSrgb(clamp(surface.color, 0.0, 1.0));
+    vec3 sssApproximation = surface.sss > 0.0001
+      ? surface.sssColor * surface.sss * 0.22
+      : vec3(0.0);
+    outputColor = labLinearToSrgb(clamp(surface.color + sssApproximation, 0.0, 1.0));
   } else if (uBakeMode == 1) {
     float roughness = clamp(uBakeBaseRoughness + surface.roughness, 0.045, 1.0);
     outputColor = vec3(roughness);
