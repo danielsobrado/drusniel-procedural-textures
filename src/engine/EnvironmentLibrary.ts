@@ -1,7 +1,10 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { MAX_MODEL_FILE_BYTES } from '../app/constants';
 import type { EnvironmentPreset } from '../materials/types';
+
+const BYTES_PER_MIB = 1024 * 1024;
 
 export interface StudioLightProfile {
   keyColor: string;
@@ -99,6 +102,10 @@ export class EnvironmentLibrary {
   public async loadHdr(file: File): Promise<boolean> {
     if (!file.name.toLowerCase().endsWith('.hdr')) {
       throw new Error('Environment files must use the Radiance .hdr format.');
+    }
+    if (file.size > MAX_MODEL_FILE_BYTES) {
+      const limitMiB = MAX_MODEL_FILE_BYTES / BYTES_PER_MIB;
+      throw new Error(`HDR environment exceeds the configured ${limitMiB.toFixed(0)} MiB import limit.`);
     }
 
     const sequence = ++this.loadSequence;
