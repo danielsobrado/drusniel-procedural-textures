@@ -277,8 +277,25 @@ mat4 labWorldMatrix = modelMatrix;
 #endif
 vec3 labPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
 float labDisplacement = labEvaluateDisplacement(labPosition);
-float labNormalScale = max(length(mat3(labWorldMatrix) * objectNormal), 0.00001);
-transformed += objectNormal * (labDisplacement / labNormalScale);
+mat3 labWorldLinear = mat3(labWorldMatrix);
+vec3 labWorldA = labWorldLinear[0];
+vec3 labWorldB = labWorldLinear[1];
+vec3 labWorldC = labWorldLinear[2];
+vec3 labCofactorX = cross(labWorldB, labWorldC);
+vec3 labCofactorY = cross(labWorldC, labWorldA);
+vec3 labCofactorZ = cross(labWorldA, labWorldB);
+float labWorldDeterminant = dot(labWorldA, labCofactorX);
+if (abs(labWorldDeterminant) > 0.00000001) {
+  vec3 labWorldNormalRaw = mat3(labCofactorX, labCofactorY, labCofactorZ) * objectNormal;
+  if (labWorldDeterminant < 0.0) labWorldNormalRaw = -labWorldNormalRaw;
+  vec3 labWorldOffset = normalize(labWorldNormalRaw) * labDisplacement;
+  vec3 labLocalOffset = vec3(
+    dot(labWorldOffset, labCofactorX),
+    dot(labWorldOffset, labCofactorY),
+    dot(labWorldOffset, labCofactorZ)
+  ) / labWorldDeterminant;
+  transformed += labLocalOffset;
+}
 `;
 
 export const SURFACE_VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
@@ -286,17 +303,37 @@ export const SURFACE_VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
 ${WORLD_MATRIX_GLSL}
 vLabPosition = labPosition;
 vLabWorldPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
+vLabDisplacement = labDisplacement;
 `;
 
 export const DISPLACED_NORMAL_GLSL = /* glsl */ `
 #include <normal_fragment_begin>
 if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
-  vec3 labDx = dFdx(vLabWorldPosition);
-  vec3 labDy = dFdy(vLabWorldPosition);
-  vec3 labWorldNormal = normalize(cross(labDx, labDy));
-  vec3 labViewNormal = normalize(mat3(viewMatrix) * labWorldNormal);
-  if (dot(labViewNormal, normal) < 0.0) labViewNormal = -labViewNormal;
-  normal = normalize(mix(normal, labViewNormal, uLabNormalStrength));
+  mat3 labViewRotation = mat3(viewMatrix);
+  mat3 labInverseViewRotation = mat3(
+    vec3(labViewRotation[0].x, labViewRotation[1].x, labViewRotation[2].x),
+    vec3(labViewRotation[0].y, labViewRotation[1].y, labViewRotation[2].y),
+    vec3(labViewRotation[0].z, labViewRotation[1].z, labViewRotation[2].z)
+  );
+  vec3 labBaseWorldNormal = normalize(labInverseViewRotation * normal);
+  vec3 labSigmaX = dFdx(vLabPosition);
+  vec3 labSigmaY = dFdy(vLabPosition);
+  vec3 labR1 = cross(labSigmaY, labBaseWorldNormal);
+  vec3 labR2 = cross(labBaseWorldNormal, labSigmaX);
+  float labDeterminant = dot(labSigmaX, labR1);
+  if (abs(labDeterminant) > 0.00000001) {
+    vec3 labSurfaceGradient = (
+      dFdx(vLabDisplacement) * labR1 +
+      dFdy(vLabDisplacement) * labR2
+    );
+    if (labDeterminant < 0.0) labSurfaceGradient = -labSurfaceGradient;
+    vec3 labWorldNormal = normalize(
+      abs(labDeterminant) * labBaseWorldNormal - labSurfaceGradient * uLabNormalStrength
+    );
+    vec3 labViewNormal = normalize(labViewRotation * labWorldNormal);
+    if (dot(labViewNormal, normal) < 0.0) labViewNormal = -labViewNormal;
+    normal = labViewNormal;
+  }
 }
 `;
 
