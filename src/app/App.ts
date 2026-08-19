@@ -7,6 +7,7 @@ import { AppState, createDefaultProject, type StateChangeReason } from './AppSta
 import { normalizeProject } from './ProjectFile';
 import { LabRenderer } from '../engine/LabRenderer';
 import { ModelLoader } from '../engine/ModelLoader';
+import { disposeObjectResources } from '../engine/ObjectResources';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
 import type { LayerKind, ProjectState } from '../materials/types';
@@ -50,6 +51,7 @@ export class App {
   private readonly radial: RadialMenu;
   private autosaveTimer: number | null = null;
   private activeImportedName: string | null = null;
+  private importedFile: File | null = null;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
@@ -149,9 +151,16 @@ export class App {
     const preset = OBJECT_PRESETS.find((item) => item.id === state.selectedObject);
     this.shell.setObjectLabel(preset?.label ?? state.selectedObject);
 
-    if (state.importedAssetName !== null) {
-      this.shell.toast('Imported mesh is not embedded in project JSON. Re-import the GLB to restore it.');
+    if (state.importedAssetName === null) {
+      return;
     }
+
+    if (this.importedFile?.name === state.importedAssetName) {
+      void this.restoreImportedModel(this.importedFile, state.importedAssetName);
+      return;
+    }
+
+    this.shell.toast('Imported mesh is not embedded in project JSON. Re-import the GLB to restore it.');
   }
 
   private bindCommands(): void {
@@ -301,6 +310,7 @@ export class App {
       }
 
       this.renderer.setImported(model);
+      this.importedFile = file;
       this.activeImportedName = file.name;
       this.state.setImportedAsset(file.name);
       this.shell.setObjectLabel(file.name);
@@ -309,6 +319,30 @@ export class App {
       console.error('Model import failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
       this.shell.setStatus('Import failed');
+    }
+  }
+
+  private async restoreImportedModel(file: File, expectedName: string): Promise<void> {
+    try {
+      this.shell.setStatus(`Restoring ${expectedName}…`);
+      const model = await this.modelLoader.load(file);
+      if (model === null) {
+        return;
+      }
+
+      if (this.state.snapshot.importedAssetName !== expectedName) {
+        disposeObjectResources(model);
+        return;
+      }
+
+      this.renderer.setImported(model);
+      this.activeImportedName = expectedName;
+      this.shell.setObjectLabel(expectedName);
+      this.shell.setStatus(`${this.state.snapshot.layers.length} layers · Physical`);
+    } catch (error) {
+      console.error('Model restore failed.', error);
+      this.shell.toast(this.errorMessage(error), 'error');
+      this.shell.setStatus('Restore failed');
     }
   }
 
