@@ -16,6 +16,20 @@ function addMaterials(
   values.forEach((value) => materials.add(value));
 }
 
+function collectMaterialTextures(materials: Iterable<THREE.Material>): Set<THREE.Texture> {
+  const textures = new Set<THREE.Texture>();
+
+  for (const material of materials) {
+    for (const value of Object.values(material as unknown as Record<string, unknown>)) {
+      if (value instanceof THREE.Texture) {
+        textures.add(value);
+      }
+    }
+  }
+
+  return textures;
+}
+
 export function collectObjectMaterials(root: THREE.Object3D): Set<THREE.Material> {
   const materials = new Set<THREE.Material>();
 
@@ -33,6 +47,18 @@ export function collectMeshMaterials(root: THREE.Object3D): Set<THREE.Material> 
 
   root.traverse((object) => {
     if (object instanceof THREE.Mesh) {
+      addMaterials(materials, object.material);
+    }
+  });
+
+  return materials;
+}
+
+export function collectNonMeshMaterials(root: THREE.Object3D): Set<THREE.Material> {
+  const materials = new Set<THREE.Material>();
+
+  root.traverse((object) => {
+    if (isGeometryRenderable(object) && !(object instanceof THREE.Mesh)) {
       addMaterials(materials, object.material);
     }
   });
@@ -64,12 +90,20 @@ export function disposeObjectSkeletons(root: THREE.Object3D): void {
   skeletons.forEach((skeleton) => skeleton.dispose());
 }
 
-export function disposeMaterialResources(materials: Iterable<THREE.Material>): void {
+export function disposeMaterialResources(
+  materials: Iterable<THREE.Material>,
+  preservedMaterials: ReadonlySet<THREE.Material> = new Set()
+): void {
+  const preservedTextures = collectMaterialTextures(preservedMaterials);
   const textures = new Set<THREE.Texture>();
 
   for (const material of materials) {
+    if (preservedMaterials.has(material)) {
+      continue;
+    }
+
     for (const value of Object.values(material as unknown as Record<string, unknown>)) {
-      if (value instanceof THREE.Texture) {
+      if (value instanceof THREE.Texture && !preservedTextures.has(value)) {
         textures.add(value);
       }
     }
@@ -96,5 +130,5 @@ export function disposeObjectResources(
 
   disposeObjectGeometries(root);
   disposeObjectSkeletons(root);
-  disposeMaterialResources(materials);
+  disposeMaterialResources(materials, preservedMaterials);
 }
