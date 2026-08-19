@@ -194,12 +194,7 @@ export class App {
     const preset = OBJECT_PRESETS.find((item) => item.id === state.selectedObject);
     this.shell.setObjectLabel(preset?.label ?? state.selectedObject);
 
-    if (state.importedAssetName === null) {
-      return;
-    }
-
-    if (this.suppressImportedRestore) {
-      this.shell.toast('Imported mesh is not embedded in project JSON. Re-import the GLB to restore it.');
+    if (state.importedAssetName === null || this.suppressImportedRestore) {
       return;
     }
 
@@ -227,12 +222,14 @@ export class App {
 
     this.shell.onCommand('import-model', () => this.shell.elements.modelInput.click());
     this.shell.onCommand('open-project', () => this.shell.elements.projectInput.click());
-    this.shell.onCommand('save-project', () => this.exportProject());
+    this.shell.onCommand('save-project', () => this.runSafely(() => this.exportProject()));
     this.shell.onCommand('frame', () => this.renderer.frameSelection());
     this.shell.onCommand('wireframe', () => this.state.toggleWireframe());
     this.shell.onCommand('snapshot', () => {
-      downloadDataUrl('procedural-texture-preview.png', this.renderer.capturePng());
-      this.shell.toast('Preview PNG saved.');
+      this.runSafely(() => {
+        downloadDataUrl('procedural-texture-preview.png', this.renderer.capturePng());
+        this.shell.toast('Preview PNG saved.');
+      });
     });
   }
 
@@ -340,13 +337,20 @@ export class App {
       }
 
       const modifier = event.ctrlKey || event.metaKey;
-      if (modifier && event.key.toLowerCase() === 'z') {
+      const key = event.key.toLowerCase();
+      if (modifier && key === 'z') {
         event.preventDefault();
         if (event.shiftKey) {
           this.state.redo();
         } else {
           this.state.undo();
         }
+        return;
+      }
+
+      if (modifier && key === 'y' && !event.shiftKey) {
+        event.preventDefault();
+        this.state.redo();
         return;
       }
 
@@ -362,9 +366,9 @@ export class App {
           bounds.top + bounds.height / 2,
           true
         );
-      } else if (event.key.toLowerCase() === 'f') {
+      } else if (key === 'f') {
         this.renderer.frameSelection();
-      } else if (event.key.toLowerCase() === 'w') {
+      } else if (key === 'w') {
         this.state.toggleWireframe();
       }
     });
@@ -389,6 +393,10 @@ export class App {
       this.state.setObjectPreset('torus');
     } else if (command === 'import') {
       this.shell.elements.modelInput.click();
+    } else if (command === 'open-project') {
+      this.shell.elements.projectInput.click();
+    } else if (command === 'save-project') {
+      this.runSafely(() => this.exportProject());
     } else if (command === 'frame') {
       this.renderer.frameSelection();
     } else if (command === 'wireframe') {
@@ -474,7 +482,14 @@ export class App {
       } finally {
         this.suppressImportedRestore = false;
       }
-      this.shell.toast(`Opened ${file.name}`);
+
+      if (normalizedProject.importedAssetName === null) {
+        this.shell.toast(`Opened ${file.name}`);
+      } else {
+        this.shell.toast(
+          `Opened ${file.name}. Re-import ${normalizedProject.importedAssetName} to restore its mesh.`
+        );
+      }
     } catch (error) {
       if (sequence !== this.projectImportSequence) {
         return;
