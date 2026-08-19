@@ -1,5 +1,7 @@
 import {
   AUTOSAVE_DELAY_MS,
+  HISTORY_LIMIT,
+  MAX_PROJECT_FILE_BYTES,
   OBJECT_PRESETS,
   STORAGE_KEY
 } from './constants';
@@ -18,11 +20,20 @@ import { RadialMenu, type RadialCommand } from '../ui/RadialMenu';
 import { Shell } from '../ui/Shell';
 import { downloadDataUrl, downloadText } from '../utils/download';
 
+const BYTES_PER_MIB = 1024 * 1024;
+
 function isEditableTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function sameFileMetadata(left: File, right: File): boolean {
+  return left.name === right.name &&
+    left.size === right.size &&
+    left.lastModified === right.lastModified &&
+    left.type === right.type;
 }
 
 function loadInitialProject(): ProjectState {
@@ -49,9 +60,11 @@ export class App {
   private readonly inspector: Inspector;
   private readonly layers: LayerStrip;
   private readonly radial: RadialMenu;
+  private readonly importedFiles = new Map<string, File>();
+  private readonly ambiguousImportedNames = new Set<string>();
   private autosaveTimer: number | null = null;
   private activeImportedName: string | null = null;
-  private importedFile: File | null = null;
+  private suppressImportedRestore = false;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
@@ -155,8 +168,19 @@ export class App {
       return;
     }
 
-    if (this.importedFile?.name === state.importedAssetName) {
-      void this.restoreImportedModel(this.importedFile, state.importedAssetName);
+    if (this.suppressImportedRestore) {
+      this.shell.toast('Imported mesh is not embedded in project JSON. Re-import the GLB to restore it.');
+      return;
+    }
+
+    const cachedFile = this.importedFiles.get(state.importedAssetName);
+    if (cachedFile !== undefined) {
+      void this.restoreImportedModel(cachedFile, state.importedAssetName);
+      return;
+    }
+
+    if (this.ambiguousImportedNames.has(state.importedAssetName)) {
+      this.shell.toast('Multiple imported files share this name. Re-import the intended GLB to restore it.');
       return;
     }
 
@@ -310,7 +334,7 @@ export class App {
       }
 
       this.renderer.setImported(model);
-      this.importedFile = file;
+      this.rememberImportedFile(file);
       this.activeImportedName = file.name;
       this.state.setImportedAsset(file.name);
       this.shell.setObjectLabel(file.name);
@@ -348,13 +372,45 @@ export class App {
 
   private async importProject(file: File): Promise<void> {
     try {
+      if (file.size > MAX_PROJECT_FILE_BYTES) {
+        const limitMiB = MAX_PROJECT_FILE_BYTES / BYTES_PER_MIB;
+        throw new Error(`Project file exceeds the configured ${limitMiB.toFixed(1)} MiB limit.`);
+      }
+
       const project = JSON.parse(await file.text()) as unknown;
       this.activeImportedName = null;
-      this.state.replaceProject(project);
+      this.suppressImportedRestore = true;
+      try {
+        this.state.replaceProject(project);
+      } finally {
+        this.suppressImportedRestore = false;
+      }
       this.shell.toast(`Opened ${file.name}`);
     } catch (error) {
       console.error('Project import failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
+    }
+  }
+
+  private rememberImportedFile(file: File): void {
+    const existing = this.importedFiles.get(file.name);
+    if (existing !== undefined && !sameFileMetadata(existing, file)) {
+      this.importedFiles.delete(file.name);
+      this.ambiguousImportedNames.add(file.name);
+      return;
+    }
+
+    if (this.ambiguousImportedNames.has(file.name)) {
+      return;
+    }
+
+    this.importedFiles.set(file.name, file);
+    while (this.importedFiles.size > HISTORY_LIMIT) {
+      const oldest = this.importedFiles.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      this.importedFiles.delete(oldest.value);
     }
   }
 
