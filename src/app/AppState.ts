@@ -4,6 +4,7 @@ import {
   DEFAULT_PHYSICAL,
   HISTORY_COALESCE_MS,
   HISTORY_LIMIT,
+  LAYER_KINDS,
   MAX_LAYERS
 } from './constants';
 import {
@@ -51,6 +52,7 @@ const CONTINUOUS_LAYER_FIELDS = new Set<keyof MaterialLayer>([
 ]);
 
 const COPY_SUFFIX = ' copy';
+const LAYER_KIND_IDS = new Set<MaterialLayer['kind']>(LAYER_KINDS.map((item) => item.id));
 
 function cloneProject(project: ProjectState): ProjectState {
   return structuredClone(project);
@@ -82,6 +84,10 @@ function layerCoalesceKey(id: string, patch: Partial<MaterialLayer>): string | u
 }
 
 export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
+  if (!LAYER_KIND_IDS.has(kind)) {
+    throw new Error(`Unsupported layer kind: ${String(kind)}.`);
+  }
+
   const names: Record<MaterialLayer['kind'], string> = {
     base: 'Base color',
     fbm: 'FBM noise',
@@ -325,6 +331,9 @@ export class AppState {
   }
 
   public setWireframe(enabled: boolean): void {
+    if (typeof enabled !== 'boolean') {
+      throw new Error('Wireframe must be a boolean.');
+    }
     if (this.project.wireframe === enabled) {
       return;
     }
