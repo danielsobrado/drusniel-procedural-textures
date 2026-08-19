@@ -82,6 +82,33 @@ function option(value: string, label: string, selected: boolean): string {
   return `<option value="${escapeHtml(value)}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
 }
 
+function canUseGroupAsParent(
+  groupId: string,
+  candidateId: string,
+  groups: readonly MaterialGroup[]
+): boolean {
+  const byId = new Map(groups.map((group) => [group.id, group]));
+  let currentId: string | null = candidateId;
+  const visited = new Set<string>();
+  while (currentId !== null) {
+    if (currentId === groupId || visited.has(currentId)) return false;
+    visited.add(currentId);
+    currentId = byId.get(currentId)?.parentId ?? null;
+  }
+  return true;
+}
+
+function syncOptionLabels(
+  select: HTMLSelectElement | null,
+  labels: ReadonlyMap<string, string>
+): void {
+  if (select === null) return;
+  for (const item of Array.from(select.options)) {
+    const label = labels.get(item.value);
+    if (label !== undefined) item.textContent = label;
+  }
+}
+
 export class Inspector {
   private currentLayerId: string | null = null;
   private currentState: Readonly<ProjectState> | null = null;
@@ -102,7 +129,7 @@ export class Inspector {
     const nextStructureKey = [
       `${layer?.id ?? ''}:${layer?.groupId ?? ''}`,
       state.layers.map((item) => item.id).join('|'),
-      state.groups.map((item) => item.id).join('|'),
+      state.groups.map((item) => `${item.id}:${item.parentId ?? ''}`).join('|'),
       state.importedMeshes.map((item) => item.id).join('|'),
       state.environmentAssetName ?? ''
     ].join('::');
@@ -224,7 +251,7 @@ export class Inspector {
 
   private groupEditor(group: MaterialGroup, state: Readonly<ProjectState>): string {
     const parentOptions = state.groups
-      .filter((item) => item.id !== group.id)
+      .filter((item) => item.id !== group.id && canUseGroupAsParent(group.id, item.id, state.groups))
       .map((item) => option(item.id, item.name, item.id === group.parentId))
       .join('');
     const range = CONTROL_RANGES.group.opacity;
@@ -337,6 +364,26 @@ export class Inspector {
         }
       }
     }
+
+    const layerLabels = new Map(state.layers.map((item) => [item.id, item.name]));
+    const groupLabels = new Map(state.groups.map((item) => [item.id, item.name]));
+    const meshLabels = new Map(state.importedMeshes.map((item) => [item.id, item.label]));
+    syncOptionLabels(
+      this.container.querySelector<HTMLSelectElement>('[data-field="maskSourceLayerId"]'),
+      layerLabels
+    );
+    syncOptionLabels(
+      this.container.querySelector<HTMLSelectElement>('[data-field="groupId"]'),
+      groupLabels
+    );
+    syncOptionLabels(
+      this.container.querySelector<HTMLSelectElement>('[data-group-field="parentId"]'),
+      groupLabels
+    );
+    syncOptionLabels(
+      this.container.querySelector<HTMLSelectElement>('[data-viewport-field="mesh"]'),
+      meshLabels
+    );
 
     const physicalFields = this.container.querySelectorAll<HTMLInputElement>('[data-physical-field]');
     for (const field of physicalFields) {
