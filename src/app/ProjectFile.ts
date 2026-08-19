@@ -31,6 +31,7 @@ export const MAX_LAYER_NAME_LENGTH = 120;
 export const MAX_GROUP_NAME_LENGTH = 120;
 export const MAX_IMPORTED_ASSET_NAME_LENGTH = 255;
 export const MAX_MESH_LABEL_LENGTH = 160;
+export const MAX_IMPORTED_MESHES = 2048;
 
 const OBJECT_IDS = new Set<ObjectPreset>(OBJECT_PRESETS.map((item) => item.id));
 const LAYER_KIND_IDS = new Set<LayerKind>(LAYER_KINDS.map((item) => item.id));
@@ -265,8 +266,8 @@ function normalizeImportedMeshes(value: unknown): ImportedMeshTarget[] {
   if (value === undefined) {
     return [];
   }
-  if (!Array.isArray(value) || value.length > 2048) {
-    throw new Error('Imported mesh catalog is invalid or too large.');
+  if (!Array.isArray(value) || value.length > MAX_IMPORTED_MESHES) {
+    throw new Error(`Imported mesh catalog must contain at most ${MAX_IMPORTED_MESHES} entries.`);
   }
   const meshes = value.map((item, index) => {
     const mesh = asRecord(item, `Imported mesh ${index + 1}`);
@@ -338,22 +339,29 @@ export function normalizeProject(value: unknown): ProjectState {
   const importedAssetName = project.importedAssetName === null || project.importedAssetName === undefined
     ? null
     : normalizeImportedAssetName(project.importedAssetName);
-  const importedMeshes = normalizeImportedMeshes(project.importedMeshes);
+  const importedMeshes = importedAssetName === null ? [] : normalizeImportedMeshes(project.importedMeshes);
   const meshIds = new Set(importedMeshes.map((mesh) => mesh.id));
-  const selectedMeshId = typeof project.selectedMeshId === 'string' && meshIds.has(project.selectedMeshId)
-    ? project.selectedMeshId
-    : importedMeshes[0]?.id ?? null;
+  const selectedMeshId = importedAssetName !== null &&
+    typeof project.selectedMeshId === 'string' &&
+    meshIds.has(project.selectedMeshId)
+      ? project.selectedMeshId
+      : importedMeshes[0]?.id ?? null;
+  const meshAssignments = importedAssetName === null
+    ? {}
+    : normalizeMeshAssignments(project.meshAssignments, importedMeshes);
 
   const environment = project.environment === undefined
     ? DEFAULT_ENVIRONMENT
     : normalizeEnvironment(project.environment);
-  const environmentAssetName = project.environmentAssetName === null || project.environmentAssetName === undefined
-    ? null
-    : asNonEmptyString(
-        project.environmentAssetName,
-        'Environment asset name',
-        MAX_IMPORTED_ASSET_NAME_LENGTH
-      );
+  const environmentAssetName = environment === 'custom' &&
+    project.environmentAssetName !== null &&
+    project.environmentAssetName !== undefined
+      ? asNonEmptyString(
+          project.environmentAssetName,
+          'Environment asset name',
+          MAX_IMPORTED_ASSET_NAME_LENGTH
+        )
+      : null;
 
   return {
     version: 2,
@@ -362,7 +370,7 @@ export function normalizeProject(value: unknown): ProjectState {
     importedAssetName,
     importedMeshes,
     selectedMeshId,
-    meshAssignments: normalizeMeshAssignments(project.meshAssignments, importedMeshes),
+    meshAssignments,
     environment,
     environmentAssetName,
     background: normalizeBackgroundColor(project.background),
