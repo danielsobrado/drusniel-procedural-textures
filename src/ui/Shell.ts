@@ -9,6 +9,7 @@ export interface ShellElements {
   radial: HTMLElement;
   modelInput: HTMLInputElement;
   projectInput: HTMLInputElement;
+  environmentInput: HTMLInputElement;
   objectLabel: HTMLElement;
   status: HTMLElement;
 }
@@ -68,18 +69,23 @@ export class Shell {
             <span data-role="object-label">Sphere</span>
           </div>
           <div class="viewport-help">Right click / Space · radial menu</div>
-          <div class="drop-overlay">Drop GLB / GLTF</div>
+          <div class="drop-overlay">Drop GLB / GLTF bundle</div>
         </main>
 
         <aside class="panel inspector-panel" data-role="inspector"></aside>
-
         <section class="layer-dock" data-role="layers"></section>
-
         <div class="radial-host" data-role="radial"></div>
         <div class="toast" data-role="toast" aria-live="polite"></div>
 
-        <input class="visually-hidden" data-role="model-input" type="file" accept=".glb,.gltf,model/gltf-binary,model/gltf+json">
+        <input
+          class="visually-hidden"
+          data-role="model-input"
+          type="file"
+          multiple
+          accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.basis,model/gltf-binary,model/gltf+json,image/*,application/octet-stream"
+        >
         <input class="visually-hidden" data-role="project-input" type="file" accept=".json,application/json">
+        <input class="visually-hidden" data-role="environment-input" type="file" accept=".hdr,image/vnd.radiance">
       </div>
     `;
 
@@ -91,6 +97,7 @@ export class Shell {
       radial: required(this.root, '[data-role="radial"]'),
       modelInput: required(this.root, '[data-role="model-input"]'),
       projectInput: required(this.root, '[data-role="project-input"]'),
+      environmentInput: required(this.root, '[data-role="environment-input"]'),
       objectLabel: required(this.root, '[data-role="object-label"]'),
       status: required(this.root, '[data-role="status"]')
     };
@@ -122,11 +129,9 @@ export class Shell {
     if (this.toastTimer !== null) {
       window.clearTimeout(this.toastTimer);
     }
-
     this.toastElement.textContent = message;
     this.toastElement.dataset.kind = kind;
     this.toastElement.classList.add('is-visible');
-
     this.toastTimer = window.setTimeout(() => {
       this.toastElement.classList.remove('is-visible');
       this.toastTimer = null;
