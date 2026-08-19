@@ -1,30 +1,49 @@
 export type ImportedFileLookup =
-  | { status: 'found'; file: File }
+  | { status: 'found'; files: readonly File[] }
   | { status: 'missing' };
 
 interface FileMetadata {
+  name: string;
   size: number;
   lastModified: number;
   type: string;
 }
 
+interface BundleEntry {
+  files: readonly File[];
+  bytes: number;
+}
+
 function metadataOf(file: File): FileMetadata {
   return {
+    name: file.name,
     size: file.size,
     lastModified: file.lastModified,
     type: file.type
   };
 }
 
-function sameFileMetadata(metadata: FileMetadata, file: File): boolean {
-  return metadata.size === file.size &&
-    metadata.lastModified === file.lastModified &&
-    metadata.type === file.type;
+function bundleMetadata(files: readonly File[]): FileMetadata[] {
+  return files.map(metadataOf).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function sameMetadata(left: readonly FileMetadata[], right: readonly FileMetadata[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((item, index) => {
+    const other = right[index];
+    return other !== undefined &&
+      item.name === other.name &&
+      item.size === other.size &&
+      item.lastModified === other.lastModified &&
+      item.type === other.type;
+  });
 }
 
 export class ImportedFileCache {
-  private readonly files = new Map<string, File>();
-  private readonly knownMetadata = new Map<string, FileMetadata>();
+  private readonly bundles = new Map<string, BundleEntry>();
+  private readonly knownMetadata = new Map<string, readonly FileMetadata[]>();
   private totalBytes = 0;
 
   public constructor(
@@ -32,51 +51,54 @@ export class ImportedFileCache {
     private readonly maxBytes: number
   ) {}
 
-  public remember(file: File): void {
-    const metadata = this.knownMetadata.get(file.name);
-    if (metadata !== undefined && !sameFileMetadata(metadata, file)) {
+  public remember(primaryName: string, files: readonly File[]): void {
+    if (files.length === 0) {
+      throw new Error('Imported asset bundle cannot be empty.');
+    }
+
+    const metadata = bundleMetadata(files);
+    const known = this.knownMetadata.get(primaryName);
+    if (known !== undefined && !sameMetadata(known, metadata)) {
       throw new Error(
-        `A different imported asset is already known as "${file.name}". Rename the file before importing it so project history can restore the correct model.`
+        `A different imported asset is already known as "${primaryName}". Rename the primary file before importing it so project history can restore the correct model.`
       );
     }
 
-    this.rememberMetadata(file.name, metadata ?? metadataOf(file));
-
-    const existing = this.files.get(file.name);
+    this.rememberMetadata(primaryName, known ?? metadata);
+    const existing = this.bundles.get(primaryName);
     if (existing !== undefined) {
-      this.refreshFile(file.name, existing);
+      this.refreshBundle(primaryName, existing);
       return;
     }
 
-    this.files.set(file.name, file);
-    this.totalBytes += file.size;
-    this.evictFilesToLimits();
+    const bytes = files.reduce((total, file) => total + file.size, 0);
+    this.bundles.set(primaryName, { files: [...files], bytes });
+    this.totalBytes += bytes;
+    this.evictToLimits();
   }
 
   public lookup(name: string): ImportedFileLookup {
-    const file = this.files.get(name);
-    if (file === undefined) {
+    const bundle = this.bundles.get(name);
+    if (bundle === undefined) {
       return { status: 'missing' };
     }
-
-    this.refreshFile(name, file);
+    this.refreshBundle(name, bundle);
     const metadata = this.knownMetadata.get(name);
     if (metadata !== undefined) {
       this.rememberMetadata(name, metadata);
     }
-    return { status: 'found', file };
+    return { status: 'found', files: bundle.files };
   }
 
   public clear(): void {
-    this.files.clear();
+    this.bundles.clear();
     this.knownMetadata.clear();
     this.totalBytes = 0;
   }
 
-  private rememberMetadata(name: string, metadata: FileMetadata): void {
+  private rememberMetadata(name: string, metadata: readonly FileMetadata[]): void {
     this.knownMetadata.delete(name);
     this.knownMetadata.set(name, metadata);
-
     while (this.knownMetadata.size > this.maxEntries) {
       const oldest = this.knownMetadata.keys().next();
       if (oldest.done) {
@@ -86,28 +108,27 @@ export class ImportedFileCache {
     }
   }
 
-  private refreshFile(name: string, file: File): void {
-    this.files.delete(name);
-    this.files.set(name, file);
+  private refreshBundle(name: string, bundle: BundleEntry): void {
+    this.bundles.delete(name);
+    this.bundles.set(name, bundle);
   }
 
-  private evictFilesToLimits(): void {
-    while (this.files.size > this.maxEntries || this.totalBytes > this.maxBytes) {
-      const oldest = this.files.keys().next();
+  private evictToLimits(): void {
+    while (this.bundles.size > this.maxEntries || this.totalBytes > this.maxBytes) {
+      const oldest = this.bundles.keys().next();
       if (oldest.done) {
         break;
       }
-      this.removeFile(oldest.value);
+      this.removeBundle(oldest.value);
     }
   }
 
-  private removeFile(name: string): void {
-    const file = this.files.get(name);
-    if (file === undefined) {
+  private removeBundle(name: string): void {
+    const bundle = this.bundles.get(name);
+    if (bundle === undefined) {
       return;
     }
-
-    this.files.delete(name);
-    this.totalBytes -= file.size;
+    this.bundles.delete(name);
+    this.totalBytes -= bundle.bytes;
   }
 }
