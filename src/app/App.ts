@@ -283,6 +283,10 @@ export class App {
         return;
       }
 
+      if (modifier || event.altKey) {
+        return;
+      }
+
       if (event.code === 'Space') {
         event.preventDefault();
         const bounds = this.shell.elements.viewport.getBoundingClientRect();
@@ -378,10 +382,11 @@ export class App {
       }
 
       const project = JSON.parse(await file.text()) as unknown;
+      const normalizedProject = normalizeProject(project);
       this.activeImportedName = null;
       this.suppressImportedRestore = true;
       try {
-        this.state.replaceProject(project);
+        this.state.replaceProject(normalizedProject);
       } finally {
         this.suppressImportedRestore = false;
       }
