@@ -424,12 +424,26 @@ export class AppState {
 
   public setImportedAsset(name: string, meshes: readonly ImportedMeshTarget[]): void {
     const normalizedName = normalizeImportedAssetName(name);
+    const restoringSameAsset = this.project.importedAssetName === normalizedName;
+    const meshIds = new Set(meshes.map((mesh) => mesh.id));
+    const nextAssignments = Object.fromEntries(
+      meshes.map((mesh) => [
+        mesh.id,
+        restoringSameAsset ? this.project.meshAssignments[mesh.id] ?? true : true
+      ])
+    );
+    const nextSelection = restoringSameAsset &&
+      this.project.selectedMeshId !== null &&
+      meshIds.has(this.project.selectedMeshId)
+        ? this.project.selectedMeshId
+        : meshes[0]?.id ?? null;
+
     const next = normalizeProject({
       ...this.project,
       importedAssetName: normalizedName,
       importedMeshes: meshes,
-      selectedMeshId: meshes[0]?.id ?? null,
-      meshAssignments: Object.fromEntries(meshes.map((mesh) => [mesh.id, true]))
+      selectedMeshId: nextSelection,
+      meshAssignments: nextAssignments
     });
     this.commit();
     this.project.importedAssetName = next.importedAssetName;
@@ -464,7 +478,9 @@ export class AppState {
 
   public setEnvironment(environment: EnvironmentPreset, assetName: string | null = null): void {
     const normalized = normalizeEnvironment(environment);
-    const normalizedAssetName = assetName === null ? null : normalizeImportedAssetName(assetName);
+    const normalizedAssetName = normalized === 'custom' && assetName !== null
+      ? normalizeImportedAssetName(assetName)
+      : null;
     if (this.project.environment === normalized && this.project.environmentAssetName === normalizedAssetName) {
       return;
     }
