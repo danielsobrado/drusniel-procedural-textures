@@ -161,12 +161,8 @@ export class App {
       this.renderer.setSelectedMesh(state.selectedMeshId);
     }
 
-    if (reason === 'background' || reason === 'project') {
-      this.renderer.setBackground(state.background);
-    }
-    if (reason === 'environment' || reason === 'project') {
-      this.renderer.setEnvironment(state.environment);
-    }
+    if (reason === 'background' || reason === 'project') this.renderer.setBackground(state.background);
+    if (reason === 'environment' || reason === 'project') this.renderer.setEnvironment(state.environment);
 
     this.shell.setStatus(`${state.layers.length} layers · ${state.groups.length} groups · Physical`);
     this.scheduleAutosave(state);
@@ -191,8 +187,10 @@ export class App {
   }
 
   private syncObject(state: Readonly<ProjectState>): void {
-    this.projectImportSequence += 1;
-    this.modelLoader.cancelPending();
+    if (!this.suppressImportedRestore) {
+      this.projectImportSequence += 1;
+      this.modelLoader.cancelPending();
+    }
 
     if (state.importedAssetName !== null && this.activeImportedName === state.importedAssetName) {
       this.shell.setObjectLabel(state.importedAssetName);
@@ -216,12 +214,8 @@ export class App {
   }
 
   private bindCommands(): void {
-    this.shell.onCommand('undo', () => {
-      if (!this.state.undo()) this.shell.toast('Nothing to undo.');
-    });
-    this.shell.onCommand('redo', () => {
-      if (!this.state.redo()) this.shell.toast('Nothing to redo.');
-    });
+    this.shell.onCommand('undo', () => { if (!this.state.undo()) this.shell.toast('Nothing to undo.'); });
+    this.shell.onCommand('redo', () => { if (!this.state.redo()) this.shell.toast('Nothing to redo.'); });
     this.shell.onCommand('import-model', () => this.shell.elements.modelInput.click());
     this.shell.onCommand('open-project', () => this.shell.elements.projectInput.click());
     this.shell.onCommand('save-project', () => this.runSafely(() => this.exportProject()));
@@ -239,13 +233,11 @@ export class App {
       if (files.length > 0) void this.importModel(files);
       this.shell.elements.modelInput.value = '';
     });
-
     this.shell.elements.projectInput.addEventListener('change', () => {
       const file = this.shell.elements.projectInput.files?.[0];
       if (file !== undefined) void this.importProject(file);
       this.shell.elements.projectInput.value = '';
     });
-
     this.shell.elements.environmentInput.addEventListener('change', () => {
       const file = this.shell.elements.environmentInput.files?.[0];
       if (file !== undefined) void this.importEnvironment(file);
@@ -331,7 +323,9 @@ export class App {
     const layerCommand: Partial<Record<RadialCommand, LayerKind>> = {
       'add-noise': 'fbm',
       'add-cells': 'cellular',
-      'add-veins': 'vessels'
+      'add-veins': 'vessels',
+      'add-wet': 'wet-film',
+      'add-sss': 'sss'
     };
     const layerKind = layerCommand[command];
     if (layerKind !== undefined) {
@@ -419,9 +413,10 @@ export class App {
       this.shell.elements.environmentInput.click();
       return;
     }
-    this.runSafely(() => this.state.setEnvironment(environment, environment === 'custom'
-      ? this.state.snapshot.environmentAssetName
-      : null));
+    this.runSafely(() => this.state.setEnvironment(
+      environment,
+      environment === 'custom' ? this.state.snapshot.environmentAssetName : null
+    ));
   }
 
   private async importProject(file: File): Promise<void> {
@@ -444,9 +439,7 @@ export class App {
       }
       if (sequence !== this.projectImportSequence) return;
 
-      if (normalizedProject.importedAssetName !== null) {
-        this.syncObject(this.state.snapshot);
-      }
+      if (normalizedProject.importedAssetName !== null) this.syncObject(this.state.snapshot);
       if (normalizedProject.environment === 'custom' && normalizedProject.environmentAssetName !== null) {
         this.shell.toast(`Opened ${file.name}. Re-load ${normalizedProject.environmentAssetName} to restore the custom HDR.`);
       } else if (normalizedProject.importedAssetName === null) {
