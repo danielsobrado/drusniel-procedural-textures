@@ -28,6 +28,18 @@ export type StateListener = (
   reason: StateChangeReason
 ) => void;
 
+const CONTINUOUS_LAYER_FIELDS = new Set<keyof MaterialLayer>([
+  'name',
+  'opacity',
+  'scale',
+  'strength',
+  'seed',
+  'colorA',
+  'colorB',
+  'roughness',
+  'displacement'
+]);
+
 function cloneProject(project: ProjectState): ProjectState {
   return structuredClone(project);
 }
@@ -42,6 +54,14 @@ function patchChanges<T extends object>(current: T, patch: Partial<T>): boolean 
 
 function patchKey(prefix: string, patch: object): string {
   return `${prefix}:${Object.keys(patch).sort().join(',')}`;
+}
+
+function layerCoalesceKey(id: string, patch: Partial<MaterialLayer>): string | undefined {
+  const keys = Object.keys(patch) as Array<keyof MaterialLayer>;
+  if (keys.length === 0 || !keys.every((key) => CONTINUOUS_LAYER_FIELDS.has(key))) {
+    return undefined;
+  }
+  return patchKey(`layer:${id}`, patch);
 }
 
 export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
@@ -142,7 +162,7 @@ export class AppState {
       return;
     }
 
-    this.commit(patchKey(`layer:${id}`, patch));
+    this.commit(layerCoalesceKey(id, patch));
     this.project.layers[index] = {
       ...current,
       ...patch,
