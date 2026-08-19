@@ -228,6 +228,22 @@ LabSurface labEvaluateSurface(vec3 position) {
 }
 `;
 
+const VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
+#include <skinning_vertex>
+mat4 labWorldMatrix = modelMatrix;
+#ifdef USE_INSTANCING
+  labWorldMatrix = labWorldMatrix * instanceMatrix;
+#endif
+#ifdef USE_BATCHING
+  labWorldMatrix = labWorldMatrix * batchingMatrix;
+#endif
+vec3 labPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
+float labDisplacement = labEvaluateDisplacement(labPosition);
+float labNormalScale = max(length(mat3(labWorldMatrix) * objectNormal), 0.00001);
+transformed += objectNormal * (labDisplacement / labNormalScale);
+vLabPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
+`;
+
 export class MaterialCompiler {
   public readonly material: THREE.MeshPhysicalMaterial;
 
@@ -265,10 +281,7 @@ export class MaterialCompiler {
           '#include <common>',
           `#include <common>\n${SHARED_GLSL}\nvarying vec3 vLabPosition;`
         )
-        .replace(
-          '#include <begin_vertex>',
-          `vec3 transformed = vec3(position);\nvec3 labPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;\nfloat labDisplacement = labEvaluateDisplacement(labPosition);\nfloat labNormalScale = max(length(mat3(modelMatrix) * objectNormal), 0.00001);\ntransformed += objectNormal * (labDisplacement / labNormalScale);\nvLabPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;`
-        );
+        .replace('#include <skinning_vertex>', VERTEX_DISPLACEMENT_GLSL);
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -285,7 +298,7 @@ export class MaterialCompiler {
         );
     };
 
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-v2';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-v3';
   }
 
   public sync(layers: readonly MaterialLayer[], wireframe: boolean): void {
