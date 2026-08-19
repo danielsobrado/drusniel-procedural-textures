@@ -30,6 +30,14 @@ function collectMaterialTextures(materials: Iterable<THREE.Material>): Set<THREE
   return textures;
 }
 
+function collectTextureImages(textures: Iterable<THREE.Texture>): Set<unknown> {
+  const images = new Set<unknown>();
+  for (const texture of textures) {
+    images.add(texture.image as unknown);
+  }
+  return images;
+}
+
 export function collectObjectMaterials(root: THREE.Object3D): Set<THREE.Material> {
   const materials = new Set<THREE.Material>();
 
@@ -95,6 +103,7 @@ export function disposeMaterialResources(
   preservedMaterials: ReadonlySet<THREE.Material> = new Set()
 ): void {
   const preservedTextures = collectMaterialTextures(preservedMaterials);
+  const preservedImages = collectTextureImages(preservedTextures);
   const textures = new Set<THREE.Texture>();
 
   for (const material of materials) {
@@ -110,13 +119,20 @@ export function disposeMaterialResources(
     material.dispose();
   }
 
+  const imagesToClose = new Set<ImageBitmap>();
   for (const texture of textures) {
     const image = texture.image as unknown;
     texture.dispose();
-    if (typeof ImageBitmap !== 'undefined' && image instanceof ImageBitmap) {
-      image.close();
+    if (
+      typeof ImageBitmap !== 'undefined' &&
+      image instanceof ImageBitmap &&
+      !preservedImages.has(image)
+    ) {
+      imagesToClose.add(image);
     }
   }
+
+  imagesToClose.forEach((image) => image.close());
 }
 
 export function disposeObjectResources(
