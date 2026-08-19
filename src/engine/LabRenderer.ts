@@ -115,7 +115,7 @@ export class LabRenderer {
     }
 
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
-    const radius = Math.max(sphere.radius, 0.1);
+    const radius = Math.max(sphere.radius + this.compiler.displacementExtent, 0.1);
     const verticalHalfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
     const horizontalHalfFov = Math.atan(
       Math.tan(verticalHalfFov) * Math.max(this.camera.aspect, 0.001)
@@ -168,6 +168,7 @@ export class LabRenderer {
   private applyProceduralMeshSettings(mesh: THREE.Mesh): void {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.frustumCulled = false;
     mesh.customDepthMaterial = this.compiler.depthMaterial;
     mesh.customDistanceMaterial = this.compiler.distanceMaterial;
   }
