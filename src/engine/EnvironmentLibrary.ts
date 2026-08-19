@@ -117,9 +117,14 @@ export class EnvironmentLibrary {
         return false;
       }
 
-      texture.mapping = THREE.EquirectangularReflectionMapping;
-      const target = this.pmrem.fromEquirectangular(texture);
-      texture.dispose();
+      let target: THREE.WebGLRenderTarget;
+      try {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        target = this.pmrem.fromEquirectangular(texture);
+      } finally {
+        texture.dispose();
+      }
+
       if (sequence !== this.loadSequence) {
         target.dispose();
         return false;
