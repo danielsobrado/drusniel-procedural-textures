@@ -1,4 +1,4 @@
-import { BLEND_MODES, LAYER_KINDS } from '../app/constants';
+import { BLEND_MODES, CONTROL_RANGES, LAYER_KINDS } from '../app/constants';
 import type { MaterialLayer, PhysicalSettings, ProjectState } from '../materials/types';
 import { escapeHtml } from '../utils/html';
 
@@ -33,26 +33,46 @@ interface PhysicalField {
 const MAX_LAYER_NAME_LENGTH = 120;
 
 const NUMERIC_FIELDS: readonly NumericField[] = [
-  { key: 'opacity', label: 'Opacity', min: 0, max: 1, step: 0.01 },
-  { key: 'scale', label: 'Scale', min: 0.1, max: 20, step: 0.1 },
-  { key: 'strength', label: 'Strength', min: 0, max: 2.5, step: 0.01 },
-  { key: 'seed', label: 'Seed', min: 0, max: 100, step: 1 },
-  { key: 'roughness', label: 'Roughness Δ', min: -0.5, max: 0.5, step: 0.01 },
-  { key: 'displacement', label: 'Displace', min: -0.18, max: 0.18, step: 0.001 }
+  { key: 'opacity', label: 'Opacity', ...CONTROL_RANGES.layer.opacity },
+  { key: 'scale', label: 'Scale', ...CONTROL_RANGES.layer.scale },
+  { key: 'strength', label: 'Strength', ...CONTROL_RANGES.layer.strength },
+  { key: 'seed', label: 'Seed', ...CONTROL_RANGES.layer.seed },
+  { key: 'roughness', label: 'Roughness Δ', ...CONTROL_RANGES.layer.roughness },
+  { key: 'displacement', label: 'Displace', ...CONTROL_RANGES.layer.displacement }
 ];
 
 const PHYSICAL_FIELDS: readonly PhysicalField[] = [
-  { key: 'roughness', label: 'Base roughness', min: 0.02, max: 1, step: 0.01 },
-  { key: 'metalness', label: 'Metalness', min: 0, max: 1, step: 0.01 },
-  { key: 'clearcoat', label: 'Clearcoat', min: 0, max: 1, step: 0.01 },
-  { key: 'clearcoatRoughness', label: 'Coat roughness', min: 0, max: 1, step: 0.01 },
-  { key: 'specularIntensity', label: 'Specular', min: 0, max: 1, step: 0.01 },
-  { key: 'ior', label: 'IOR', min: 1, max: 2.33, step: 0.01 },
-  { key: 'sheen', label: 'Sheen', min: 0, max: 1, step: 0.01 },
-  { key: 'sheenRoughness', label: 'Sheen roughness', min: 0, max: 1, step: 0.01 },
-  { key: 'transmission', label: 'Transmission', min: 0, max: 1, step: 0.01 },
-  { key: 'thickness', label: 'Thickness', min: 0, max: 3, step: 0.01 },
-  { key: 'attenuationDistance', label: 'Absorb distance', min: 0.05, max: 10, step: 0.05 }
+  { key: 'roughness', label: 'Base roughness', ...CONTROL_RANGES.physical.roughness },
+  { key: 'metalness', label: 'Metalness', ...CONTROL_RANGES.physical.metalness },
+  { key: 'clearcoat', label: 'Clearcoat', ...CONTROL_RANGES.physical.clearcoat },
+  {
+    key: 'clearcoatRoughness',
+    label: 'Coat roughness',
+    ...CONTROL_RANGES.physical.clearcoatRoughness
+  },
+  {
+    key: 'specularIntensity',
+    label: 'Specular',
+    ...CONTROL_RANGES.physical.specularIntensity
+  },
+  { key: 'ior', label: 'IOR', ...CONTROL_RANGES.physical.ior },
+  { key: 'sheen', label: 'Sheen', ...CONTROL_RANGES.physical.sheen },
+  {
+    key: 'sheenRoughness',
+    label: 'Sheen roughness',
+    ...CONTROL_RANGES.physical.sheenRoughness
+  },
+  {
+    key: 'transmission',
+    label: 'Transmission',
+    ...CONTROL_RANGES.physical.transmission
+  },
+  { key: 'thickness', label: 'Thickness', ...CONTROL_RANGES.physical.thickness },
+  {
+    key: 'attenuationDistance',
+    label: 'Absorb distance',
+    ...CONTROL_RANGES.physical.attenuationDistance
+  }
 ];
 
 export class Inspector {
