@@ -5,6 +5,12 @@ app:
     - procedural-texture-lab.project.v1
   maxLayers: 12
   maxGroups: 8
+  maxGroupDepth: 4
+  maxImportedMeshes: 2048
+  maxLayerNameLength: 120
+  maxGroupNameLength: 120
+  maxImportedAssetNameLength: 255
+  maxMeshLabelLength: 160
   historyLimit: 80
   historyCoalesceMs: 350
   autosaveDelayMs: 250
