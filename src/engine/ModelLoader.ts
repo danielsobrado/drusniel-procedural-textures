@@ -9,6 +9,7 @@ const GLB_VERSION = 2;
 const GLB_JSON_CHUNK = 0x4e4f534a;
 const GLB_HEADER_BYTES = 12;
 const GLB_CHUNK_HEADER_BYTES = 8;
+const GLB_ALIGNMENT_BYTES = 4;
 const PREVIEW_SIZE = 2.35;
 const BYTES_PER_MIB = 1024 * 1024;
 const DATA_URI = /^data:/i;
@@ -24,6 +25,10 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+function isContainer(value: unknown): boolean {
+  return Array.isArray(value) || asRecord(value) !== null;
+}
+
 function assertNoExternalUris(value: unknown): void {
   const pending: Array<{ value: unknown; path: string }> = [{ value, path: 'gltf' }];
 
@@ -35,7 +40,9 @@ function assertNoExternalUris(value: unknown): void {
 
     if (Array.isArray(entry.value)) {
       entry.value.forEach((item, index) => {
-        pending.push({ value: item, path: `${entry.path}[${index}]` });
+        if (isContainer(item)) {
+          pending.push({ value: item, path: `${entry.path}[${index}]` });
+        }
       });
       continue;
     }
@@ -52,7 +59,9 @@ function assertNoExternalUris(value: unknown): void {
           `External GLTF resource at ${childPath} is not supported. Use GLB or a self-contained GLTF.`
         );
       }
-      pending.push({ value: child, path: childPath });
+      if (isContainer(child)) {
+        pending.push({ value: child, path: childPath });
+      }
     }
   }
 }
@@ -65,8 +74,19 @@ function parseGltfJson(text: string): unknown {
   }
 }
 
+function decodeGlbJson(bytes: Uint8Array): unknown {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw new Error('The GLB JSON chunk is not valid UTF-8.', { cause: error });
+  }
+
+  return parseGltfJson(text.replace(/\u0000+$/u, '').trim());
+}
+
 function readGlbJson(buffer: ArrayBuffer): unknown {
-  if (buffer.byteLength < GLB_HEADER_BYTES) {
+  if (buffer.byteLength < GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES) {
     throw new Error('The GLB file is truncated.');
   }
 
@@ -84,26 +104,45 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   }
 
   let offset = GLB_HEADER_BYTES;
-  while (offset + GLB_CHUNK_HEADER_BYTES <= buffer.byteLength) {
+  let json: unknown;
+  let chunkIndex = 0;
+
+  while (offset < buffer.byteLength) {
+    if (offset + GLB_CHUNK_HEADER_BYTES > buffer.byteLength) {
+      throw new Error('The GLB container contains trailing incomplete data.');
+    }
+
     const chunkLength = view.getUint32(offset, true);
     const chunkType = view.getUint32(offset + 4, true);
     const chunkStart = offset + GLB_CHUNK_HEADER_BYTES;
     const chunkEnd = chunkStart + chunkLength;
 
+    if (chunkLength % GLB_ALIGNMENT_BYTES !== 0) {
+      throw new Error('The GLB container contains a misaligned chunk.');
+    }
     if (chunkEnd > buffer.byteLength) {
       throw new Error('The GLB container contains a truncated chunk.');
     }
+    if (chunkIndex === 0 && chunkType !== GLB_JSON_CHUNK) {
+      throw new Error('The first GLB chunk must contain JSON.');
+    }
 
     if (chunkType === GLB_JSON_CHUNK) {
-      const bytes = new Uint8Array(buffer, chunkStart, chunkLength);
-      const text = new TextDecoder().decode(bytes).replace(/\u0000+$/u, '').trim();
-      return parseGltfJson(text);
+      if (json !== undefined) {
+        throw new Error('The GLB container contains multiple JSON chunks.');
+      }
+      json = decodeGlbJson(new Uint8Array(buffer, chunkStart, chunkLength));
     }
 
     offset = chunkEnd;
+    chunkIndex += 1;
   }
 
-  throw new Error('The GLB container does not contain a JSON chunk.');
+  if (json === undefined) {
+    throw new Error('The GLB container does not contain a JSON chunk.');
+  }
+
+  return json;
 }
 
 function hasMeshGeometry(root: THREE.Object3D): boolean {
