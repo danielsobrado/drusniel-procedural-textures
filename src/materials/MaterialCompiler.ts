@@ -1,11 +1,14 @@
 import * as THREE from 'three';
-import { MAX_LAYERS } from '../app/constants';
-import type { MaterialGroup, MaterialLayer, PhysicalSettings } from './types';
-import { applyPhysicalSettings } from './PhysicalMaterial';
-import {
-  BAKE_FRAGMENT_GLSL,
-  BAKE_VERTEX_GLSL
-} from '../export/TextureBakeShader';
+import { MAX_LAYERS, RENDERER_CONFIG } from '../app/constants';
+import { BAKE_FRAGMENT_GLSL, BAKE_VERTEX_GLSL } from '../export/TextureBakeShader';
+import type {
+  BlendMode,
+  LayerChannel,
+  LayerKind,
+  MaterialGroup,
+  MaterialLayer,
+  PhysicalSettings
+} from './types';
 import {
   DISPLACED_NORMAL_GLSL,
   FRAGMENT_GLSL,
@@ -17,7 +20,7 @@ import {
   SURFACE_VERTEX_DISPLACEMENT_GLSL
 } from './ProceduralShader';
 
-const LAYER_KIND_CODE: Record<MaterialLayer['kind'], number> = {
+const LAYER_KIND_CODE: Record<LayerKind, number> = {
   base: 0,
   fbm: 1,
   cellular: 2,
@@ -30,7 +33,7 @@ const LAYER_KIND_CODE: Record<MaterialLayer['kind'], number> = {
   sss: 9
 };
 
-const BLEND_MODE_CODE: Record<MaterialLayer['blendMode'], number> = {
+const BLEND_MODE_CODE: Record<BlendMode, number> = {
   normal: 0,
   multiply: 1,
   add: 2,
@@ -38,7 +41,7 @@ const BLEND_MODE_CODE: Record<MaterialLayer['blendMode'], number> = {
   overlay: 4
 };
 
-const CHANNEL_CODE: Record<MaterialLayer['channel'], number> = {
+const CHANNEL_CODE: Record<LayerChannel, number> = {
   surface: 0,
   color: 1,
   roughness: 2,
@@ -47,74 +50,72 @@ const CHANNEL_CODE: Record<MaterialLayer['channel'], number> = {
   sss: 5
 };
 
-function colorArray(): THREE.Color[] {
-  return Array.from({ length: MAX_LAYERS }, () => new THREE.Color('#000000'));
-}
-
-function numberArray(value = 0): number[] {
-  return Array.from({ length: MAX_LAYERS }, () => value);
-}
-
-function groupOpacityFor(groupId: string | null, groups: readonly MaterialGroup[]): number {
-  if (groupId === null) return 1;
-  const byId = new Map(groups.map((group) => [group.id, group]));
-  const visited = new Set<string>();
+function effectiveGroupOpacity(
+  groupId: string | null,
+  groups: ReadonlyMap<string, MaterialGroup>
+): number {
   let opacity = 1;
-  let current = byId.get(groupId);
-  while (current !== undefined) {
-    if (visited.has(current.id)) return 0;
-    visited.add(current.id);
-    if (!current.enabled) return 0;
-    opacity *= current.opacity;
-    current = current.parentId === null ? undefined : byId.get(current.parentId);
+  let currentId = groupId;
+  const visited = new Set<string>();
+
+  while (currentId !== null) {
+    if (visited.has(currentId)) return 0;
+    visited.add(currentId);
+    const group = groups.get(currentId);
+    if (group === undefined || !group.enabled) return 0;
+    opacity *= group.opacity;
+    currentId = group.parentId;
   }
+
   return opacity;
 }
 
-function routesHeight(channel: MaterialLayer['channel']): boolean {
+function routesHeight(channel: LayerChannel): boolean {
   return channel === 'surface' || channel === 'height';
 }
 
 export class MaterialCompiler {
-  public readonly material = new THREE.MeshPhysicalMaterial();
-  public readonly depthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking });
+  public readonly material: THREE.MeshPhysicalMaterial;
+  public readonly depthMaterial = new THREE.MeshDepthMaterial();
   public readonly distanceMaterial = new THREE.MeshDistanceMaterial();
 
-  private readonly uniforms: Record<string, THREE.IUniform> = {
+  private displacementExtentValue = 0;
+  private readonly uniforms = {
     uLabCount: { value: 0 },
-    uLabEnabled: { value: numberArray() },
-    uLabLayerKind: { value: numberArray() },
-    uLabBlendMode: { value: numberArray() },
-    uLabChannel: { value: numberArray() },
-    uLabOpacity: { value: numberArray() },
-    uLabScale: { value: numberArray(1) },
-    uLabStrength: { value: numberArray(1) },
-    uLabSeed: { value: numberArray() },
-    uLabRoughness: { value: numberArray() },
-    uLabDisplacement: { value: numberArray() },
-    uLabGroupOpacity: { value: numberArray(1) },
-    uLabMaskIndex: { value: numberArray(-1) },
-    uLabMaskInvert: { value: numberArray() },
-    uLabMaskStrength: { value: numberArray(1) },
-    uLabColorA: { value: colorArray() },
-    uLabColorB: { value: colorArray() },
+    uLabEnabled: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabLayerKind: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabBlendMode: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabChannel: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabOpacity: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabScale: { value: new Array<number>(MAX_LAYERS).fill(1) },
+    uLabStrength: { value: new Array<number>(MAX_LAYERS).fill(1) },
+    uLabSeed: { value: new Array<number>(MAX_LAYERS).fill(1) },
+    uLabColorA: { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Color()) },
+    uLabColorB: { value: Array.from({ length: MAX_LAYERS }, () => new THREE.Color()) },
+    uLabRoughness: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabDisplacement: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabGroupOpacity: { value: new Array<number>(MAX_LAYERS).fill(1) },
+    uLabMaskIndex: { value: new Array<number>(MAX_LAYERS).fill(-1) },
+    uLabMaskInvert: { value: new Array<number>(MAX_LAYERS).fill(0) },
+    uLabMaskStrength: { value: new Array<number>(MAX_LAYERS).fill(1) },
     uLabHasDisplacement: { value: 0 },
-    uLabNormalStrength: { value: 1 }
+    uLabNormalStrength: { value: RENDERER_CONFIG.displacedNormalStrength }
   };
 
-  private displacementExtentValue = 0;
-
   public constructor() {
-    this.material.color.set('#ffffff');
-    this.material.side = THREE.DoubleSide;
-    this.material.shadowSide = THREE.DoubleSide;
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v3';
-    this.depthMaterial.customProgramCacheKey = () => 'procedural-texture-lab-depth-v3';
-    this.distanceMaterial.customProgramCacheKey = () => 'procedural-texture-lab-distance-v3';
+    this.material = new THREE.MeshPhysicalMaterial({
+      color: 0xffffff,
+      roughness: 0.42,
+      metalness: 0,
+      clearcoat: 0.34,
+      clearcoatRoughness: 0.18,
+      specularIntensity: 0.62,
+      ior: 1.42
+    });
 
     this.configureSurfaceShader();
-    this.configureShadowMaterial(this.depthMaterial);
-    this.configureShadowMaterial(this.distanceMaterial);
+    this.configureShadowShader(this.depthMaterial, 'depth');
+    this.configureShadowShader(this.distanceMaterial, 'distance');
   }
 
   public get displacementExtent(): number {
@@ -127,17 +128,16 @@ export class MaterialCompiler {
     wireframe: boolean
   ): void {
     const count = Math.min(layers.length, MAX_LAYERS);
+    const layerIndexById = new Map(layers.slice(0, count).map((layer, index) => [layer.id, index]));
+    const groupById = new Map(groups.map((group) => [group.id, group]));
     this.uniforms.uLabCount.value = count;
     this.displacementExtentValue = 0;
     let hasDisplacement = false;
 
-    const activeLayers = layers.slice(0, count);
-    const layerIndexById = new Map(activeLayers.map((layer, index) => [layer.id, index]));
-
     for (let index = 0; index < MAX_LAYERS; index += 1) {
-      const layer = activeLayers[index];
+      const layer = layers[index];
       const active = layer !== undefined;
-      const groupOpacity = active ? groupOpacityFor(layer.groupId, groups) : 0;
+      const groupOpacity = active ? effectiveGroupOpacity(layer.groupId, groupById) : 1;
       const maskIndex = active && layer.maskSourceLayerId !== null
         ? layerIndexById.get(layer.maskSourceLayerId) ?? -1
         : -1;
@@ -174,10 +174,6 @@ export class MaterialCompiler {
 
     this.uniforms.uLabHasDisplacement.value = hasDisplacement ? 1 : 0;
     this.material.wireframe = wireframe;
-  }
-
-  public applyPhysical(settings: Readonly<PhysicalSettings>): void {
-    applyPhysicalSettings(this.material, settings);
   }
 
   public createBakeMaterial(settings: Readonly<PhysicalSettings>): THREE.ShaderMaterial {
@@ -237,9 +233,14 @@ export class MaterialCompiler {
         .replace('#include <lights_physical_fragment>', PHYSICAL_LAYER_GLSL)
         .replace('#include <lights_fragment_end>', SSS_LIGHT_GLSL);
     };
+
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v5';
   }
 
-  private configureShadowMaterial(material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial): void {
+  private configureShadowShader(
+    material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial,
+    pass: 'depth' | 'distance'
+  ): void {
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
       shader.vertexShader = shader.vertexShader
@@ -247,5 +248,6 @@ export class MaterialCompiler {
         .replace('#include <begin_vertex>', SHADOW_NORMAL_GLSL)
         .replace('#include <skinning_vertex>', SHADOW_VERTEX_DISPLACEMENT_GLSL);
     };
+    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v2`;
   }
 }
