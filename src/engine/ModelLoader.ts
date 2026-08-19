@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MAX_MODEL_FILE_BYTES } from '../app/constants';
+import type { ImportedMeshTarget } from '../materials/types';
 import { disposeObjectResources } from './ObjectResources';
 
 const SUPPORTED_EXTENSIONS = new Set(['glb', 'gltf']);
@@ -13,6 +14,7 @@ const GLB_ALIGNMENT_BYTES = 4;
 const PREVIEW_SIZE = 2.35;
 const BYTES_PER_MIB = 1024 * 1024;
 const DATA_URI = /^data:/i;
+const REMOTE_URI = /^(?:https?:|file:|blob:|\/\/)/i;
 
 function fileExtension(name: string): string {
   const parts = name.toLowerCase().split('.');
@@ -29,41 +31,31 @@ function isContainer(value: unknown): boolean {
   return Array.isArray(value) || asRecord(value) !== null;
 }
 
-function assertNoExternalUris(value: unknown): void {
-  const pending: Array<{ value: unknown; path: string }> = [{ value, path: 'gltf' }];
-
+function collectExternalUris(value: unknown): string[] {
+  const uris = new Set<string>();
+  const pending: unknown[] = [value];
   while (pending.length > 0) {
-    const entry = pending.pop();
-    if (entry === undefined) {
-      break;
-    }
-
-    if (Array.isArray(entry.value)) {
-      entry.value.forEach((item, index) => {
-        if (isContainer(item)) {
-          pending.push({ value: item, path: `${entry.path}[${index}]` });
-        }
-      });
+    const current = pending.pop();
+    if (Array.isArray(current)) {
+      pending.push(...current.filter(isContainer));
       continue;
     }
-
-    const record = asRecord(entry.value);
+    const record = asRecord(current);
     if (record === null) {
       continue;
     }
-
     for (const [key, child] of Object.entries(record)) {
-      const childPath = `${entry.path}.${key}`;
       if (key === 'uri' && typeof child === 'string' && !DATA_URI.test(child)) {
-        throw new Error(
-          `External GLTF resource at ${childPath} is not supported. Use GLB or a self-contained GLTF.`
-        );
-      }
-      if (isContainer(child)) {
-        pending.push({ value: child, path: childPath });
+        if (REMOTE_URI.test(child)) {
+          throw new Error(`Remote GLTF resource URIs are not supported: ${child}`);
+        }
+        uris.add(child);
+      } else if (isContainer(child)) {
+        pending.push(child);
       }
     }
   }
+  return [...uris];
 }
 
 function parseGltfJson(text: string): unknown {
@@ -99,26 +91,21 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   if (view.getUint32(4, true) !== GLB_VERSION) {
     throw new Error('Only GLB version 2 is supported.');
   }
-
-  const declaredLength = view.getUint32(8, true);
-  if (declaredLength !== buffer.byteLength) {
+  if (view.getUint32(8, true) !== buffer.byteLength) {
     throw new Error('The GLB container length is invalid.');
   }
 
   let offset = GLB_HEADER_BYTES;
   let json: unknown;
   let chunkIndex = 0;
-
   while (offset < buffer.byteLength) {
     if (offset + GLB_CHUNK_HEADER_BYTES > buffer.byteLength) {
       throw new Error('The GLB container contains trailing incomplete data.');
     }
-
     const chunkLength = view.getUint32(offset, true);
     const chunkType = view.getUint32(offset + 4, true);
     const chunkStart = offset + GLB_CHUNK_HEADER_BYTES;
     const chunkEnd = chunkStart + chunkLength;
-
     if (chunkLength % GLB_ALIGNMENT_BYTES !== 0) {
       throw new Error('The GLB container contains a misaligned chunk.');
     }
@@ -128,14 +115,12 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
     if (chunkIndex === 0 && chunkType !== GLB_JSON_CHUNK) {
       throw new Error('The first GLB chunk must contain JSON.');
     }
-
     if (chunkType === GLB_JSON_CHUNK) {
       if (json !== undefined) {
         throw new Error('The GLB container contains multiple JSON chunks.');
       }
       json = decodeGlbJson(new Uint8Array(buffer, chunkStart, chunkLength));
     }
-
     offset = chunkEnd;
     chunkIndex += 1;
   }
@@ -143,65 +128,189 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   if (json === undefined) {
     throw new Error('The GLB container does not contain a JSON chunk.');
   }
-
   return json;
+}
+
+function normalizeResourcePath(value: string): string {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    decoded = value;
+  }
+  return decoded
+    .split(/[?#]/u, 1)[0]
+    ?.replaceAll('\\', '/')
+    .replace(/^\.\//u, '') ?? '';
+}
+
+function basename(value: string): string {
+  return normalizeResourcePath(value).split('/').at(-1) ?? '';
+}
+
+function bundleKeys(file: File): string[] {
+  const relative = file.webkitRelativePath?.trim();
+  return relative === undefined || relative.length === 0
+    ? [file.name]
+    : [relative, file.name];
+}
+
+function createBundleIndex(files: readonly File[]): Map<string, File[]> {
+  const index = new Map<string, File[]>();
+  for (const file of files) {
+    for (const key of bundleKeys(file)) {
+      const normalized = normalizeResourcePath(key);
+      const values = index.get(normalized) ?? [];
+      if (!values.includes(file)) {
+        values.push(file);
+      }
+      index.set(normalized, values);
+    }
+  }
+  return index;
+}
+
+function resolveBundleFile(uri: string, index: ReadonlyMap<string, File[]>): File {
+  const normalized = normalizeResourcePath(uri);
+  const exact = index.get(normalized);
+  if (exact?.length === 1 && exact[0] !== undefined) {
+    return exact[0];
+  }
+  const wantedBasename = basename(normalized);
+  const matches = new Set<File>();
+  for (const [path, files] of index) {
+    if (basename(path) === wantedBasename) {
+      files.forEach((file) => matches.add(file));
+    }
+  }
+  if (matches.size === 1) {
+    return [...matches][0] as File;
+  }
+  if (matches.size > 1) {
+    throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
+  }
+  throw new Error(`GLTF resource "${uri}" is missing. Select the GLTF, BIN and texture files together.`);
+}
+
+function primaryFile(files: readonly File[]): File {
+  const candidates = files.filter((file) => SUPPORTED_EXTENSIONS.has(fileExtension(file.name)));
+  if (candidates.length !== 1 || candidates[0] === undefined) {
+    throw new Error('Select exactly one GLB or GLTF primary file with its optional external resources.');
+  }
+  return candidates[0];
 }
 
 function hasMeshGeometry(root: THREE.Object3D): boolean {
   let found = false;
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) {
-      return;
-    }
-
-    const position = object.geometry.getAttribute('position');
-    if (position !== undefined && position.count > 0) {
-      found = true;
+    if (object instanceof THREE.Mesh) {
+      const position = object.geometry.getAttribute('position');
+      found ||= position !== undefined && position.count > 0;
     }
   });
   return found;
 }
 
+function annotateMeshes(root: THREE.Object3D): void {
+  let meshIndex = 0;
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) {
+      return;
+    }
+    const id = `mesh-${meshIndex}`;
+    const label = object.name.trim().length > 0 ? object.name : `Mesh ${meshIndex + 1}`;
+    object.userData.labMeshId = id;
+    object.userData.labMeshLabel = label;
+    meshIndex += 1;
+  });
+}
+
+export function describeImportedMeshes(root: THREE.Object3D): ImportedMeshTarget[] {
+  const result: ImportedMeshTarget[] = [];
+  root.traverse((object) => {
+    if (!(object instanceof THREE.Mesh)) {
+      return;
+    }
+    const id = object.userData.labMeshId;
+    const label = object.userData.labMeshLabel;
+    if (typeof id === 'string' && typeof label === 'string') {
+      result.push({ id, label: label.slice(0, 160) });
+    }
+  });
+  return result;
+}
+
 export class ModelLoader {
-  private readonly loader = new GLTFLoader();
   private loadSequence = 0;
 
   public cancelPending(): void {
     this.loadSequence += 1;
   }
 
-  public async load(file: File): Promise<THREE.Object3D | null> {
+  public async load(input: File | readonly File[]): Promise<THREE.Object3D | null> {
     const sequence = ++this.loadSequence;
+    const files = input instanceof File ? [input] : [...input];
 
     try {
-      if (file.size > MAX_MODEL_FILE_BYTES) {
+      if (files.length === 0) {
+        throw new Error('No model files were selected.');
+      }
+      const totalBytes = files.reduce((total, file) => total + file.size, 0);
+      if (totalBytes > MAX_MODEL_FILE_BYTES) {
         const limitMiB = Math.round(MAX_MODEL_FILE_BYTES / BYTES_PER_MIB);
-        throw new Error(`Model file exceeds the configured ${limitMiB} MiB limit.`);
+        throw new Error(`Model bundle exceeds the configured ${limitMiB} MiB limit.`);
       }
 
-      const extension = fileExtension(file.name);
-      if (!SUPPORTED_EXTENSIONS.has(extension)) {
-        throw new Error('Only GLB and GLTF files are supported.');
-      }
-
+      const primary = primaryFile(files);
+      const extension = fileExtension(primary.name);
       let payload: ArrayBuffer | string;
+      let gltfJson: unknown;
       if (extension === 'glb') {
-        payload = await file.arrayBuffer();
-        assertNoExternalUris(readGlbJson(payload));
+        payload = await primary.arrayBuffer();
+        gltfJson = readGlbJson(payload);
       } else {
-        const bytes = new Uint8Array(await file.arrayBuffer());
+        const bytes = new Uint8Array(await primary.arrayBuffer());
         payload = decodeUtf8(bytes, 'The GLTF file is not valid UTF-8.');
-        assertNoExternalUris(parseGltfJson(payload));
+        gltfJson = parseGltfJson(payload);
+      }
+
+      const externalUris = collectExternalUris(gltfJson);
+      const bundleIndex = createBundleIndex(files);
+      for (const uri of externalUris) {
+        resolveBundleFile(uri, bundleIndex);
       }
 
       if (sequence !== this.loadSequence) {
         return null;
       }
 
-      const gltf = await this.loader.parseAsync(payload, '');
+      const manager = new THREE.LoadingManager();
+      const objectUrls = new Map<File, string>();
+      manager.setURLModifier((url) => {
+        if (DATA_URI.test(url) || url.startsWith('blob:')) {
+          return url;
+        }
+        const file = resolveBundleFile(url, bundleIndex);
+        let objectUrl = objectUrls.get(file);
+        if (objectUrl === undefined) {
+          objectUrl = URL.createObjectURL(file);
+          objectUrls.set(file, objectUrl);
+        }
+        return objectUrl;
+      });
+
+      const loader = new GLTFLoader(manager);
+      let gltf;
+      try {
+        gltf = await loader.parseAsync(payload, '');
+      } finally {
+        for (const url of objectUrls.values()) {
+          URL.revokeObjectURL(url);
+        }
+      }
 
       try {
-        const normalized = this.normalize(gltf.scene, file.name);
+        const normalized = this.normalize(gltf.scene, primary.name);
         if (sequence !== this.loadSequence) {
           disposeObjectResources(normalized);
           return null;
@@ -221,7 +330,6 @@ export class ModelLoader {
 
   private normalize(root: THREE.Object3D, name: string): THREE.Object3D {
     root.updateMatrixWorld(true);
-
     if (!hasMeshGeometry(root)) {
       throw new Error('The imported model does not contain mesh geometry.');
     }
@@ -230,15 +338,14 @@ export class ModelLoader {
     if (bounds.isEmpty()) {
       throw new Error('The imported model does not contain visible geometry.');
     }
-
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const largestDimension = Math.max(size.x, size.y, size.z);
-
     if (!Number.isFinite(largestDimension) || largestDimension <= 0) {
       throw new Error('The imported model has invalid bounds.');
     }
 
+    annotateMeshes(root);
     const scale = PREVIEW_SIZE / largestDimension;
     const normalized = new THREE.Group();
     normalized.name = name;
