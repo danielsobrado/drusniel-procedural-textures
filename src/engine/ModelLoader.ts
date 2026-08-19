@@ -41,9 +41,7 @@ function collectExternalUris(value: unknown): string[] {
       continue;
     }
     const record = asRecord(current);
-    if (record === null) {
-      continue;
-    }
+    if (record === null) continue;
     for (const [key, child] of Object.entries(record)) {
       if (key === 'uri' && typeof child === 'string' && !DATA_URI.test(child)) {
         if (REMOTE_URI.test(child)) {
@@ -150,7 +148,11 @@ function canonicalBundlePath(value: string): string {
   for (const part of parts) {
     if (part.length === 0 || part === '.') continue;
     if (part === '..') {
-      stack.pop();
+      if (stack.length > 0 && stack.at(-1) !== '..') {
+        stack.pop();
+      } else {
+        stack.push('..');
+      }
       continue;
     }
     stack.push(part);
@@ -185,9 +187,7 @@ function createBundleIndex(files: readonly File[]): Map<string, File[]> {
     for (const key of bundleKeys(file)) {
       const normalized = canonicalBundlePath(key);
       const values = index.get(normalized) ?? [];
-      if (!values.includes(file)) {
-        values.push(file);
-      }
+      if (!values.includes(file)) values.push(file);
       index.set(normalized, values);
     }
   }
@@ -196,9 +196,7 @@ function createBundleIndex(files: readonly File[]): Map<string, File[]> {
 
 function primaryBundlePath(primary: File, index: ReadonlyMap<string, File[]>): string {
   for (const [path, files] of index) {
-    if (files.includes(primary) && path !== primary.name) {
-      return path;
-    }
+    if (files.includes(primary) && path !== primary.name) return path;
   }
   return primary.name;
 }
@@ -212,9 +210,7 @@ function resolveBundleFile(
   const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
   for (const candidate of [primaryRelative, normalized]) {
     const exact = index.get(candidate);
-    if (exact?.length === 1 && exact[0] !== undefined) {
-      return exact[0];
-    }
+    if (exact?.length === 1 && exact[0] !== undefined) return exact[0];
     if ((exact?.length ?? 0) > 1) {
       throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
     }
@@ -223,13 +219,9 @@ function resolveBundleFile(
   const wantedBasename = basename(normalized);
   const matches = new Set<File>();
   for (const [path, files] of index) {
-    if (basename(path) === wantedBasename) {
-      files.forEach((file) => matches.add(file));
-    }
+    if (basename(path) === wantedBasename) files.forEach((file) => matches.add(file));
   }
-  if (matches.size === 1) {
-    return [...matches][0] as File;
-  }
+  if (matches.size === 1) return [...matches][0] as File;
   if (matches.size > 1) {
     throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
   }
@@ -258,9 +250,7 @@ function hasMeshGeometry(root: THREE.Object3D): boolean {
 function annotateMeshes(root: THREE.Object3D): void {
   let meshIndex = 0;
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) {
-      return;
-    }
+    if (!(object instanceof THREE.Mesh)) return;
     const id = `mesh-${meshIndex}`;
     const label = object.name.trim().length > 0 ? object.name : `Mesh ${meshIndex + 1}`;
     object.userData.labMeshId = id;
@@ -272,9 +262,7 @@ function annotateMeshes(root: THREE.Object3D): void {
 export function describeImportedMeshes(root: THREE.Object3D): ImportedMeshTarget[] {
   const result: ImportedMeshTarget[] = [];
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) {
-      return;
-    }
+    if (!(object instanceof THREE.Mesh)) return;
     const id = object.userData.labMeshId;
     const label = object.userData.labMeshLabel;
     if (typeof id === 'string' && typeof label === 'string') {
@@ -296,9 +284,7 @@ export class ModelLoader {
     const files = input instanceof File ? [input] : [...input];
 
     try {
-      if (files.length === 0) {
-        throw new Error('No model files were selected.');
-      }
+      if (files.length === 0) throw new Error('No model files were selected.');
       const totalBytes = files.reduce((total, file) => total + file.size, 0);
       if (totalBytes > MAX_MODEL_FILE_BYTES) {
         const limitMiB = Math.round(MAX_MODEL_FILE_BYTES / BYTES_PER_MIB);
@@ -321,20 +307,14 @@ export class ModelLoader {
       const externalUris = collectExternalUris(gltfJson);
       const bundleIndex = createBundleIndex(files);
       const primaryPath = primaryBundlePath(primary, bundleIndex);
-      for (const uri of externalUris) {
-        resolveBundleFile(uri, bundleIndex, primaryPath);
-      }
+      for (const uri of externalUris) resolveBundleFile(uri, bundleIndex, primaryPath);
 
-      if (sequence !== this.loadSequence) {
-        return null;
-      }
+      if (sequence !== this.loadSequence) return null;
 
       const manager = new THREE.LoadingManager();
       const objectUrls = new Map<File, string>();
       manager.setURLModifier((url) => {
-        if (DATA_URI.test(url) || url.startsWith('blob:')) {
-          return url;
-        }
+        if (DATA_URI.test(url) || url.startsWith('blob:')) return url;
         const file = resolveBundleFile(url, bundleIndex, primaryPath);
         let objectUrl = objectUrls.get(file);
         if (objectUrl === undefined) {
@@ -349,9 +329,7 @@ export class ModelLoader {
       try {
         gltf = await loader.parseAsync(payload, '');
       } finally {
-        for (const url of objectUrls.values()) {
-          URL.revokeObjectURL(url);
-        }
+        for (const url of objectUrls.values()) URL.revokeObjectURL(url);
       }
 
       try {
@@ -366,9 +344,7 @@ export class ModelLoader {
         throw error;
       }
     } catch (error) {
-      if (sequence !== this.loadSequence) {
-        return null;
-      }
+      if (sequence !== this.loadSequence) return null;
       throw error;
     }
   }
