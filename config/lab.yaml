@@ -1,6 +1,8 @@
 app:
   name: Procedural Texture Lab
   storageKey: procedural-texture-lab.project.v2
+  legacyStorageKeys:
+    - procedural-texture-lab.project.v1
   maxLayers: 12
   maxGroups: 8
   historyLimit: 80
