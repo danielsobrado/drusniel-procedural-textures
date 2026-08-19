@@ -11,6 +11,30 @@ interface ObjectCatalogItem extends CatalogItem<ObjectPreset> {
   glyph: string;
 }
 
+interface NumericControlRange {
+  min: number;
+  max: number;
+  step: number;
+}
+
+type LayerControlKey =
+  | 'opacity'
+  | 'scale'
+  | 'strength'
+  | 'seed'
+  | 'roughness'
+  | 'displacement';
+
+type PhysicalControlKey = Exclude<
+  keyof PhysicalSettings,
+  'sheenColor' | 'attenuationColor'
+>;
+
+interface ControlsConfig {
+  layer: Record<LayerControlKey, NumericControlRange>;
+  physical: Record<PhysicalControlKey, NumericControlRange>;
+}
+
 interface UiConfig {
   longPressDelayMs: number;
   longPressMoveTolerancePx: number;
@@ -43,6 +67,7 @@ interface LabConfig {
     maxProjectFileBytes: number;
   };
   ui: UiConfig;
+  controls: ControlsConfig;
   defaults: {
     background: string;
     object: ObjectPreset;
@@ -79,6 +104,29 @@ const BLEND_MODE_IDS: readonly BlendMode[] = [
   'add',
   'screen',
   'overlay'
+];
+
+const LAYER_CONTROL_KEYS: readonly LayerControlKey[] = [
+  'opacity',
+  'scale',
+  'strength',
+  'seed',
+  'roughness',
+  'displacement'
+];
+
+const PHYSICAL_CONTROL_KEYS: readonly PhysicalControlKey[] = [
+  'roughness',
+  'metalness',
+  'clearcoat',
+  'clearcoatRoughness',
+  'specularIntensity',
+  'ior',
+  'sheen',
+  'sheenRoughness',
+  'transmission',
+  'thickness',
+  'attenuationDistance'
 ];
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -140,6 +188,55 @@ function assertExactCatalog<T extends string>(
       throw new Error(`Configuration catalog ${name} is missing ${id}.`);
     }
   }
+}
+
+function parseControlRange(value: unknown, name: string): NumericControlRange {
+  const range = asRecord(value, name);
+  const min = asNumber(range.min, `${name}.min`, -1000000, 1000000);
+  const max = asNumber(range.max, `${name}.max`, -1000000, 1000000);
+  if (max <= min) {
+    throw new Error(`Configuration range ${name} must have max greater than min.`);
+  }
+
+  const step = asNumber(range.step, `${name}.step`, 0.000000001, 1000000);
+  if (step > max - min) {
+    throw new Error(`Configuration range ${name}.step cannot exceed its span.`);
+  }
+
+  return { min, max, step };
+}
+
+function parseControlGroup<T extends string>(
+  value: unknown,
+  keys: readonly T[],
+  name: string
+): Record<T, NumericControlRange> {
+  const group = asRecord(value, name);
+  const supported = new Set<string>(keys);
+
+  for (const key of Object.keys(group)) {
+    if (!supported.has(key)) {
+      throw new Error(`Unsupported configuration control: ${name}.${key}.`);
+    }
+  }
+
+  const result = {} as Record<T, NumericControlRange>;
+  for (const key of keys) {
+    result[key] = parseControlRange(group[key], `${name}.${key}`);
+  }
+  return result;
+}
+
+function parseControls(value: unknown): ControlsConfig {
+  const controls = asRecord(value, 'controls');
+  return {
+    layer: parseControlGroup(controls.layer, LAYER_CONTROL_KEYS, 'controls.layer'),
+    physical: parseControlGroup(
+      controls.physical,
+      PHYSICAL_CONTROL_KEYS,
+      'controls.physical'
+    )
+  };
 }
 
 function parseObjects(value: unknown): ObjectCatalogItem[] {
@@ -210,40 +307,78 @@ function parseBlendModes(value: unknown): CatalogItem<BlendMode>[] {
   return items;
 }
 
-function parsePhysical(value: unknown): PhysicalSettings {
+function parsePhysical(
+  value: unknown,
+  ranges: ControlsConfig['physical']
+): PhysicalSettings {
   const physical = asRecord(value, 'defaults.physical');
   return {
-    roughness: asNumber(physical.roughness, 'defaults.physical.roughness', 0, 1),
-    metalness: asNumber(physical.metalness, 'defaults.physical.metalness', 0, 1),
-    clearcoat: asNumber(physical.clearcoat, 'defaults.physical.clearcoat', 0, 1),
+    roughness: asNumber(
+      physical.roughness,
+      'defaults.physical.roughness',
+      ranges.roughness.min,
+      ranges.roughness.max
+    ),
+    metalness: asNumber(
+      physical.metalness,
+      'defaults.physical.metalness',
+      ranges.metalness.min,
+      ranges.metalness.max
+    ),
+    clearcoat: asNumber(
+      physical.clearcoat,
+      'defaults.physical.clearcoat',
+      ranges.clearcoat.min,
+      ranges.clearcoat.max
+    ),
     clearcoatRoughness: asNumber(
       physical.clearcoatRoughness,
       'defaults.physical.clearcoatRoughness',
-      0,
-      1
+      ranges.clearcoatRoughness.min,
+      ranges.clearcoatRoughness.max
     ),
     specularIntensity: asNumber(
       physical.specularIntensity,
       'defaults.physical.specularIntensity',
-      0,
-      1
+      ranges.specularIntensity.min,
+      ranges.specularIntensity.max
     ),
-    ior: asNumber(physical.ior, 'defaults.physical.ior', 1, 2.333),
-    sheen: asNumber(physical.sheen, 'defaults.physical.sheen', 0, 1),
+    ior: asNumber(
+      physical.ior,
+      'defaults.physical.ior',
+      ranges.ior.min,
+      ranges.ior.max
+    ),
+    sheen: asNumber(
+      physical.sheen,
+      'defaults.physical.sheen',
+      ranges.sheen.min,
+      ranges.sheen.max
+    ),
     sheenRoughness: asNumber(
       physical.sheenRoughness,
       'defaults.physical.sheenRoughness',
-      0,
-      1
+      ranges.sheenRoughness.min,
+      ranges.sheenRoughness.max
     ),
     sheenColor: asColor(physical.sheenColor, 'defaults.physical.sheenColor'),
-    transmission: asNumber(physical.transmission, 'defaults.physical.transmission', 0, 1),
-    thickness: asNumber(physical.thickness, 'defaults.physical.thickness', 0, 100),
+    transmission: asNumber(
+      physical.transmission,
+      'defaults.physical.transmission',
+      ranges.transmission.min,
+      ranges.transmission.max
+    ),
+    thickness: asNumber(
+      physical.thickness,
+      'defaults.physical.thickness',
+      ranges.thickness.min,
+      ranges.thickness.max
+    ),
     attenuationDistance: asNumber(
       physical.attenuationDistance,
       'defaults.physical.attenuationDistance',
-      0.001,
-      1000000
+      ranges.attenuationDistance.min,
+      ranges.attenuationDistance.max
     ),
     attenuationColor: asColor(
       physical.attenuationColor,
@@ -318,6 +453,7 @@ function parseConfig(value: unknown): LabConfig {
   const root = asRecord(value, 'root');
   const app = asRecord(root.app, 'app');
   const defaults = asRecord(root.defaults, 'defaults');
+  const controls = parseControls(root.controls);
   const objects = parseObjects(root.objects);
   const layerKinds = parseLayerKinds(root.layerKinds);
   const blendModes = parseBlendModes(root.blendModes);
@@ -349,10 +485,11 @@ function parseConfig(value: unknown): LabConfig {
       )
     },
     ui: parseUi(root.ui),
+    controls,
     defaults: {
       background: asColor(defaults.background, 'defaults.background'),
       object: defaultObject,
-      physical: parsePhysical(defaults.physical)
+      physical: parsePhysical(defaults.physical, controls.physical)
     },
     objects,
     layerKinds,
