@@ -100,9 +100,11 @@ export class Inspector {
     this.currentState = state;
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
     const nextStructureKey = [
-      state.layers.map((item) => `${item.id}:${item.name}`).join('|'),
-      state.groups.map((item) => `${item.id}:${item.name}`).join('|'),
-      state.importedMeshes.map((item) => `${item.id}:${item.label}`).join('|')
+      `${layer?.id ?? ''}:${layer?.groupId ?? ''}`,
+      state.layers.map((item) => item.id).join('|'),
+      state.groups.map((item) => item.id).join('|'),
+      state.importedMeshes.map((item) => item.id).join('|'),
+      state.environmentAssetName ?? ''
     ].join('::');
 
     if (this.currentLayerId !== layer?.id || this.structureKey !== nextStructureKey) {
@@ -299,9 +301,7 @@ export class Inspector {
 
   private sync(layer: MaterialLayer | null, state: Readonly<ProjectState>): void {
     const title = this.container.querySelector<HTMLElement>('[data-role="inspector-title"]');
-    if (title !== null) {
-      title.textContent = layer?.name ?? 'Material';
-    }
+    if (title !== null) title.textContent = layer?.name ?? 'Material';
 
     if (layer !== null) {
       const fields = this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-field]');
@@ -487,9 +487,7 @@ export class Inspector {
       this.callbacks.onMeshSelect(target.value === '' ? null : target.value);
     } else if (field === 'mesh-assigned' && target instanceof HTMLInputElement) {
       const id = this.currentState?.selectedMeshId;
-      if (id !== null && id !== undefined) {
-        this.callbacks.onMeshAssigned(id, target.checked);
-      }
+      if (id !== null && id !== undefined) this.callbacks.onMeshAssigned(id, target.checked);
     }
   }
 
@@ -513,9 +511,12 @@ export class Inspector {
       return;
     }
     const field = target.dataset.field as NumericLayerKey | undefined;
-    const layer = this.currentLayerId === null ? null : state.layers.find((item) => item.id === this.currentLayerId) ?? null;
-    if (field !== undefined && layer !== null && typeof layer[field] === 'number') {
-      this.restoreNumberPeers(`[data-field="${field}"]`, layer[field]);
+    const layer = this.currentLayerId === null
+      ? null
+      : state.layers.find((item) => item.id === this.currentLayerId) ?? null;
+    const value = field === undefined || layer === null ? undefined : layer[field];
+    if (field !== undefined && typeof value === 'number') {
+      this.restoreNumberPeers(`[data-field="${field}"]`, value);
     }
   }
 
