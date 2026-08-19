@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MAX_MODEL_FILE_BYTES } from '../app/constants';
 import { disposeObjectResources } from './ObjectResources';
 
 const SUPPORTED_EXTENSIONS = new Set(['glb', 'gltf']);
@@ -9,6 +10,7 @@ const GLB_JSON_CHUNK = 0x4e4f534a;
 const GLB_HEADER_BYTES = 12;
 const GLB_CHUNK_HEADER_BYTES = 8;
 const PREVIEW_SIZE = 2.35;
+const BYTES_PER_MIB = 1024 * 1024;
 
 function fileExtension(name: string): string {
   const parts = name.toLowerCase().split('.');
@@ -99,6 +101,11 @@ export class ModelLoader {
     const sequence = ++this.loadSequence;
 
     try {
+      if (file.size > MAX_MODEL_FILE_BYTES) {
+        const limitMiB = Math.round(MAX_MODEL_FILE_BYTES / BYTES_PER_MIB);
+        throw new Error(`Model file exceeds the configured ${limitMiB} MiB limit.`);
+      }
+
       const extension = fileExtension(file.name);
       if (!SUPPORTED_EXTENSIONS.has(extension)) {
         throw new Error('Only GLB and GLTF files are supported.');
