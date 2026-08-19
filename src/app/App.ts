@@ -1,10 +1,12 @@
 import {
   AUTOSAVE_DELAY_MS,
+  EXPORT_CONFIG,
   HISTORY_LIMIT,
   LEGACY_STORAGE_KEYS,
   MAX_MODEL_FILE_BYTES,
   MAX_PROJECT_FILE_BYTES,
   OBJECT_PRESETS,
+  PERFORMANCE_CONFIG,
   STORAGE_KEY,
   UI_CONFIG
 } from './constants';
@@ -14,15 +16,17 @@ import { normalizeImportedAssetName, normalizeProject } from './ProjectFile';
 import { LabRenderer } from '../engine/LabRenderer';
 import { describeImportedMeshes, ModelLoader } from '../engine/ModelLoader';
 import { disposeObjectResources } from '../engine/ObjectResources';
+import type { QualityTier } from '../engine/Quality';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
+import { MATERIAL_PRESETS } from '../materials/presets';
 import type { EnvironmentPreset, LayerKind, ProjectState } from '../materials/types';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
 import { LibraryPanel } from '../ui/LibraryPanel';
 import { RadialMenu, type RadialCommand } from '../ui/RadialMenu';
 import { Shell } from '../ui/Shell';
-import { downloadDataUrl, downloadText } from '../utils/download';
+import { downloadBlob, downloadDataUrl, downloadText } from '../utils/download';
 
 const BYTES_PER_MIB = 1024 * 1024;
 const IMPORT_CACHE_ENTRY_LIMIT = HISTORY_LIMIT + 1;
@@ -66,9 +70,7 @@ function loadInitialProject(): ProjectState {
   for (const storageKey of storageKeys) {
     try {
       const serialized = localStorage.getItem(storageKey);
-      if (serialized === null) {
-        continue;
-      }
+      if (serialized === null) continue;
       const project = normalizeProject(JSON.parse(serialized));
       if (storageKey !== STORAGE_KEY) {
         try {
@@ -108,6 +110,7 @@ export class App {
     this.state = new AppState(loadInitialProject());
     this.renderer = new LabRenderer(this.shell.elements.viewport, this.compiler);
     this.renderer.setMeshSelectionCallback((id) => this.state.selectMesh(id));
+    this.renderer.setPerformanceCallback((stats) => this.shell.setPerformanceStats(stats));
 
     this.library = new LibraryPanel(this.shell.elements.library, {
       onObject: (preset) => this.runSafely(() => this.state.setObjectPreset(preset)),
@@ -147,6 +150,7 @@ export class App {
     this.bindViewportGestures();
     this.bindKeyboard();
     this.syncAll(this.state.snapshot);
+    window.setTimeout(() => this.generatePresetThumbnails(), 0);
   }
 
   private handleStateChange(state: Readonly<ProjectState>, reason: StateChangeReason): void {
@@ -175,6 +179,7 @@ export class App {
     if (reason === 'object' || reason === 'project') {
       this.syncObject(state);
       this.library.render(state);
+      this.generatePresetThumbnails();
     } else if (reason === 'mesh') {
       this.renderer.setMeshAssignments(state.meshAssignments);
       this.renderer.setSelectedMesh(state.selectedMeshId);
@@ -185,7 +190,7 @@ export class App {
       this.renderer.setEnvironment(state.environment, state.environmentAssetName);
     }
 
-    this.shell.setStatus(`${state.layers.length} layers · ${state.groups.length} groups · Physical`);
+    this.shell.setStatus(this.projectStatus(state));
     this.scheduleAutosave(state);
   }
 
@@ -199,7 +204,8 @@ export class App {
     this.library.render(state);
     this.inspector.render(state);
     this.layers.render(state);
-    this.shell.setStatus(`${state.layers.length} layers · ${state.groups.length} groups · Physical`);
+    this.shell.setQualityTier(PERFORMANCE_CONFIG.defaultTier);
+    this.shell.setStatus(this.projectStatus(state));
   }
 
   private syncMaterial(state: Readonly<ProjectState>): void {
@@ -240,12 +246,15 @@ export class App {
     this.shell.onCommand('import-model', () => this.shell.elements.modelInput.click());
     this.shell.onCommand('open-project', () => this.shell.elements.projectInput.click());
     this.shell.onCommand('save-project', () => this.runSafely(() => this.exportProject()));
+    this.shell.onCommand('bake-textures', () => { void this.bakeTextures(); });
+    this.shell.onCommand('export-glb', () => { void this.exportGlb(); });
     this.shell.onCommand('frame', () => this.renderer.frameSelection());
     this.shell.onCommand('wireframe', () => this.state.toggleWireframe());
     this.shell.onCommand('snapshot', () => this.runSafely(() => {
       downloadDataUrl('procedural-texture-preview.png', this.renderer.capturePng());
       this.shell.toast('Preview PNG saved.');
     }));
+    this.shell.onQualityChange((tier) => this.setQualityTier(tier));
   }
 
   private bindFiles(): void {
@@ -358,6 +367,8 @@ export class App {
     else if (command === 'import') this.shell.elements.modelInput.click();
     else if (command === 'open-project') this.shell.elements.projectInput.click();
     else if (command === 'save-project') this.runSafely(() => this.exportProject());
+    else if (command === 'bake-textures') void this.bakeTextures();
+    else if (command === 'export-glb') void this.exportGlb();
     else if (command === 'frame') this.renderer.frameSelection();
     else if (command === 'wireframe') this.state.toggleWireframe();
   }
@@ -405,7 +416,7 @@ export class App {
       this.renderer.setSelectedMesh(this.state.snapshot.selectedMeshId);
       this.activeImportedName = expectedName;
       this.shell.setObjectLabel(expectedName);
-      this.shell.setStatus(`${this.state.snapshot.layers.length} layers · Physical`);
+      this.shell.setStatus(this.projectStatus(this.state.snapshot));
     } catch (error) {
       console.error('Model restore failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
@@ -484,6 +495,63 @@ export class App {
   private exportProject(): void {
     downloadText('procedural-texture-lab.json', JSON.stringify(this.state.snapshot, null, 2));
     this.shell.toast('Project JSON saved.');
+  }
+
+  private async bakeTextures(): Promise<void> {
+    try {
+      const quality = this.renderer.getQualityTierSettings();
+      this.shell.setStatus(`Baking PBR maps · ${quality.bakeResolution}²…`);
+      const maps = await this.renderer.bakeCurrentMaterial(this.state.snapshot.physical);
+      const stem = EXPORT_CONFIG.textureFileStem;
+      downloadBlob(`${stem}-albedo.png`, maps.albedo.blob);
+      downloadBlob(`${stem}-roughness.png`, maps.roughness.blob);
+      downloadBlob(`${stem}-normal.png`, maps.normal.blob);
+      downloadBlob(`${stem}-height.png`, maps.height.blob);
+      downloadBlob(`${stem}-clearcoat.png`, maps.clearcoat.blob);
+      downloadBlob(`${stem}-clearcoat-roughness.png`, maps.clearcoatRoughness.blob);
+      this.shell.toast(`Baked 6 maps at ${maps.resolution}×${maps.resolution}.`);
+    } catch (error) {
+      console.error('Texture bake failed.', error);
+      this.shell.toast(this.errorMessage(error), 'error');
+    } finally {
+      this.shell.setStatus(this.projectStatus(this.state.snapshot));
+    }
+  }
+
+  private async exportGlb(): Promise<void> {
+    try {
+      this.shell.setStatus('Baking material and exporting GLB…');
+      const blob = await this.renderer.exportCurrentGlb(this.state.snapshot.physical);
+      downloadBlob(EXPORT_CONFIG.glbFileName, blob);
+      this.shell.toast(`Exported ${EXPORT_CONFIG.glbFileName} · ${(blob.size / BYTES_PER_MIB).toFixed(1)} MiB`);
+    } catch (error) {
+      console.error('GLB export failed.', error);
+      this.shell.toast(this.errorMessage(error), 'error');
+    } finally {
+      this.shell.setStatus(this.projectStatus(this.state.snapshot));
+    }
+  }
+
+  private setQualityTier(tier: QualityTier): void {
+    this.runSafely(() => {
+      const active = this.renderer.setQualityTier(tier);
+      const settings = PERFORMANCE_CONFIG.tiers[active];
+      this.shell.setQualityTier(tier);
+      const label = tier === 'auto' ? `Auto → ${settings.label}` : settings.label;
+      this.shell.toast(`${label} quality · bake ${settings.bakeResolution}²`);
+    });
+  }
+
+  private generatePresetThumbnails(): void {
+    try {
+      this.library.setThumbnails(this.renderer.generatePresetThumbnails(MATERIAL_PRESETS));
+    } catch (error) {
+      console.warn('Preset thumbnail generation failed.', error);
+    }
+  }
+
+  private projectStatus(state: Readonly<ProjectState>): string {
+    return `${state.layers.length} layers · ${state.groups.length} groups · Physical`;
   }
 
   private scheduleAutosave(state: Readonly<ProjectState>): void {
