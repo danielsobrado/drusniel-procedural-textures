@@ -128,7 +128,13 @@ float labEvaluateDisplacement(vec3 position) {
       break;
     }
 
-    if (uLabEnabled[i] < 0.5) {
+    float layerOpacity = uLabOpacity[i];
+    float layerDisplacement = uLabDisplacement[i];
+    if (
+      uLabEnabled[i] < 0.5 ||
+      layerOpacity <= 0.000001 ||
+      abs(layerDisplacement) <= 0.000001
+    ) {
       continue;
     }
 
@@ -140,7 +146,7 @@ float labEvaluateDisplacement(vec3 position) {
     );
 
     float shaped = labShapeField(field, uLabStrength[i]);
-    displacement += (shaped - 0.5) * uLabDisplacement[i] * uLabOpacity[i];
+    displacement += (shaped - 0.5) * layerDisplacement * layerOpacity;
   }
 
   return displacement;
@@ -186,7 +192,8 @@ LabSurface labEvaluateSurface(vec3 position) {
       break;
     }
 
-    if (uLabEnabled[i] < 0.5) {
+    float layerOpacity = uLabOpacity[i];
+    if (uLabEnabled[i] < 0.5 || layerOpacity <= 0.000001) {
       continue;
     }
 
@@ -200,7 +207,7 @@ LabSurface labEvaluateSurface(vec3 position) {
 
     float shaped = labShapeField(field, uLabStrength[i]);
     float coverage = kind == 0 ? 1.0 : mix(0.55, 1.0, shaped);
-    float opacity = clamp(uLabOpacity[i] * coverage, 0.0, 1.0);
+    float opacity = clamp(layerOpacity * coverage, 0.0, 1.0);
     float roughnessWeight = kind == 0 ? 1.0 : mix(0.45, 1.0, shaped);
     vec3 layerColor = mix(uLabColorA[i], uLabColorB[i], shaped);
 
