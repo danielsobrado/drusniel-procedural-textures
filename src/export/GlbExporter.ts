@@ -82,6 +82,7 @@ export class GlbExporter {
 
   public async export(options: ExportOptions): Promise<Blob> {
     const sourceRoot = sourceForExport(options.root, options.imported);
+    sourceRoot.updateMatrixWorld(true);
     const exportRoot = sourceRoot.clone(true);
     exportRoot.updateMatrixWorld(true);
 
@@ -98,7 +99,6 @@ export class GlbExporter {
 
     try {
       const sourceMeshes = new Map<string, THREE.Mesh>();
-      sourceRoot.updateMatrixWorld(true);
       sourceRoot.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
         const id = object.userData.labMeshId;
