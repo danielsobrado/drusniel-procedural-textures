@@ -11,6 +11,7 @@ const GLB_HEADER_BYTES = 12;
 const GLB_CHUNK_HEADER_BYTES = 8;
 const PREVIEW_SIZE = 2.35;
 const BYTES_PER_MIB = 1024 * 1024;
+const DATA_URI = /^data:/i;
 
 function fileExtension(name: string): string {
   const parts = name.toLowerCase().split('.');
@@ -23,24 +24,36 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function assertNoExternalUris(value: unknown, path = 'gltf'): void {
-  if (Array.isArray(value)) {
-    value.forEach((item, index) => assertNoExternalUris(item, `${path}[${index}]`));
-    return;
-  }
+function assertNoExternalUris(value: unknown): void {
+  const pending: Array<{ value: unknown; path: string }> = [{ value, path: 'gltf' }];
 
-  const record = asRecord(value);
-  if (record === null) {
-    return;
-  }
-
-  for (const [key, child] of Object.entries(record)) {
-    if (key === 'uri' && typeof child === 'string' && !child.startsWith('data:')) {
-      throw new Error(
-        `External GLTF resource at ${path}.uri is not supported. Use GLB or a self-contained GLTF.`
-      );
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (entry === undefined) {
+      break;
     }
-    assertNoExternalUris(child, `${path}.${key}`);
+
+    if (Array.isArray(entry.value)) {
+      entry.value.forEach((item, index) => {
+        pending.push({ value: item, path: `${entry.path}[${index}]` });
+      });
+      continue;
+    }
+
+    const record = asRecord(entry.value);
+    if (record === null) {
+      continue;
+    }
+
+    for (const [key, child] of Object.entries(record)) {
+      const childPath = `${entry.path}.${key}`;
+      if (key === 'uri' && typeof child === 'string' && !DATA_URI.test(child)) {
+        throw new Error(
+          `External GLTF resource at ${childPath} is not supported. Use GLB or a self-contained GLTF.`
+        );
+      }
+      pending.push({ value: child, path: childPath });
+    }
   }
 }
 
@@ -96,11 +109,12 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
 function hasMeshGeometry(root: THREE.Object3D): boolean {
   let found = false;
   root.traverse((object) => {
-    if (
-      object instanceof THREE.Mesh &&
-      object.geometry.getAttribute('position')?.count !== undefined &&
-      object.geometry.getAttribute('position').count > 0
-    ) {
+    if (!(object instanceof THREE.Mesh)) {
+      return;
+    }
+
+    const position = object.geometry.getAttribute('position');
+    if (position !== undefined && position.count > 0) {
       found = true;
     }
   });
