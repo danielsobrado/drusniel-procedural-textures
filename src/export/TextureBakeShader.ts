@@ -1,6 +1,8 @@
 import { FRAGMENT_GLSL, SHARED_GLSL } from '../materials/ProceduralShader';
 
 export const BAKE_VERTEX_GLSL = /* glsl */ `
+uniform mat3 uBakeWorldNormalMatrix;
+
 varying vec3 vBakePosition;
 varying vec3 vBakeWorldPosition;
 varying vec3 vBakeWorldNormal;
@@ -9,7 +11,7 @@ void main() {
   vec4 worldPosition = modelMatrix * vec4(position, 1.0);
   vBakePosition = worldPosition.xyz;
   vBakeWorldPosition = worldPosition.xyz;
-  vBakeWorldNormal = normalize(normalMatrix * normal);
+  vBakeWorldNormal = normalize(uBakeWorldNormalMatrix * normal);
   gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
