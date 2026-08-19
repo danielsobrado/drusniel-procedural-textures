@@ -5,6 +5,8 @@ app:
   historyLimit: 80
   historyCoalesceMs: 350
   autosaveDelayMs: 250
+  maxModelFileBytes: 134217728
+  maxProjectFileBytes: 2097152
 
 ui:
   longPressDelayMs: 520
