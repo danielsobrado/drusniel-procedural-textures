@@ -33,6 +33,7 @@ export interface BakeMeshSnapshot {
   readonly geometry: THREE.BufferGeometry;
   readonly matrixWorld: THREE.Matrix4;
   readonly name: string;
+  readonly generatedUvAtlas: boolean;
 }
 
 const CHANNEL_MODE: Record<BakeChannel, number> = {
@@ -46,6 +47,7 @@ const CHANNEL_MODE: Record<BakeChannel, number> = {
 
 const UV_EPSILON = 1e-5;
 const UV_OVERLAP_GRID_SIZE = 256;
+const TRIANGLE_ATLAS_PADDING = 0.14;
 
 function needsDeformedGeometry(mesh: THREE.Mesh): boolean {
   return mesh instanceof THREE.SkinnedMesh ||
@@ -169,7 +171,41 @@ function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void 
   }
 }
 
-function createBakeGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
+function createTriangleAtlas(source: THREE.BufferGeometry): THREE.BufferGeometry {
+  const atlas = source.getIndex() === null ? source.clone() : source.toNonIndexed();
+  const position = atlas.getAttribute('position');
+  if (position === undefined || position.count < 3) {
+    atlas.dispose();
+    throw new Error('Cannot create a bake UV atlas for geometry without triangles.');
+  }
+
+  const triangleCount = Math.floor(position.count / 3);
+  const grid = Math.ceil(Math.sqrt(triangleCount));
+  const cell = 1 / grid;
+  const padding = TRIANGLE_ATLAS_PADDING * cell;
+  const uvs = new Float32Array(position.count * 2);
+
+  for (let triangle = 0; triangle < triangleCount; triangle += 1) {
+    const x = triangle % grid;
+    const y = Math.floor(triangle / grid);
+    const left = x * cell + padding;
+    const right = (x + 1) * cell - padding;
+    const bottom = y * cell + padding;
+    const top = (y + 1) * cell - padding;
+    const offset = triangle * 6;
+    uvs[offset] = left;
+    uvs[offset + 1] = bottom;
+    uvs[offset + 2] = right;
+    uvs[offset + 3] = bottom;
+    uvs[offset + 4] = left;
+    uvs[offset + 5] = top;
+  }
+
+  atlas.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  return atlas;
+}
+
+function createBakeGeometry(mesh: THREE.Mesh): { geometry: THREE.BufferGeometry; generatedUvAtlas: boolean } {
   if (mesh instanceof THREE.InstancedMesh) {
     throw new Error('Instanced meshes must be converted to regular meshes before texture baking.');
   }
@@ -179,7 +215,7 @@ function createBakeGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
     throw new Error(`Mesh "${mesh.name || 'Unnamed mesh'}" has no positions to bake.`);
   }
 
-  const geometry = mesh.geometry.clone();
+  let geometry = mesh.geometry.clone();
   if (needsDeformedGeometry(mesh)) {
     const vertex = new THREE.Vector3();
     const positions = new Float32Array(position.count * 3);
@@ -194,11 +230,21 @@ function createBakeGeometry(mesh: THREE.Mesh): THREE.BufferGeometry {
     geometry.deleteAttribute('normal');
   }
 
-  if (geometry.getAttribute('normal') === undefined) {
-    geometry.computeVertexNormals();
+  if (geometry.getAttribute('normal') === undefined) geometry.computeVertexNormals();
+
+  try {
+    validateBakeUv(geometry, mesh.name || 'Unnamed mesh');
+    return { geometry, generatedUvAtlas: false };
+  } catch (error) {
+    if (mesh.userData.labProceduralPreview !== true) {
+      geometry.dispose();
+      throw error;
+    }
+    const atlas = createTriangleAtlas(geometry);
+    geometry.dispose();
+    validateBakeUv(atlas, mesh.name || 'Procedural mesh');
+    return { geometry: atlas, generatedUvAtlas: true };
   }
-  validateBakeUv(geometry, mesh.name || 'Unnamed mesh');
-  return geometry;
 }
 
 function flipRows(source: Uint8Array, width: number, height: number): Uint8ClampedArray {
@@ -226,14 +272,9 @@ function dilateTransparentPixels(
       for (let x = 0; x < width; x += 1) {
         const offset = (y * width + x) * 4;
         if ((current[offset + 3] ?? 0) !== 0) continue;
-
         const neighbors = [
-          [x - 1, y],
-          [x + 1, y],
-          [x, y - 1],
-          [x, y + 1]
+          [x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]
         ] as const;
-
         for (const [neighborX, neighborY] of neighbors) {
           if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) continue;
           const neighborOffset = (neighborY * width + neighborX) * 4;
@@ -247,7 +288,6 @@ function dilateTransparentPixels(
         }
       }
     }
-
     current = next;
     if (!changed) break;
   }
@@ -282,10 +322,12 @@ export class TextureBaker {
 
   public snapshotMesh(source: THREE.Mesh): BakeMeshSnapshot {
     source.updateMatrixWorld(true);
+    const bake = createBakeGeometry(source);
     return {
-      geometry: createBakeGeometry(source),
+      geometry: bake.geometry,
       matrixWorld: source.matrixWorld.clone(),
-      name: source.name || 'Unnamed mesh'
+      name: source.name || 'Unnamed mesh',
+      generatedUvAtlas: bake.generatedUvAtlas
     };
   }
 
@@ -301,7 +343,14 @@ export class TextureBaker {
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
-      return await this.bakeSnapshot(snapshot, settings, resolution, material, true);
+      const common = await this.renderPbrSnapshot(snapshot, settings, resolution, material);
+      const context = this.createContext(snapshot, material, resolution);
+      try {
+        const height = await this.renderChannel(context.target, material, 'height', resolution);
+        return { ...common, height };
+      } finally {
+        this.disposeContext(context);
+      }
     } finally {
       material.dispose();
       this.disposeSnapshot(snapshot);
@@ -316,7 +365,7 @@ export class TextureBaker {
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
-      return await this.bakeSnapshot(snapshot, settings, resolution, material, false);
+      return await this.renderPbrSnapshot(snapshot, settings, resolution, material);
     } finally {
       material.dispose();
       this.disposeSnapshot(snapshot);
@@ -329,30 +378,15 @@ export class TextureBaker {
     resolution: number,
     material: THREE.ShaderMaterial
   ): Promise<BakedPbrTextureSet> {
-    return this.bakeSnapshot(snapshot, settings, resolution, material, false);
+    return this.renderPbrSnapshot(snapshot, settings, resolution, material);
   }
 
-  private async bakeSnapshot(
+  private async renderPbrSnapshot(
     snapshot: BakeMeshSnapshot,
     settings: Readonly<PhysicalSettings>,
     resolution: number,
-    material: THREE.ShaderMaterial,
-    includeHeight: true
-  ): Promise<BakedTextureSet>;
-  private async bakeSnapshot(
-    snapshot: BakeMeshSnapshot,
-    settings: Readonly<PhysicalSettings>,
-    resolution: number,
-    material: THREE.ShaderMaterial,
-    includeHeight: false
-  ): Promise<BakedPbrTextureSet>;
-  private async bakeSnapshot(
-    snapshot: BakeMeshSnapshot,
-    settings: Readonly<PhysicalSettings>,
-    resolution: number,
-    material: THREE.ShaderMaterial,
-    includeHeight: boolean
-  ): Promise<BakedTextureSet | BakedPbrTextureSet> {
+    material: THREE.ShaderMaterial
+  ): Promise<BakedPbrTextureSet> {
     if (!Number.isInteger(resolution) || resolution < 128 || resolution > 4096) {
       throw new Error('Bake resolution must be an integer between 128 and 4096 pixels.');
     }
@@ -376,10 +410,7 @@ export class TextureBaker {
         'clearcoat-roughness',
         resolution
       );
-      const common = { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness };
-      if (!includeHeight) return common;
-      const height = await this.renderChannel(context.target, material, 'height', resolution);
-      return { ...common, height };
+      return { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness };
     } finally {
       this.disposeContext(context);
     }
@@ -417,9 +448,7 @@ export class TextureBaker {
     resolution: number
   ): Promise<BakedTexture> {
     const modeUniform = material.uniforms.uBakeMode;
-    if (modeUniform === undefined) {
-      throw new Error('Bake shader is missing its output mode uniform.');
-    }
+    if (modeUniform === undefined) throw new Error('Bake shader is missing its output mode uniform.');
     modeUniform.value = CHANNEL_MODE[channel];
 
     const previousTarget = this.renderer.getRenderTarget();
