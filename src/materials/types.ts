@@ -111,6 +111,7 @@ export interface MaterialPreset {
   id: string;
   name: string;
   description: string;
+  tags: string[];
   physical?: Partial<PhysicalSettings>;
   groups?: MaterialGroup[];
   layers: MaterialLayer[];
