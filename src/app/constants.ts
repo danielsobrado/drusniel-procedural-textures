@@ -10,6 +10,7 @@ export const AUTOSAVE_DELAY_MS = labConfig.app.autosaveDelayMs;
 export const MAX_MODEL_FILE_BYTES = labConfig.app.maxModelFileBytes;
 export const MAX_PROJECT_FILE_BYTES = labConfig.app.maxProjectFileBytes;
 export const UI_CONFIG = labConfig.ui;
+export const CONTROL_RANGES = labConfig.controls;
 
 export const OBJECT_PRESETS: ReadonlyArray<{ id: ObjectPreset; label: string; glyph: string }> =
   labConfig.objects;
