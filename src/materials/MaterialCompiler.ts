@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import { MAX_LAYERS, RENDERER_CONFIG } from '../app/constants';
+import { BAKE_FRAGMENT_GLSL, BAKE_VERTEX_GLSL } from '../export/TextureBakeShader';
 import type {
   BlendMode,
   LayerChannel,
   LayerKind,
   MaterialGroup,
-  MaterialLayer
+  MaterialLayer,
+  PhysicalSettings
 } from './types';
 import {
   DISPLACED_NORMAL_GLSL,
@@ -179,6 +181,28 @@ export class MaterialCompiler {
 
     this.uniforms.uLabHasDisplacement.value = hasDisplacement ? 1 : 0;
     this.material.wireframe = wireframe;
+  }
+
+  public createBakeMaterial(settings: Readonly<PhysicalSettings>): THREE.ShaderMaterial {
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        ...this.uniforms,
+        uBakeMode: { value: 0 },
+        uBakeBaseRoughness: { value: settings.roughness },
+        uBakeBaseClearcoat: { value: settings.clearcoat },
+        uBakeBaseClearcoatRoughness: { value: settings.clearcoatRoughness },
+        uBakeHeightExtent: { value: Math.max(this.displacementExtentValue, 0.000001) }
+      },
+      vertexShader: BAKE_VERTEX_GLSL,
+      fragmentShader: BAKE_FRAGMENT_GLSL,
+      side: THREE.DoubleSide,
+      depthTest: false,
+      depthWrite: false,
+      transparent: true,
+      toneMapped: false
+    });
+    material.name = 'Procedural Texture Lab Bake';
+    return material;
   }
 
   public dispose(): void {
