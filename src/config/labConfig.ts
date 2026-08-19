@@ -39,6 +39,8 @@ interface LabConfig {
     historyLimit: number;
     historyCoalesceMs: number;
     autosaveDelayMs: number;
+    maxModelFileBytes: number;
+    maxProjectFileBytes: number;
   };
   ui: UiConfig;
   defaults: {
@@ -332,7 +334,19 @@ function parseConfig(value: unknown): LabConfig {
       maxLayers: asInteger(app.maxLayers, 'app.maxLayers', 1, 32),
       historyLimit: asInteger(app.historyLimit, 'app.historyLimit', 1, 1000),
       historyCoalesceMs: asInteger(app.historyCoalesceMs, 'app.historyCoalesceMs', 0, 5000),
-      autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000)
+      autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000),
+      maxModelFileBytes: asInteger(
+        app.maxModelFileBytes,
+        'app.maxModelFileBytes',
+        1048576,
+        2147483648
+      ),
+      maxProjectFileBytes: asInteger(
+        app.maxProjectFileBytes,
+        'app.maxProjectFileBytes',
+        1024,
+        67108864
+      )
     },
     ui: parseUi(root.ui),
     defaults: {
