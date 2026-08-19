@@ -77,6 +77,7 @@ export class LabRenderer {
 
   public setPrimitive(preset: ObjectPreset): void {
     const mesh = createProceduralMesh(preset, this.compiler.material);
+    this.applyProceduralMeshSettings(mesh);
     this.replaceRoot(mesh);
   }
 
@@ -96,8 +97,7 @@ export class LabRenderer {
       }
 
       object.material = this.compiler.material;
-      object.castShadow = true;
-      object.receiveShadow = true;
+      this.applyProceduralMeshSettings(object);
     });
 
     disposeMaterialResources(replacedMaterials);
@@ -164,9 +164,16 @@ export class LabRenderer {
     this.resizeObserver.disconnect();
     this.controls.dispose();
     this.disposeRoot(this.currentRoot);
-    this.compiler.material.dispose();
+    this.compiler.dispose();
     this.environmentTarget.dispose();
     this.renderer.dispose();
+  }
+
+  private applyProceduralMeshSettings(mesh: THREE.Mesh): void {
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.customDepthMaterial = this.compiler.depthMaterial;
+    mesh.customDistanceMaterial = this.compiler.distanceMaterial;
   }
 
   private addStudioLighting(): void {
