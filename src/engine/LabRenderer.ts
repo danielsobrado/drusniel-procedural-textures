@@ -141,9 +141,7 @@ export class LabRenderer {
   }
 
   public setQualityTier(tier: QualityTier): FixedQualityTier {
-    if (!isQualityTier(tier)) {
-      throw new Error(`Unsupported quality tier: ${String(tier)}.`);
-    }
+    if (!isQualityTier(tier)) throw new Error(`Unsupported quality tier: ${String(tier)}.`);
     this.requestedQualityTier = tier;
     const active = this.resolveQualityTier(tier);
     const settings = PERFORMANCE_CONFIG.tiers[active];
@@ -241,7 +239,9 @@ export class LabRenderer {
   }
 
   public async loadEnvironmentHdr(file: File): Promise<boolean> {
-    return this.environments.loadHdr(file);
+    const loaded = await this.environments.loadHdr(file);
+    if (loaded) this.setEnvironment('custom', file.name);
+    return loaded;
   }
 
   public setBackground(color: string): void {
@@ -296,9 +296,7 @@ export class LabRenderer {
   }
 
   public async exportCurrentGlb(settings: Readonly<PhysicalSettings>): Promise<Blob> {
-    if (this.currentRoot === null) {
-      throw new Error('There is no preview object to export.');
-    }
+    if (this.currentRoot === null) throw new Error('There is no preview object to export.');
     const quality = this.getQualityTierSettings();
     const bakeResolution = this.effectiveTextureResolution(quality.bakeResolution);
     const maxTextureSize = this.effectiveTextureResolution(quality.maxExportTextureSize);
@@ -309,9 +307,7 @@ export class LabRenderer {
     const renderer = new PresetThumbnailRenderer(this.renderer, DEFAULT_PHYSICAL);
     const thumbnails = new Map<string, string>();
     try {
-      for (const preset of presets) {
-        thumbnails.set(preset.id, renderer.render(preset));
-      }
+      for (const preset of presets) thumbnails.set(preset.id, renderer.render(preset));
       return thumbnails;
     } finally {
       renderer.dispose();
@@ -356,9 +352,7 @@ export class LabRenderer {
         firstAssigned = object;
       }
     });
-    if (firstAssigned === null) {
-      throw new Error('No mesh currently uses the lab material.');
-    }
+    if (firstAssigned === null) throw new Error('No mesh currently uses the lab material.');
     return firstAssigned;
   }
 
@@ -436,6 +430,8 @@ export class LabRenderer {
       for (const item of materialSet(original.material)) {
         if (!visibleMeshMaterials.has(item)) hiddenOriginals.add(item);
       }
+      if (original.customDepthMaterial !== undefined) hiddenOriginals.add(original.customDepthMaterial);
+      if (original.customDistanceMaterial !== undefined) hiddenOriginals.add(original.customDistanceMaterial);
     }
     disposeMaterialResources(hiddenOriginals, new Set([...visibleMeshMaterials, ...retainedNonMesh]));
 
