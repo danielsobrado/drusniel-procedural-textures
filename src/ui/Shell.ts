@@ -82,7 +82,7 @@ export class Shell {
           data-role="model-input"
           type="file"
           multiple
-          accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,.ktx2,.basis,model/gltf-binary,model/gltf+json,image/*,application/octet-stream"
+          accept=".glb,.gltf,.bin,.png,.jpg,.jpeg,.webp,model/gltf-binary,model/gltf+json,image/*,application/octet-stream"
         >
         <input class="visually-hidden" data-role="project-input" type="file" accept=".json,application/json">
         <input class="visually-hidden" data-role="environment-input" type="file" accept=".hdr,image/vnd.radiance">
