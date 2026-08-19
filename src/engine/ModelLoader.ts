@@ -74,14 +74,16 @@ function parseGltfJson(text: string): unknown {
   }
 }
 
-function decodeGlbJson(bytes: Uint8Array): unknown {
-  let text: string;
+function decodeUtf8(bytes: Uint8Array, errorMessage: string): string {
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch (error) {
-    throw new Error('The GLB JSON chunk is not valid UTF-8.', { cause: error });
+    throw new Error(errorMessage, { cause: error });
   }
+}
 
+function decodeGlbJson(bytes: Uint8Array): unknown {
+  const text = decodeUtf8(bytes, 'The GLB JSON chunk is not valid UTF-8.');
   return parseGltfJson(text.replace(/\u0000+$/u, '').trim());
 }
 
@@ -187,7 +189,8 @@ export class ModelLoader {
         payload = await file.arrayBuffer();
         assertNoExternalUris(readGlbJson(payload));
       } else {
-        payload = await file.text();
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        payload = decodeUtf8(bytes, 'The GLTF file is not valid UTF-8.');
         assertNoExternalUris(parseGltfJson(payload));
       }
 
