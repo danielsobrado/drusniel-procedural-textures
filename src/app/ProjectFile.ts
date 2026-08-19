@@ -95,7 +95,7 @@ function asId(value: unknown, name: string): string {
   return id;
 }
 
-function asObjectPreset(value: unknown): ObjectPreset {
+export function normalizeObjectPreset(value: unknown): ObjectPreset {
   if (typeof value !== 'string' || !OBJECT_IDS.has(value as ObjectPreset)) {
     throw new Error('Project contains an unsupported preview object.');
   }
@@ -128,7 +128,11 @@ export function normalizeImportedAssetName(value: unknown): string {
   );
 }
 
-function normalizeLayer(value: unknown, index: number): MaterialLayer {
+export function normalizeBackgroundColor(value: unknown): string {
+  return asColor(value, 'Background color');
+}
+
+export function normalizeMaterialLayer(value: unknown, index: number): MaterialLayer {
   const layer = asRecord(value, `Layer ${index + 1}`);
   return {
     id: asId(layer.id, `Layer ${index + 1} id`),
@@ -171,7 +175,7 @@ function normalizeLayer(value: unknown, index: number): MaterialLayer {
   };
 }
 
-function normalizePhysical(value: unknown): PhysicalSettings {
+export function normalizePhysicalSettings(value: unknown): PhysicalSettings {
   const input = value === undefined
     ? {}
     : asRecord(value, 'Physical material settings');
@@ -250,7 +254,7 @@ export function normalizeProject(value: unknown): ProjectState {
     throw new Error(`Project exceeds the ${MAX_LAYERS} layer limit.`);
   }
 
-  const layers = project.layers.map(normalizeLayer);
+  const layers = project.layers.map(normalizeMaterialLayer);
   const ids = new Set(layers.map((layer) => layer.id));
   if (ids.size !== layers.length) {
     throw new Error('Project contains duplicate layer ids.');
@@ -268,12 +272,12 @@ export function normalizeProject(value: unknown): ProjectState {
 
   return {
     version: 1,
-    selectedObject: asObjectPreset(project.selectedObject),
+    selectedObject: normalizeObjectPreset(project.selectedObject),
     selectedLayerId,
     importedAssetName,
-    background: asColor(project.background, 'Background color'),
+    background: normalizeBackgroundColor(project.background),
     wireframe: asBoolean(project.wireframe, 'Wireframe'),
-    physical: normalizePhysical(project.physical),
+    physical: normalizePhysicalSettings(project.physical),
     layers
   };
 }
