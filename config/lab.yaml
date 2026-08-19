@@ -13,7 +13,7 @@ ui:
   longPressDelayMs: 520
   longPressMoveTolerancePx: 12
   radialClickMoveTolerancePx: 6
-  radialRadiusPx: 104
+  radialRadiusPx: 116
   radialEdgePaddingPx: 58
   toastInfoMs: 2600
   toastErrorMs: 4200
