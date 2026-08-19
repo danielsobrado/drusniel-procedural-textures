@@ -162,7 +162,9 @@ export class App {
     }
 
     if (reason === 'background' || reason === 'project') this.renderer.setBackground(state.background);
-    if (reason === 'environment' || reason === 'project') this.renderer.setEnvironment(state.environment);
+    if (reason === 'environment' || reason === 'project') {
+      this.renderer.setEnvironment(state.environment, state.environmentAssetName);
+    }
 
     this.shell.setStatus(`${state.layers.length} layers · ${state.groups.length} groups · Physical`);
     this.scheduleAutosave(state);
@@ -171,7 +173,7 @@ export class App {
   private syncAll(state: Readonly<ProjectState>): void {
     this.syncMaterial(state);
     this.renderer.setBackground(state.background);
-    this.renderer.setEnvironment(state.environment);
+    this.renderer.setEnvironment(state.environment, state.environmentAssetName);
     this.syncObject(state);
     this.renderer.setMeshAssignments(state.meshAssignments);
     this.renderer.setSelectedMesh(state.selectedMeshId);
@@ -404,11 +406,15 @@ export class App {
       if (sequence !== this.environmentLoadSequence) return;
       console.error('HDR environment import failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
-      this.renderer.setEnvironment(this.state.snapshot.environment);
+      this.renderer.setEnvironment(
+        this.state.snapshot.environment,
+        this.state.snapshot.environmentAssetName
+      );
     }
   }
 
   private selectEnvironment(environment: EnvironmentPreset): void {
+    this.environmentLoadSequence += 1;
     if (environment === 'custom' && this.state.snapshot.environmentAssetName === null) {
       this.shell.elements.environmentInput.click();
       return;
@@ -421,6 +427,7 @@ export class App {
 
   private async importProject(file: File): Promise<void> {
     const sequence = ++this.projectImportSequence;
+    this.environmentLoadSequence += 1;
     this.modelLoader.cancelPending();
     try {
       if (file.size > MAX_PROJECT_FILE_BYTES) {
