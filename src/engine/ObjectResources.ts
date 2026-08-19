@@ -52,6 +52,18 @@ export function disposeObjectGeometries(root: THREE.Object3D): void {
   geometries.forEach((geometry) => geometry.dispose());
 }
 
+export function disposeObjectSkeletons(root: THREE.Object3D): void {
+  const skeletons = new Set<THREE.Skeleton>();
+
+  root.traverse((object) => {
+    if (object instanceof THREE.SkinnedMesh) {
+      skeletons.add(object.skeleton);
+    }
+  });
+
+  skeletons.forEach((skeleton) => skeleton.dispose());
+}
+
 export function disposeMaterialResources(materials: Iterable<THREE.Material>): void {
   const textures = new Set<THREE.Texture>();
 
@@ -83,5 +95,6 @@ export function disposeObjectResources(
   }
 
   disposeObjectGeometries(root);
+  disposeObjectSkeletons(root);
   disposeMaterialResources(materials);
 }
