@@ -151,12 +151,13 @@ export class LabRenderer {
   }
 
   public setEnvironment(preset: EnvironmentPreset, customName: string | null = null): void {
+    this.environments.cancelPending();
     const profile = this.environments.apply(this.scene, preset, customName);
     this.applyLightProfile(profile);
   }
 
-  public async loadEnvironmentHdr(file: File): Promise<void> {
-    await this.environments.loadHdr(file);
+  public async loadEnvironmentHdr(file: File): Promise<boolean> {
+    return this.environments.loadHdr(file);
   }
 
   public setBackground(color: string): void {
