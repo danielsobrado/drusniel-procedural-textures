@@ -22,12 +22,16 @@ export function installLongPressContextMenu(): () => void {
       return;
     }
 
+    if (!event.isPrimary || active !== null) {
+      cancel();
+      return;
+    }
+
     const target = event.target instanceof Element ? event.target.closest('.viewport') : null;
     if (!(target instanceof HTMLElement)) {
       return;
     }
 
-    cancel();
     const startX = event.clientX;
     const startY = event.clientY;
     const pointerId = event.pointerId;
@@ -60,16 +64,22 @@ export function installLongPressContextMenu(): () => void {
     }
   };
 
+  const onPointerEnd = (event: PointerEvent): void => {
+    if (active?.pointerId === event.pointerId) {
+      cancel();
+    }
+  };
+
   document.addEventListener('pointerdown', onPointerDown, { passive: true });
   document.addEventListener('pointermove', onPointerMove, { passive: true });
-  document.addEventListener('pointerup', cancel, { passive: true });
-  document.addEventListener('pointercancel', cancel, { passive: true });
+  document.addEventListener('pointerup', onPointerEnd, { passive: true });
+  document.addEventListener('pointercancel', onPointerEnd, { passive: true });
 
   return () => {
     cancel();
     document.removeEventListener('pointerdown', onPointerDown);
     document.removeEventListener('pointermove', onPointerMove);
-    document.removeEventListener('pointerup', cancel);
-    document.removeEventListener('pointercancel', cancel);
+    document.removeEventListener('pointerup', onPointerEnd);
+    document.removeEventListener('pointercancel', onPointerEnd);
   };
 }
