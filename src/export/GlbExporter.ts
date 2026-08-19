@@ -85,10 +85,11 @@ export class GlbExporter {
     const exportRoot = sourceRoot.clone(true);
     exportRoot.updateMatrixWorld(true);
 
+    const physical = clonePhysical(options.physical);
     const snapshot: ExportSnapshot = {
-      physical: clonePhysical(options.physical),
+      physical,
       meshAssignments: cloneAssignments(options.meshAssignments),
-      bakeMaterial: options.compiler.createBakeMaterial(options.physical),
+      bakeMaterial: options.compiler.createBakeMaterial(physical),
       displacementExtent: options.compiler.displacementExtent
     };
 
@@ -97,6 +98,7 @@ export class GlbExporter {
 
     try {
       const sourceMeshes = new Map<string, THREE.Mesh>();
+      sourceRoot.updateMatrixWorld(true);
       sourceRoot.traverse((object) => {
         if (!(object instanceof THREE.Mesh)) return;
         const id = object.userData.labMeshId;
