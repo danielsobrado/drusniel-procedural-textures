@@ -6,11 +6,18 @@ export const SHARED_GLSL = /* glsl */ `
 uniform int uLabCount;
 uniform float uLabEnabled[LAB_MAX_LAYERS];
 uniform int uLabLayerKind[LAB_MAX_LAYERS];
+uniform int uLabChannel[LAB_MAX_LAYERS];
 uniform float uLabOpacity[LAB_MAX_LAYERS];
 uniform float uLabScale[LAB_MAX_LAYERS];
 uniform float uLabStrength[LAB_MAX_LAYERS];
 uniform float uLabSeed[LAB_MAX_LAYERS];
 uniform float uLabDisplacement[LAB_MAX_LAYERS];
+uniform float uLabGroupOpacity[LAB_MAX_LAYERS];
+uniform int uLabMaskIndex[LAB_MAX_LAYERS];
+uniform float uLabMaskInvert[LAB_MAX_LAYERS];
+uniform float uLabMaskStrength[LAB_MAX_LAYERS];
+uniform float uLabHasDisplacement;
+uniform float uLabNormalStrength;
 
 float labHash31(vec3 p) {
   p = fract(p * 0.1031);
@@ -45,20 +52,17 @@ float labNoise3(vec3 p) {
   float nx10 = mix(n010, n110, f.x);
   float nx01 = mix(n001, n101, f.x);
   float nx11 = mix(n011, n111, f.x);
-
   return mix(mix(nx00, nx10, f.y), mix(nx01, nx11, f.y), f.z);
 }
 
 float labFbm(vec3 p) {
   float value = 0.0;
   float amplitude = 0.5;
-
   for (int octave = 0; octave < 5; octave++) {
     value += labNoise3(p) * amplitude;
     p = p * 2.03 + vec3(7.1, 13.7, 4.9);
     amplitude *= 0.5;
   }
-
   return value;
 }
 
@@ -66,7 +70,6 @@ float labWorley(vec3 p) {
   vec3 cell = floor(p);
   vec3 local = fract(p);
   float nearest = 10.0;
-
   for (int x = -1; x <= 1; x++) {
     for (int y = -1; y <= 1; y++) {
       for (int z = -1; z <= 1; z++) {
@@ -77,78 +80,105 @@ float labWorley(vec3 p) {
       }
     }
   }
-
   return sqrt(nearest);
+}
+
+float labVeinBand(float value, float width) {
+  return 1.0 - smoothstep(width * 0.35, width, abs(value - 0.5));
+}
+
+float labBranchingVessels(vec3 p) {
+  vec3 warp = vec3(
+    labFbm(p * 0.31 + vec3(3.1, 8.7, 1.3)),
+    labFbm(p * 0.29 + vec3(11.2, 2.4, 7.8)),
+    labFbm(p * 0.33 + vec3(5.5, 13.1, 4.2))
+  ) - 0.5;
+  vec3 q = p + warp * 1.35;
+  float trunk = labVeinBand(labFbm(q * 0.62), 0.075);
+  float branchA = labVeinBand(labFbm(q * 1.28 + 17.0), 0.052);
+  float branchB = labVeinBand(labFbm(q * 2.15 + vec3(31.0, 7.0, 19.0)), 0.034);
+  float territory = smoothstep(0.30, 0.72, labFbm(q * 0.18 + 9.0));
+  return clamp(max(trunk, max(branchA * 0.82, branchB * 0.58)) * territory, 0.0, 1.0);
 }
 
 float labLayerField(int kind, vec3 position, float scale, float seed) {
   vec3 seedOffset = vec3(seed * 0.71, seed * 1.17, seed * 1.91);
   vec3 p = position * max(scale, 0.001) + seedOffset;
 
-  if (kind == 0) {
-    return 0.5;
-  }
-
-  if (kind == 1) {
-    return labFbm(p);
-  }
-
-  if (kind == 2) {
-    float cellular = labWorley(p);
-    return 1.0 - smoothstep(0.15, 0.72, cellular);
-  }
-
+  if (kind == 0) return 0.5;
+  if (kind == 1) return labFbm(p);
+  if (kind == 2) return 1.0 - smoothstep(0.15, 0.72, labWorley(p));
   if (kind == 3) {
     float ridge = 1.0 - abs(labFbm(p) * 2.0 - 1.0);
     return pow(clamp(ridge, 0.0, 1.0), 2.2);
   }
-
-  if (kind == 4) {
-    return smoothstep(0.58, 0.78, labFbm(p));
-  }
-
+  if (kind == 4) return smoothstep(0.58, 0.78, labFbm(p));
   if (kind == 5) {
-    float vein = 1.0 - smoothstep(0.018, 0.072, abs(labFbm(p) - 0.5));
+    float vein = labVeinBand(labFbm(p), 0.072);
     float distribution = smoothstep(0.34, 0.72, labFbm(p * 0.31 + 18.0));
     return vein * distribution;
   }
-
-  return clamp(position.y * 0.5 + 0.5, 0.0, 1.0);
+  if (kind == 6) return clamp(position.y * 0.5 + 0.5, 0.0, 1.0);
+  if (kind == 7) return labBranchingVessels(p);
+  if (kind == 8) {
+    float wet = labFbm(p * 0.7 + vec3(4.0, 12.0, 7.0));
+    return smoothstep(0.30, 0.72, wet);
+  }
+  float tissue = labFbm(p * 0.55 + vec3(13.0, 3.0, 21.0));
+  return smoothstep(0.18, 0.82, tissue);
 }
 
 float labShapeField(float field, float strength) {
   return clamp(0.5 + (field - 0.5) * max(strength, 0.0), 0.0, 1.0);
 }
 
+float labMaskForLayer(int layerIndex, vec3 position) {
+  int maskIndex = uLabMaskIndex[layerIndex];
+  if (maskIndex < 0 || maskIndex >= uLabCount) {
+    return 1.0;
+  }
+  float field = labLayerField(
+    uLabLayerKind[maskIndex],
+    position,
+    uLabScale[maskIndex],
+    uLabSeed[maskIndex]
+  );
+  float shaped = labShapeField(field, uLabStrength[maskIndex]);
+  if (uLabMaskInvert[layerIndex] > 0.5) {
+    shaped = 1.0 - shaped;
+  }
+  return mix(1.0, shaped, clamp(uLabMaskStrength[layerIndex], 0.0, 1.0));
+}
+
+float labEffectiveOpacity(int layerIndex, vec3 position) {
+  return clamp(
+    uLabOpacity[layerIndex] * uLabGroupOpacity[layerIndex] * labMaskForLayer(layerIndex, position),
+    0.0,
+    1.0
+  );
+}
+
+bool labRoutesHeight(int channel) {
+  return channel == 0 || channel == 3;
+}
+
 float labEvaluateDisplacement(vec3 position) {
   float displacement = 0.0;
-
   for (int i = 0; i < LAB_MAX_LAYERS; i++) {
-    if (i >= uLabCount) {
-      break;
-    }
-
-    float layerOpacity = uLabOpacity[i];
+    if (i >= uLabCount) break;
     float layerDisplacement = uLabDisplacement[i];
     if (
       uLabEnabled[i] < 0.5 ||
-      layerOpacity <= 0.000001 ||
+      !labRoutesHeight(uLabChannel[i]) ||
       abs(layerDisplacement) <= 0.000001
-    ) {
-      continue;
-    }
+    ) continue;
 
-    float field = labLayerField(
-      uLabLayerKind[i],
-      position,
-      uLabScale[i],
-      uLabSeed[i]
-    );
-
+    float opacity = labEffectiveOpacity(i, position);
+    if (opacity <= 0.000001) continue;
+    float field = labLayerField(uLabLayerKind[i], position, uLabScale[i], uLabSeed[i]);
     float shaped = labShapeField(field, uLabStrength[i]);
-    displacement += (shaped - 0.5) * layerDisplacement * layerOpacity;
+    displacement += (shaped - 0.5) * layerDisplacement * opacity;
   }
-
   return displacement;
 }
 `;
@@ -162,11 +192,14 @@ uniform float uLabRoughness[LAB_MAX_LAYERS];
 struct LabSurface {
   vec3 color;
   float roughness;
+  float clearcoat;
+  float clearcoatRoughness;
+  float sss;
+  vec3 sssColor;
 };
 
 vec3 labBlend(vec3 base, vec3 layerColor, int mode, float opacity) {
   vec3 blended = layerColor;
-
   if (mode == 1) {
     blended = base * layerColor;
   } else if (mode == 2) {
@@ -178,7 +211,6 @@ vec3 labBlend(vec3 base, vec3 layerColor, int mode, float opacity) {
     vec3 high = 1.0 - 2.0 * (1.0 - base) * (1.0 - layerColor);
     blended = mix(low, high, step(vec3(0.5), base));
   }
-
   return mix(base, blended, clamp(opacity, 0.0, 1.0));
 }
 
@@ -186,35 +218,52 @@ LabSurface labEvaluateSurface(vec3 position) {
   LabSurface surface;
   surface.color = vec3(0.42, 0.45, 0.50);
   surface.roughness = 0.0;
+  surface.clearcoat = 0.0;
+  surface.clearcoatRoughness = 0.18;
+  surface.sss = 0.0;
+  surface.sssColor = vec3(0.0);
 
   for (int i = 0; i < LAB_MAX_LAYERS; i++) {
-    if (i >= uLabCount) {
-      break;
-    }
+    if (i >= uLabCount) break;
+    if (uLabEnabled[i] < 0.5) continue;
 
-    float layerOpacity = uLabOpacity[i];
-    if (uLabEnabled[i] < 0.5 || layerOpacity <= 0.000001) {
-      continue;
-    }
+    float opacityBase = labEffectiveOpacity(i, position);
+    if (opacityBase <= 0.000001) continue;
 
     int kind = uLabLayerKind[i];
-    float field = labLayerField(
-      kind,
-      position,
-      uLabScale[i],
-      uLabSeed[i]
-    );
-
+    int channel = uLabChannel[i];
+    float field = labLayerField(kind, position, uLabScale[i], uLabSeed[i]);
     float shaped = labShapeField(field, uLabStrength[i]);
-    float coverage = kind == 0 ? 1.0 : mix(0.55, 1.0, shaped);
-    float opacity = clamp(layerOpacity * coverage, 0.0, 1.0);
-    float roughnessWeight = kind == 0 ? 1.0 : mix(0.45, 1.0, shaped);
+    float coverage = kind == 0 ? 1.0 : mix(0.48, 1.0, shaped);
+    float opacity = clamp(opacityBase * coverage, 0.0, 1.0);
     vec3 layerColor = mix(uLabColorA[i], uLabColorB[i], shaped);
 
-    surface.color = labBlend(surface.color, layerColor, uLabBlendMode[i], opacity);
-    surface.roughness += uLabRoughness[i] * opacity * roughnessWeight;
+    if (channel == 0 || channel == 1) {
+      surface.color = labBlend(surface.color, layerColor, uLabBlendMode[i], opacity);
+    }
+
+    if (channel == 0 || channel == 2 || channel == 4) {
+      float roughnessWeight = kind == 0 ? 1.0 : mix(0.4, 1.0, shaped);
+      surface.roughness += uLabRoughness[i] * opacity * roughnessWeight;
+    }
+
+    if (channel == 4 || kind == 8) {
+      float wetness = clamp(opacity * shaped * max(uLabStrength[i], 0.0), 0.0, 1.0);
+      surface.clearcoat = max(surface.clearcoat, wetness);
+      surface.clearcoatRoughness = mix(surface.clearcoatRoughness, 0.045 + (1.0 - shaped) * 0.18, wetness);
+    }
+
+    if (channel == 5 || kind == 9) {
+      float scatter = clamp(opacity * mix(0.45, 1.0, shaped), 0.0, 1.0);
+      surface.sssColor += layerColor * scatter;
+      surface.sss += scatter;
+    }
   }
 
+  if (surface.sss > 0.0001) {
+    surface.sssColor /= surface.sss;
+  }
+  surface.sss = clamp(surface.sss, 0.0, 1.0);
   return surface;
 }
 `;
@@ -237,6 +286,42 @@ export const SURFACE_VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
 #include <skinning_vertex>
 ${WORLD_MATRIX_GLSL}
 vLabPosition = labPosition;
+vLabWorldPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
+`;
+
+export const DISPLACED_NORMAL_GLSL = /* glsl */ `
+#include <normal_fragment_begin>
+if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
+  vec3 labDx = dFdx(vLabWorldPosition);
+  vec3 labDy = dFdy(vLabWorldPosition);
+  vec3 labWorldNormal = normalize(cross(labDx, labDy));
+  vec3 labViewNormal = normalize(mat3(viewMatrix) * labWorldNormal);
+  if (dot(labViewNormal, normal) < 0.0) {
+    labViewNormal = -labViewNormal;
+  }
+  normal = normalize(mix(normal, labViewNormal, uLabNormalStrength));
+}
+`;
+
+export const PHYSICAL_LAYER_GLSL = /* glsl */ `
+#include <lights_physical_fragment>
+#ifdef USE_CLEARCOAT
+  material.clearcoat = max(material.clearcoat, labSurface.clearcoat);
+  material.clearcoatRoughness = mix(
+    material.clearcoatRoughness,
+    labSurface.clearcoatRoughness,
+    labSurface.clearcoat
+  );
+#endif
+`;
+
+export const SSS_LIGHT_GLSL = /* glsl */ `
+#include <lights_fragment_end>
+if (labSurface.sss > 0.0001) {
+  float labRim = pow(1.0 - saturate(dot(geometryNormal, geometryViewDir)), 2.0);
+  float labForward = 0.06 + labRim * 0.32;
+  totalEmissiveRadiance += labSurface.sssColor * labSurface.sss * labForward;
+}
 `;
 
 export const SHADOW_NORMAL_GLSL = /* glsl */ `
