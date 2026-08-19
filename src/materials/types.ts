@@ -5,7 +5,10 @@ export type LayerKind =
   | 'ridges'
   | 'spots'
   | 'veins'
-  | 'gradient';
+  | 'gradient'
+  | 'vessels'
+  | 'wet-film'
+  | 'sss';
 
 export type BlendMode =
   | 'normal'
@@ -13,6 +16,21 @@ export type BlendMode =
   | 'add'
   | 'screen'
   | 'overlay';
+
+export type LayerChannel =
+  | 'surface'
+  | 'color'
+  | 'roughness'
+  | 'height'
+  | 'clearcoat'
+  | 'sss';
+
+export type EnvironmentPreset =
+  | 'studio'
+  | 'warm'
+  | 'cool'
+  | 'night'
+  | 'custom';
 
 export type ObjectPreset =
   | 'sphere'
@@ -28,6 +46,7 @@ export interface MaterialLayer {
   kind: LayerKind;
   enabled: boolean;
   blendMode: BlendMode;
+  channel: LayerChannel;
   opacity: number;
   scale: number;
   strength: number;
@@ -36,6 +55,23 @@ export interface MaterialLayer {
   colorB: string;
   roughness: number;
   displacement: number;
+  groupId: string | null;
+  maskSourceLayerId: string | null;
+  maskInvert: boolean;
+  maskStrength: number;
+}
+
+export interface MaterialGroup {
+  id: string;
+  name: string;
+  parentId: string | null;
+  enabled: boolean;
+  opacity: number;
+}
+
+export interface ImportedMeshTarget {
+  id: string;
+  label: string;
 }
 
 export interface PhysicalSettings {
@@ -55,13 +91,19 @@ export interface PhysicalSettings {
 }
 
 export interface ProjectState {
-  version: 1;
+  version: 2;
   selectedObject: ObjectPreset;
   selectedLayerId: string | null;
   importedAssetName: string | null;
+  importedMeshes: ImportedMeshTarget[];
+  selectedMeshId: string | null;
+  meshAssignments: Record<string, boolean>;
+  environment: EnvironmentPreset;
+  environmentAssetName: string | null;
   background: string;
   wireframe: boolean;
   physical: PhysicalSettings;
+  groups: MaterialGroup[];
   layers: MaterialLayer[];
 }
 
@@ -70,5 +112,6 @@ export interface MaterialPreset {
   name: string;
   description: string;
   physical?: Partial<PhysicalSettings>;
+  groups?: MaterialGroup[];
   layers: MaterialLayer[];
 }
