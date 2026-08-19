@@ -13,7 +13,8 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - Layer masks sourced from another procedural layer with strength and inversion
 - Nested material groups with enable/opacity inheritance
 - Per-layer color, opacity, scale, strength, seed, roughness and displacement
-- Displacement-aware fragment normals reconstructed from the displaced surface
+- World-space displacement that remains normal-directed under non-uniform or mirrored object transforms
+- Smooth displacement-aware shading reconstructed from the interpolated height slope rather than triangle face normals
 - Matching depth/distance displacement for shadows
 
 ### Biological material depth
@@ -37,8 +38,10 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - GLB, self-contained GLTF and multi-file GLTF bundles
 - Multi-file GLTF resources are resolved only from the explicitly selected local bundle; remote resource URIs are rejected
 - Relative GLTF bundle URIs are resolved from the primary GLTF directory before basename fallback, including parent-directory segments
+- Encoded filename characters are preserved while URI query/fragment suffixes are handled separately
 - Automatic model normalization, missing-normal generation, stale-operation cancellation and GPU cleanup
 - Preview normalization is editor-only; GLB export preserves the imported source hierarchy, origin, scale and transforms
+- Imported animation clips are retained for baked GLB export
 - Imported scenes expose individual mesh targets
 - Click a mesh in the viewport or choose it in the inspector
 - Apply/remove the lab material per imported mesh while preserving its original material
@@ -49,13 +52,17 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - UV-space GPU baking for albedo, roughness, tangent-space normal, height, clearcoat and clearcoat-roughness maps
 - Morph/skinning-aware bake geometry using the current deformed vertex positions
 - Configurable texture-island dilation to reduce seam bleeding
-- Imported meshes require finite, unique, non-overlapping UVs inside the 0–1 range; unsupported tiled/mirrored UV layouts fail explicitly
+- Imported meshes require finite, non-degenerate, unique, non-overlapping UVs inside the 0–1 range; unsupported tiled/mirrored UV layouts fail explicitly
+- UV overlap validation uses exact triangle intersection checks after spatial broad-phase filtering instead of texture-resolution sampling
 - Procedural preview meshes can generate a deterministic triangle UV atlas when their built-in UVs are not bake-safe; GLB export carries that atlas geometry with the baked maps
 - Quality-tier-controlled bake resolution and GLB texture limits
 - Binary GLB export using baked standard PBR textures
 - Full GLB export state is snapshotted before asynchronous baking so multi-mesh exports cannot mix edits made midway through an export
+- Bake/export commands are serialized in the editor to avoid duplicate high-cost production jobs
+- Individual bake contexts use isolated scenes so asynchronous PNG encoding cannot contaminate another bake
 - Per-mesh GLB export preserves original materials on imported meshes that are not assigned to the lab material
 - Imported ImageBitmap-backed textures are snapshotted before export so replacing the preview cannot invalidate an in-flight GLB
+- Imported animation clips are exported against the cloned source hierarchy without the editor preview transform
 - Realtime SSS is approximated conservatively in baked albedo because standard glTF has no direct SSS material model
 - Embedded texture export through Three.js `GLTFExporter`
 - Tagged preset browser with text/tag filtering
@@ -68,6 +75,7 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 
 - Compact responsive desktop/tablet/mobile layout
 - Context radial menu on right click, `Space`, or touch long press
+- Touch long-press radial activation is isolated from viewport picking/orbit gestures once triggered
 - Drag-and-drop layer ordering plus touch-friendly move controls
 - Material preset library with search, tags and rendered thumbnails
 - Coalesced undo/redo for continuous edits
@@ -128,7 +136,7 @@ Native text-field undo and normal keyboard activation of focused controls are pr
 - `src/ui` — compact panels, inspector, tagged preset browser, layer dock and radial interactions
 - `src/utils` — browser downloads, IDs and HTML helpers
 
-The procedural compiler injects a fixed-size runtime into `MeshPhysicalMaterial`. Layers are evaluated in normalized world space after morph/skinning deformation. Masks and nested-group opacity are compiled into the same layer pass. Routed height modifies geometry and shadow passes; color/roughness/clearcoat/SSS channels only affect their intended response. Strong displacement lighting uses screen-space derivatives of the displaced world position rather than the original mesh normal.
+The procedural compiler injects a fixed-size runtime into `MeshPhysicalMaterial`. Layers are evaluated in world space after morph/skinning deformation. Masks and nested-group opacity are compiled into the same layer pass. Routed height modifies geometry and shadow passes; color/roughness/clearcoat/SSS channels only affect their intended response. Vertex displacement is converted from the desired world-normal offset back into local coordinates, which avoids skew from non-uniform transforms. Lighting normals use the smooth base normal plus screen-space derivatives of the interpolated displacement scalar, avoiding the faceted face-normal result produced by directly crossing displaced-position derivatives.
 
 The texture baker reuses the same procedural uniforms and field functions in a dedicated UV-space shader. This keeps the authored procedural fields consistent between the realtime preview, downloaded maps and baked GLB materials.
 
@@ -160,13 +168,13 @@ Quality tier is an editor/runtime preference rather than material content, so it
 - clearcoat
 - clearcoat roughness
 
-Texture baking requires a usable UV set. Imported meshes must have a finite, unique, non-overlapping 0–1 unwrap; tiled, mirrored or overlapping imported UVs are rejected instead of silently overwriting unrelated surface regions. Procedural previewing itself does not require UVs because the procedural fields are evaluated in normalized world space. When a built-in procedural preview mesh has UVs that are not bake-safe, the exporter can generate a deterministic triangle atlas for that procedural mesh.
+Texture baking requires a usable UV set. Imported meshes must have a finite, non-degenerate, unique, non-overlapping 0–1 unwrap; tiled, mirrored or overlapping imported UVs are rejected instead of silently overwriting unrelated surface regions. Procedural previewing itself does not require UVs because the procedural fields are evaluated in world space. When a built-in procedural preview mesh has UVs that are not bake-safe, the exporter can generate a deterministic triangle atlas for that procedural mesh.
 
 The configured quality tier controls bake resolution. The renderer also caps the requested resolution to the GPU's reported maximum texture size.
 
 ## GLB export
 
-`Export GLB` snapshots the current material/export state, removes editor-only preview normalization from imported assets, clones the source hierarchy, bakes standard PBR maps for every mesh assigned to the lab material, embeds those maps and exports binary glTF. Imported meshes that retain their original material are exported with a snapshotted copy of that material and its textures.
+`Export GLB` snapshots the current material/export state, removes editor-only preview normalization from imported assets, clones the source hierarchy, bakes standard PBR maps for every mesh assigned to the lab material, embeds those maps and exports binary glTF. Imported meshes that retain their original material are exported with a snapshotted copy of that material and its textures. Imported animation clips are carried into the exported file and bound to the clone of the original source hierarchy.
 
 The export path intentionally converts the procedural runtime into conventional PBR textures instead of embedding custom GLSL. This produces a portable GLB that can be consumed by normal glTF renderers without the texture lab shader compiler.
 
@@ -178,9 +186,9 @@ For an external-resource GLTF, select the `.gltf`, referenced `.bin` files and t
 
 ## Rendering notes
 
-The SSS layer is a realtime raster approximation intended for interactive biological-material authoring. It is not path-traced volumetric scattering. Wet-film layers modulate the physical clearcoat response per pixel. Displaced normals are reconstructed from screen-space derivatives, which is robust for arbitrary imported topology but remains a raster approximation at silhouettes and discontinuities.
+The SSS layer is a realtime raster approximation intended for interactive biological-material authoring. It is not path-traced volumetric scattering. Wet-film layers modulate the physical clearcoat response per pixel. Procedural displacement modifies actual vertices and shadows; the smooth lighting normal is then perturbed from the interpolated displacement slope. This remains a raster approximation at silhouettes and is bounded by the tessellation of the preview mesh.
 
-The baked normal map captures displaced surface lighting detail, while the separately exported height map preserves the authored height field for engines or DCC tools that support displacement. Standard glTF has no core height/displacement texture slot, so the GLB exporter uses the baked normal map rather than a custom displacement extension.
+The baked normal map captures higher-frequency procedural displacement lighting detail, while the separately exported height map preserves the authored height field for engines or DCC tools that support displacement. Standard glTF has no core height/displacement texture slot, so the GLB exporter uses the baked normal map rather than a custom displacement extension.
 
 ## Verification
 
