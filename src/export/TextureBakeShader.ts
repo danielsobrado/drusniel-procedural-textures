@@ -28,10 +28,19 @@ varying vec3 vBakePosition;
 varying vec3 vBakeWorldPosition;
 varying vec3 vBakeWorldNormal;
 
+float labLinearChannelToSrgb(float value) {
+  float safeValue = max(value, 0.0);
+  return safeValue <= 0.0031308
+    ? safeValue * 12.92
+    : 1.055 * pow(safeValue, 1.0 / 2.4) - 0.055;
+}
+
 vec3 labLinearToSrgb(vec3 color) {
-  vec3 low = color * 12.92;
-  vec3 high = 1.055 * pow(max(color, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055;
-  return mix(high, low, lessThanEqual(color, vec3(0.0031308)));
+  return vec3(
+    labLinearChannelToSrgb(color.r),
+    labLinearChannelToSrgb(color.g),
+    labLinearChannelToSrgb(color.b)
+  );
 }
 
 vec3 labBakeTangentNormal(vec3 baseNormal, float height) {
