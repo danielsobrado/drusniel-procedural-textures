@@ -1,5 +1,6 @@
 import {
   BLEND_MODES,
+  CONTROL_RANGES,
   DEFAULT_PHYSICAL,
   LAYER_KINDS,
   MAX_LAYERS,
@@ -37,6 +38,14 @@ function asString(value: unknown, name: string, maxLength: number): string {
   return value;
 }
 
+function asNonEmptyString(value: unknown, name: string, maxLength: number): string {
+  const text = asString(value, name, maxLength);
+  if (text.trim().length === 0) {
+    throw new Error(`${name} cannot be empty.`);
+  }
+  return text;
+}
+
 function asBoolean(value: unknown, name: string): boolean {
   if (typeof value !== 'boolean') {
     throw new Error(`${name} must be a boolean.`);
@@ -59,6 +68,14 @@ function asFiniteNumber(
     throw new Error(`${name} must be between ${min} and ${max}.`);
   }
   return value;
+}
+
+function asControlNumber(
+  value: unknown,
+  name: string,
+  range: Readonly<{ min: number; max: number }>
+): number {
+  return asFiniteNumber(value, name, range.min, range.max);
 }
 
 function asColor(value: unknown, name: string): string {
@@ -106,14 +123,38 @@ function normalizeLayer(value: unknown, index: number): MaterialLayer {
     kind: asLayerKind(layer.kind, index),
     enabled: asBoolean(layer.enabled, `Layer ${index + 1} enabled`),
     blendMode: asBlendMode(layer.blendMode, index),
-    opacity: asFiniteNumber(layer.opacity, `Layer ${index + 1} opacity`, 0, 1),
-    scale: asFiniteNumber(layer.scale, `Layer ${index + 1} scale`, 0.01, 100),
-    strength: asFiniteNumber(layer.strength, `Layer ${index + 1} strength`, 0, 10),
-    seed: asFiniteNumber(layer.seed, `Layer ${index + 1} seed`, -100000, 100000),
+    opacity: asControlNumber(
+      layer.opacity,
+      `Layer ${index + 1} opacity`,
+      CONTROL_RANGES.layer.opacity
+    ),
+    scale: asControlNumber(
+      layer.scale,
+      `Layer ${index + 1} scale`,
+      CONTROL_RANGES.layer.scale
+    ),
+    strength: asControlNumber(
+      layer.strength,
+      `Layer ${index + 1} strength`,
+      CONTROL_RANGES.layer.strength
+    ),
+    seed: asControlNumber(
+      layer.seed,
+      `Layer ${index + 1} seed`,
+      CONTROL_RANGES.layer.seed
+    ),
     colorA: asColor(layer.colorA, `Layer ${index + 1} low color`),
     colorB: asColor(layer.colorB, `Layer ${index + 1} high color`),
-    roughness: asFiniteNumber(layer.roughness, `Layer ${index + 1} roughness`, -1, 1),
-    displacement: asFiniteNumber(layer.displacement, `Layer ${index + 1} displacement`, -2, 2)
+    roughness: asControlNumber(
+      layer.roughness,
+      `Layer ${index + 1} roughness`,
+      CONTROL_RANGES.layer.roughness
+    ),
+    displacement: asControlNumber(
+      layer.displacement,
+      `Layer ${index + 1} displacement`,
+      CONTROL_RANGES.layer.displacement
+    )
   };
 }
 
@@ -127,37 +168,57 @@ function normalizePhysical(value: unknown): PhysicalSettings {
   };
 
   return {
-    roughness: asFiniteNumber(merged.roughness, 'Physical roughness', 0, 1),
-    metalness: asFiniteNumber(merged.metalness, 'Physical metalness', 0, 1),
-    clearcoat: asFiniteNumber(merged.clearcoat, 'Physical clearcoat', 0, 1),
-    clearcoatRoughness: asFiniteNumber(
+    roughness: asControlNumber(
+      merged.roughness,
+      'Physical roughness',
+      CONTROL_RANGES.physical.roughness
+    ),
+    metalness: asControlNumber(
+      merged.metalness,
+      'Physical metalness',
+      CONTROL_RANGES.physical.metalness
+    ),
+    clearcoat: asControlNumber(
+      merged.clearcoat,
+      'Physical clearcoat',
+      CONTROL_RANGES.physical.clearcoat
+    ),
+    clearcoatRoughness: asControlNumber(
       merged.clearcoatRoughness,
       'Physical clearcoat roughness',
-      0,
-      1
+      CONTROL_RANGES.physical.clearcoatRoughness
     ),
-    specularIntensity: asFiniteNumber(
+    specularIntensity: asControlNumber(
       merged.specularIntensity,
       'Physical specular intensity',
-      0,
-      1
+      CONTROL_RANGES.physical.specularIntensity
     ),
-    ior: asFiniteNumber(merged.ior, 'Physical IOR', 1, 2.333),
-    sheen: asFiniteNumber(merged.sheen, 'Physical sheen', 0, 1),
-    sheenRoughness: asFiniteNumber(
+    ior: asControlNumber(merged.ior, 'Physical IOR', CONTROL_RANGES.physical.ior),
+    sheen: asControlNumber(
+      merged.sheen,
+      'Physical sheen',
+      CONTROL_RANGES.physical.sheen
+    ),
+    sheenRoughness: asControlNumber(
       merged.sheenRoughness,
       'Physical sheen roughness',
-      0,
-      1
+      CONTROL_RANGES.physical.sheenRoughness
     ),
     sheenColor: asColor(merged.sheenColor, 'Physical sheen color'),
-    transmission: asFiniteNumber(merged.transmission, 'Physical transmission', 0, 1),
-    thickness: asFiniteNumber(merged.thickness, 'Physical thickness', 0, 100),
-    attenuationDistance: asFiniteNumber(
+    transmission: asControlNumber(
+      merged.transmission,
+      'Physical transmission',
+      CONTROL_RANGES.physical.transmission
+    ),
+    thickness: asControlNumber(
+      merged.thickness,
+      'Physical thickness',
+      CONTROL_RANGES.physical.thickness
+    ),
+    attenuationDistance: asControlNumber(
       merged.attenuationDistance,
       'Physical attenuation distance',
-      0.001,
-      1000000
+      CONTROL_RANGES.physical.attenuationDistance
     ),
     attenuationColor: asColor(merged.attenuationColor, 'Physical attenuation color')
   };
@@ -190,7 +251,11 @@ export function normalizeProject(value: unknown): ProjectState {
 
   const importedAssetName = project.importedAssetName === null || project.importedAssetName === undefined
     ? null
-    : asString(project.importedAssetName, 'Imported asset name', MAX_ASSET_NAME_LENGTH);
+    : asNonEmptyString(
+        project.importedAssetName,
+        'Imported asset name',
+        MAX_ASSET_NAME_LENGTH
+      );
 
   return {
     version: 1,
