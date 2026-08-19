@@ -6,7 +6,12 @@ import {
   HISTORY_LIMIT,
   MAX_LAYERS
 } from './constants';
-import { normalizeProject } from './ProjectFile';
+import {
+  MAX_LAYER_NAME_LENGTH,
+  normalizeImportedAssetName,
+  normalizeLayerName,
+  normalizeProject
+} from './ProjectFile';
 import type {
   MaterialLayer,
   MaterialPreset,
@@ -42,12 +47,19 @@ const CONTINUOUS_LAYER_FIELDS = new Set<keyof MaterialLayer>([
   'displacement'
 ]);
 
+const COPY_SUFFIX = ' copy';
+
 function cloneProject(project: ProjectState): ProjectState {
   return structuredClone(project);
 }
 
 function cloneLayer(layer: MaterialLayer): MaterialLayer {
   return { ...layer, id: createId('layer') };
+}
+
+function duplicateLayerName(name: string): string {
+  const prefixLength = Math.max(MAX_LAYER_NAME_LENGTH - COPY_SUFFIX.length, 0);
+  return `${name.slice(0, prefixLength)}${COPY_SUFFIX}`;
 }
 
 function patchChanges<T extends object>(current: T, patch: Partial<T>): boolean {
@@ -160,14 +172,22 @@ export class AppState {
   public updateLayer(id: string, patch: Partial<MaterialLayer>): void {
     const index = this.project.layers.findIndex((layer) => layer.id === id);
     const current = this.project.layers[index];
-    if (index < 0 || current === undefined || !patchChanges(current, patch)) {
+    if (index < 0 || current === undefined) {
       return;
     }
 
-    this.commit(layerCoalesceKey(id, patch));
+    const normalizedPatch = patch.name === undefined
+      ? patch
+      : { ...patch, name: normalizeLayerName(patch.name) };
+
+    if (!patchChanges(current, normalizedPatch)) {
+      return;
+    }
+
+    this.commit(layerCoalesceKey(id, normalizedPatch));
     this.project.layers[index] = {
       ...current,
-      ...patch,
+      ...normalizedPatch,
       id
     };
     this.emit('layers');
@@ -207,7 +227,7 @@ export class AppState {
 
     this.commit();
     const duplicate = cloneLayer(source);
-    duplicate.name = `${source.name} copy`;
+    duplicate.name = duplicateLayerName(source.name);
     this.project.layers.splice(index + 1, 0, duplicate);
     this.project.selectedLayerId = duplicate.id;
     this.emit('layers');
@@ -273,12 +293,13 @@ export class AppState {
   }
 
   public setImportedAsset(name: string): void {
-    if (this.project.importedAssetName === name) {
+    const normalizedName = normalizeImportedAssetName(name);
+    if (this.project.importedAssetName === normalizedName) {
       return;
     }
 
     this.commit();
-    this.project.importedAssetName = name;
+    this.project.importedAssetName = normalizedName;
     this.emit('object');
   }
 
