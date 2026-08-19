@@ -229,7 +229,7 @@ transformed += objectNormal * (labDisplacement / labNormalScale);
 export const SURFACE_VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
 #include <skinning_vertex>
 ${WORLD_MATRIX_GLSL}
-vLabPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
+vLabPosition = labPosition;
 `;
 
 export const SHADOW_NORMAL_GLSL = /* glsl */ `
