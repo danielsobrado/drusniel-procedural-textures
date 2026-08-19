@@ -12,6 +12,7 @@ import {
 interface ExportResources {
   materials: THREE.Material[];
   textures: THREE.Texture[];
+  geometries: THREE.BufferGeometry[];
 }
 
 interface ExportMeshSnapshot {
@@ -44,6 +45,8 @@ function cleanLabMetadata(root: THREE.Object3D): void {
     delete object.userData.labPreviewWrapper;
     delete object.userData.labPreviewScale;
     delete object.userData.labPreviewCenter;
+    delete object.userData.labProceduralPreview;
+    delete object.userData.labObjectPreset;
   });
 }
 
@@ -76,21 +79,11 @@ function createBakedMaterial(
     color: 0xffffff,
     map: canvasTexture(maps.albedo.canvas, `${prefix} albedo`, THREE.SRGBColorSpace, resources),
     roughness: 1,
-    roughnessMap: canvasTexture(
-      maps.roughness.canvas,
-      `${prefix} roughness`,
-      THREE.NoColorSpace,
-      resources
-    ),
+    roughnessMap: canvasTexture(maps.roughness.canvas, `${prefix} roughness`, THREE.NoColorSpace, resources),
     metalness: settings.metalness,
     normalMap: canvasTexture(maps.normal.canvas, `${prefix} normal`, THREE.NoColorSpace, resources),
     clearcoat: 1,
-    clearcoatMap: canvasTexture(
-      maps.clearcoat.canvas,
-      `${prefix} clearcoat`,
-      THREE.NoColorSpace,
-      resources
-    ),
+    clearcoatMap: canvasTexture(maps.clearcoat.canvas, `${prefix} clearcoat`, THREE.NoColorSpace, resources),
     clearcoatRoughness: 1,
     clearcoatRoughnessMap: canvasTexture(
       maps.clearcoatRoughness.canvas,
@@ -139,9 +132,7 @@ function cloneMaterial(material: THREE.Material, resources: ExportResources): TH
   const sourceValues = material as unknown as Record<string, unknown>;
   const cloneValues = clone as unknown as Record<string, unknown>;
   for (const [key, value] of Object.entries(sourceValues)) {
-    if (value instanceof THREE.Texture) {
-      cloneValues[key] = cloneTexture(value, resources);
-    }
+    if (value instanceof THREE.Texture) cloneValues[key] = cloneTexture(value, resources);
   }
   resources.materials.push(clone);
   return clone;
@@ -162,15 +153,23 @@ function snapshotOriginalMaterials(
   resources: ExportResources
 ): void {
   root.traverse((object) => {
-    const renderable = object instanceof THREE.Mesh || object instanceof THREE.Line || object instanceof THREE.Points;
-    if (!renderable || (object instanceof THREE.Mesh && assignedMeshes.has(object))) return;
-    object.material = cloneMaterialSet(object.material, resources);
+    if (object instanceof THREE.Mesh) {
+      if (!assignedMeshes.has(object)) object.material = cloneMaterialSet(object.material, resources);
+      return;
+    }
+    if (object instanceof THREE.Line || object instanceof THREE.Points) {
+      const materialOwner = object as THREE.Object3D & {
+        material: THREE.Material | THREE.Material[];
+      };
+      materialOwner.material = cloneMaterialSet(materialOwner.material, resources);
+    }
   });
 }
 
 function disposeResources(resources: ExportResources): void {
   resources.materials.forEach((material) => material.dispose());
   resources.textures.forEach((texture) => texture.dispose());
+  resources.geometries.forEach((geometry) => geometry.dispose());
 }
 
 export class GlbExporter {
@@ -190,9 +189,7 @@ export class GlbExporter {
     previewRoot.updateMatrixWorld(true);
     const sourceRoot = sourceForExport(previewRoot);
     const sourceMeshes = collectMeshes(sourceRoot);
-    if (sourceMeshes.length === 0) {
-      throw new Error('There is no mesh geometry to export.');
-    }
+    if (sourceMeshes.length === 0) throw new Error('There is no mesh geometry to export.');
 
     const physical = structuredClone(settings);
     const bakeMaterial = this.compiler.createBakeMaterial(physical);
@@ -223,7 +220,7 @@ export class GlbExporter {
       throw new Error('Export clone does not match the current mesh hierarchy.');
     }
 
-    const resources: ExportResources = { materials: [], textures: [] };
+    const resources: ExportResources = { materials: [], textures: [], geometries: [] };
     const assignedTargets = new Set<THREE.Mesh>();
     for (let index = 0; index < exportMeshes.length; index += 1) {
       if (meshSnapshots[index]?.assigned === true && exportMeshes[index] !== undefined) {
@@ -245,6 +242,11 @@ export class GlbExporter {
           bakeResolution,
           bakeMaterial
         );
+        if (snapshot.bake.generatedUvAtlas) {
+          const geometry = snapshot.bake.geometry.clone();
+          target.geometry = geometry;
+          resources.geometries.push(geometry);
+        }
         target.material = createBakedMaterial(maps, physical, index, resources);
         target.customDepthMaterial = undefined;
         target.customDistanceMaterial = undefined;
