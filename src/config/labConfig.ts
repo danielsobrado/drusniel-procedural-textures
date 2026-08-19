@@ -70,6 +70,7 @@ interface LabConfig {
   app: {
     name: string;
     storageKey: string;
+    legacyStorageKeys: string[];
     maxLayers: number;
     maxGroups: number;
     historyLimit: number;
@@ -131,6 +132,17 @@ function asString(value: unknown, name: string, maxLength = 128): string {
     throw new Error(`Invalid configuration value: ${name}.`);
   }
   return value;
+}
+
+function asStringArray(value: unknown, name: string, maxItems = 16): string[] {
+  if (!Array.isArray(value) || value.length > maxItems) {
+    throw new Error(`Configuration value ${name} must be an array with at most ${maxItems} entries.`);
+  }
+  const values = value.map((item, index) => asString(item, `${name}[${index}]`));
+  if (new Set(values).size !== values.length) {
+    throw new Error(`Configuration value ${name} contains duplicate entries.`);
+  }
+  return values;
 }
 
 function asColor(value: unknown, name: string): string {
@@ -355,10 +367,17 @@ function parseConfig(value: unknown): LabConfig {
     throw new Error(`Unsupported default environment in configuration: ${defaultEnvironment}.`);
   }
 
+  const storageKey = asString(app.storageKey, 'app.storageKey');
+  const legacyStorageKeys = asStringArray(app.legacyStorageKeys ?? [], 'app.legacyStorageKeys');
+  if (legacyStorageKeys.includes(storageKey)) {
+    throw new Error('app.legacyStorageKeys cannot contain app.storageKey.');
+  }
+
   return {
     app: {
       name: asString(app.name, 'app.name'),
-      storageKey: asString(app.storageKey, 'app.storageKey'),
+      storageKey,
+      legacyStorageKeys,
       maxLayers: asInteger(app.maxLayers, 'app.maxLayers', 1, 32),
       maxGroups: asInteger(app.maxGroups, 'app.maxGroups', 0, 32),
       historyLimit: asInteger(app.historyLimit, 'app.historyLimit', 1, 1000),
