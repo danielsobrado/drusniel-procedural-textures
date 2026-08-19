@@ -16,14 +16,17 @@ export interface BakedTexture {
   blob: Blob;
 }
 
-export interface BakedTextureSet {
+export interface BakedPbrTextureSet {
   resolution: number;
   albedo: BakedTexture;
   roughness: BakedTexture;
   normal: BakedTexture;
-  height: BakedTexture;
   clearcoat: BakedTexture;
   clearcoatRoughness: BakedTexture;
+}
+
+export interface BakedTextureSet extends BakedPbrTextureSet {
+  height: BakedTexture;
 }
 
 const CHANNEL_MODE: Record<BakeChannel, number> = {
@@ -156,6 +159,66 @@ export class TextureBaker {
     settings: Readonly<PhysicalSettings>,
     resolution: number
   ): Promise<BakedTextureSet> {
+    const context = this.createContext(source, settings, resolution);
+    try {
+      const albedo = await this.renderChannel(context.target, context.material, 'albedo', resolution);
+      const roughness = await this.renderChannel(context.target, context.material, 'roughness', resolution);
+      const normal = await this.renderChannel(context.target, context.material, 'normal', resolution);
+      const height = await this.renderChannel(context.target, context.material, 'height', resolution);
+      const clearcoat = await this.renderChannel(context.target, context.material, 'clearcoat', resolution);
+      const clearcoatRoughness = await this.renderChannel(
+        context.target,
+        context.material,
+        'clearcoat-roughness',
+        resolution
+      );
+      return {
+        resolution,
+        albedo,
+        roughness,
+        normal,
+        height,
+        clearcoat,
+        clearcoatRoughness
+      };
+    } finally {
+      this.disposeContext(context);
+    }
+  }
+
+  public async bakePbr(
+    source: THREE.Mesh,
+    settings: Readonly<PhysicalSettings>,
+    resolution: number
+  ): Promise<BakedPbrTextureSet> {
+    const context = this.createContext(source, settings, resolution);
+    try {
+      const albedo = await this.renderChannel(context.target, context.material, 'albedo', resolution);
+      const roughness = await this.renderChannel(context.target, context.material, 'roughness', resolution);
+      const normal = await this.renderChannel(context.target, context.material, 'normal', resolution);
+      const clearcoat = await this.renderChannel(context.target, context.material, 'clearcoat', resolution);
+      const clearcoatRoughness = await this.renderChannel(
+        context.target,
+        context.material,
+        'clearcoat-roughness',
+        resolution
+      );
+      return { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness };
+    } finally {
+      this.disposeContext(context);
+    }
+  }
+
+  private createContext(
+    source: THREE.Mesh,
+    settings: Readonly<PhysicalSettings>,
+    resolution: number
+  ): {
+    geometry: THREE.BufferGeometry;
+    material: THREE.ShaderMaterial;
+    mesh: THREE.Mesh;
+    target: THREE.WebGLRenderTarget;
+  } {
     if (!Number.isInteger(resolution) || resolution < 128 || resolution > 4096) {
       throw new Error('Bake resolution must be an integer between 128 and 4096 pixels.');
     }
@@ -174,34 +237,19 @@ export class TextureBaker {
     });
     target.texture.colorSpace = THREE.NoColorSpace;
     target.texture.generateMipmaps = false;
+    return { geometry, material, mesh, target };
+  }
 
-    try {
-      const albedo = await this.renderChannel(target, material, 'albedo', resolution);
-      const roughness = await this.renderChannel(target, material, 'roughness', resolution);
-      const normal = await this.renderChannel(target, material, 'normal', resolution);
-      const height = await this.renderChannel(target, material, 'height', resolution);
-      const clearcoat = await this.renderChannel(target, material, 'clearcoat', resolution);
-      const clearcoatRoughness = await this.renderChannel(
-        target,
-        material,
-        'clearcoat-roughness',
-        resolution
-      );
-      return {
-        resolution,
-        albedo,
-        roughness,
-        normal,
-        height,
-        clearcoat,
-        clearcoatRoughness
-      };
-    } finally {
-      this.scene.remove(mesh);
-      target.dispose();
-      material.dispose();
-      geometry.dispose();
-    }
+  private disposeContext(context: {
+    geometry: THREE.BufferGeometry;
+    material: THREE.ShaderMaterial;
+    mesh: THREE.Mesh;
+    target: THREE.WebGLRenderTarget;
+  }): void {
+    this.scene.remove(context.mesh);
+    context.target.dispose();
+    context.material.dispose();
+    context.geometry.dispose();
   }
 
   private async renderChannel(
