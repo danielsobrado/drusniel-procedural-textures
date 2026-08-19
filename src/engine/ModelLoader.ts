@@ -144,8 +144,32 @@ function normalizeResourcePath(value: string): string {
     .replace(/^\.\//u, '') ?? '';
 }
 
+function canonicalBundlePath(value: string): string {
+  const parts = normalizeResourcePath(value).split('/');
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part.length === 0 || part === '.') continue;
+    if (part === '..') {
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack.join('/');
+}
+
 function basename(value: string): string {
-  return normalizeResourcePath(value).split('/').at(-1) ?? '';
+  return canonicalBundlePath(value).split('/').at(-1) ?? '';
+}
+
+function dirname(value: string): string {
+  const normalized = canonicalBundlePath(value);
+  const slash = normalized.lastIndexOf('/');
+  return slash < 0 ? '' : normalized.slice(0, slash);
+}
+
+function joinBundlePath(base: string, relative: string): string {
+  return canonicalBundlePath(base.length === 0 ? relative : `${base}/${relative}`);
 }
 
 function bundleKeys(file: File): string[] {
@@ -159,7 +183,7 @@ function createBundleIndex(files: readonly File[]): Map<string, File[]> {
   const index = new Map<string, File[]>();
   for (const file of files) {
     for (const key of bundleKeys(file)) {
-      const normalized = normalizeResourcePath(key);
+      const normalized = canonicalBundlePath(key);
       const values = index.get(normalized) ?? [];
       if (!values.includes(file)) {
         values.push(file);
@@ -170,12 +194,32 @@ function createBundleIndex(files: readonly File[]): Map<string, File[]> {
   return index;
 }
 
-function resolveBundleFile(uri: string, index: ReadonlyMap<string, File[]>): File {
-  const normalized = normalizeResourcePath(uri);
-  const exact = index.get(normalized);
-  if (exact?.length === 1 && exact[0] !== undefined) {
-    return exact[0];
+function primaryBundlePath(primary: File, index: ReadonlyMap<string, File[]>): string {
+  for (const [path, files] of index) {
+    if (files.includes(primary) && path !== primary.name) {
+      return path;
+    }
   }
+  return primary.name;
+}
+
+function resolveBundleFile(
+  uri: string,
+  index: ReadonlyMap<string, File[]>,
+  primaryPath: string
+): File {
+  const normalized = canonicalBundlePath(uri);
+  const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
+  for (const candidate of [primaryRelative, normalized]) {
+    const exact = index.get(candidate);
+    if (exact?.length === 1 && exact[0] !== undefined) {
+      return exact[0];
+    }
+    if ((exact?.length ?? 0) > 1) {
+      throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
+    }
+  }
+
   const wantedBasename = basename(normalized);
   const matches = new Set<File>();
   for (const [path, files] of index) {
@@ -276,8 +320,9 @@ export class ModelLoader {
 
       const externalUris = collectExternalUris(gltfJson);
       const bundleIndex = createBundleIndex(files);
+      const primaryPath = primaryBundlePath(primary, bundleIndex);
       for (const uri of externalUris) {
-        resolveBundleFile(uri, bundleIndex);
+        resolveBundleFile(uri, bundleIndex, primaryPath);
       }
 
       if (sequence !== this.loadSequence) {
@@ -290,7 +335,7 @@ export class ModelLoader {
         if (DATA_URI.test(url) || url.startsWith('blob:')) {
           return url;
         }
-        const file = resolveBundleFile(url, bundleIndex);
+        const file = resolveBundleFile(url, bundleIndex, primaryPath);
         let objectUrl = objectUrls.get(file);
         if (objectUrl === undefined) {
           objectUrl = URL.createObjectURL(file);
@@ -346,9 +391,13 @@ export class ModelLoader {
     }
 
     annotateMeshes(root);
+    root.userData.labImportedSource = true;
     const scale = PREVIEW_SIZE / largestDimension;
     const normalized = new THREE.Group();
     normalized.name = name;
+    normalized.userData.labPreviewWrapper = true;
+    normalized.userData.labPreviewScale = scale;
+    normalized.userData.labPreviewCenter = center.toArray();
     normalized.add(root);
     normalized.scale.setScalar(scale);
     normalized.position.copy(center).multiplyScalar(-scale);
