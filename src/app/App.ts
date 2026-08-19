@@ -178,7 +178,9 @@ export class App {
   }
 
   private syncObject(state: Readonly<ProjectState>): void {
-    this.projectImportSequence += 1;
+    if (!this.suppressImportedRestore) {
+      this.projectImportSequence += 1;
+    }
     this.modelLoader.cancelPending();
 
     if (
