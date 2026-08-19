@@ -8,7 +8,6 @@ export function applyPhysicalSettings(
   const hadClearcoat = material.clearcoat > 0;
   const hadTransmission = material.transmission > 0;
   const hadSheen = material.sheen > 0;
-
   const hasClearcoat = settings.clearcoat > 0;
   const hasTransmission = settings.transmission > 0;
   const hasSheen = settings.sheen > 0;
