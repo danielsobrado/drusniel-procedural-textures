@@ -6,8 +6,14 @@ import {
   ENVIRONMENTS,
   LAYER_CHANNELS,
   LAYER_KINDS,
+  MAX_GROUP_DEPTH,
+  MAX_GROUP_NAME_LENGTH,
   MAX_GROUPS,
+  MAX_IMPORTED_ASSET_NAME_LENGTH,
+  MAX_IMPORTED_MESHES,
+  MAX_LAYER_NAME_LENGTH,
   MAX_LAYERS,
+  MAX_MESH_LABEL_LENGTH,
   OBJECT_PRESETS
 } from './constants';
 import type {
@@ -25,13 +31,6 @@ import type {
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-const MAX_GROUP_DEPTH = 4;
-
-export const MAX_LAYER_NAME_LENGTH = 120;
-export const MAX_GROUP_NAME_LENGTH = 120;
-export const MAX_IMPORTED_ASSET_NAME_LENGTH = 255;
-export const MAX_MESH_LABEL_LENGTH = 160;
-export const MAX_IMPORTED_MESHES = 2048;
 
 const OBJECT_IDS = new Set<ObjectPreset>(OBJECT_PRESETS.map((item) => item.id));
 const LAYER_KIND_IDS = new Set<LayerKind>(LAYER_KINDS.map((item) => item.id));
@@ -227,17 +226,13 @@ export function normalizePhysicalSettings(value: unknown): PhysicalSettings {
 }
 
 function normalizeGroups(value: unknown): MaterialGroup[] {
-  if (value === undefined) {
-    return [];
-  }
+  if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_GROUPS) {
     throw new Error(`Project groups must be an array with at most ${MAX_GROUPS} entries.`);
   }
   const groups = value.map(normalizeMaterialGroup);
   const ids = new Set(groups.map((group) => group.id));
-  if (ids.size !== groups.length) {
-    throw new Error('Project contains duplicate group ids.');
-  }
+  if (ids.size !== groups.length) throw new Error('Project contains duplicate group ids.');
 
   const byId = new Map(groups.map((group) => [group.id, group]));
   for (const group of groups) {
@@ -248,9 +243,7 @@ function normalizeGroups(value: unknown): MaterialGroup[] {
     let current: MaterialGroup | undefined = group;
     const seen = new Set<string>();
     while (current?.parentId !== null && current?.parentId !== undefined) {
-      if (seen.has(current.id)) {
-        throw new Error('Project contains a cyclic group hierarchy.');
-      }
+      if (seen.has(current.id)) throw new Error('Project contains a cyclic group hierarchy.');
       seen.add(current.id);
       current = byId.get(current.parentId);
       depth += 1;
@@ -263,9 +256,7 @@ function normalizeGroups(value: unknown): MaterialGroup[] {
 }
 
 function normalizeImportedMeshes(value: unknown): ImportedMeshTarget[] {
-  if (value === undefined) {
-    return [];
-  }
+  if (value === undefined) return [];
   if (!Array.isArray(value) || value.length > MAX_IMPORTED_MESHES) {
     throw new Error(`Imported mesh catalog must contain at most ${MAX_IMPORTED_MESHES} entries.`);
   }
@@ -277,9 +268,7 @@ function normalizeImportedMeshes(value: unknown): ImportedMeshTarget[] {
     };
   });
   const ids = new Set(meshes.map((mesh) => mesh.id));
-  if (ids.size !== meshes.length) {
-    throw new Error('Imported mesh catalog contains duplicate ids.');
-  }
+  if (ids.size !== meshes.length) throw new Error('Imported mesh catalog contains duplicate ids.');
   return meshes;
 }
 
@@ -313,9 +302,7 @@ export function normalizeProject(value: unknown): ProjectState {
   const groupIds = new Set(groups.map((group) => group.id));
   const layers = project.layers.map(normalizeMaterialLayer);
   const layerIds = new Set(layers.map((layer) => layer.id));
-  if (layerIds.size !== layers.length) {
-    throw new Error('Project contains duplicate layer ids.');
-  }
+  if (layerIds.size !== layers.length) throw new Error('Project contains duplicate layer ids.');
 
   for (const layer of layers) {
     if (layer.groupId !== null && !groupIds.has(layer.groupId)) {
