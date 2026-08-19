@@ -29,6 +29,8 @@ import type {
   ProjectState
 } from '../materials/types';
 
+export { MAX_GROUP_NAME_LENGTH, MAX_IMPORTED_MESHES, MAX_LAYER_NAME_LENGTH } from './constants';
+
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 
