@@ -37,6 +37,23 @@ function sourceForExport(root: THREE.Object3D): THREE.Object3D {
   return source;
 }
 
+function synchronizeCloneUuids(source: THREE.Object3D, clone: THREE.Object3D): void {
+  const sourceObjects: THREE.Object3D[] = [];
+  const cloneObjects: THREE.Object3D[] = [];
+  source.traverse((object) => sourceObjects.push(object));
+  clone.traverse((object) => cloneObjects.push(object));
+  if (sourceObjects.length !== cloneObjects.length) {
+    throw new Error('Export clone does not match the current object hierarchy.');
+  }
+  for (let index = 0; index < sourceObjects.length; index += 1) {
+    const sourceObject = sourceObjects[index];
+    const cloneObject = cloneObjects[index];
+    if (sourceObject !== undefined && cloneObject !== undefined) {
+      cloneObject.uuid = sourceObject.uuid;
+    }
+  }
+}
+
 function cleanLabMetadata(root: THREE.Object3D): void {
   root.traverse((object) => {
     delete object.userData.labMeshId;
@@ -173,8 +190,6 @@ function disposeResources(resources: ExportResources): void {
 }
 
 export class GlbExporter {
-  private readonly exporter = new GLTFExporter();
-
   public constructor(
     private readonly baker: TextureBaker,
     private readonly compiler: MaterialCompiler
@@ -192,6 +207,7 @@ export class GlbExporter {
     if (sourceMeshes.length === 0) throw new Error('There is no mesh geometry to export.');
 
     const physical = structuredClone(settings);
+    const animations = sourceRoot.animations.map((clip) => clip.clone());
     const bakeMaterial = this.compiler.createBakeMaterial(physical);
     const meshSnapshots: ExportMeshSnapshot[] = [];
     try {
@@ -211,6 +227,7 @@ export class GlbExporter {
     }
 
     const exportRoot = cloneSkeletonSafe(sourceRoot);
+    synchronizeCloneUuids(sourceRoot, exportRoot);
     const exportMeshes = collectMeshes(exportRoot);
     if (exportMeshes.length !== sourceMeshes.length) {
       for (const snapshot of meshSnapshots) {
@@ -252,14 +269,16 @@ export class GlbExporter {
         target.customDistanceMaterial = undefined;
       }
 
-      const result = await this.exporter.parseAsync(exportRoot, {
+      const exporter = new GLTFExporter();
+      const result = await exporter.parseAsync(exportRoot, {
         binary: true,
         embedImages: true,
         onlyVisible: true,
         truncateDrawRange: true,
         forceIndices: true,
         includeCustomExtensions: false,
-        maxTextureSize
+        maxTextureSize,
+        animations
       });
       if (!(result instanceof ArrayBuffer)) {
         throw new Error('GLB exporter returned an unexpected non-binary result.');
