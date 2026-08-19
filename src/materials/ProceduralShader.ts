@@ -116,6 +116,10 @@ float labLayerField(int kind, vec3 position, float scale, float seed) {
   return clamp(position.y * 0.5 + 0.5, 0.0, 1.0);
 }
 
+float labShapeField(float field, float strength) {
+  return clamp(0.5 + (field - 0.5) * max(strength, 0.0), 0.0, 1.0);
+}
+
 float labEvaluateDisplacement(vec3 position) {
   float displacement = 0.0;
 
@@ -135,7 +139,7 @@ float labEvaluateDisplacement(vec3 position) {
       uLabSeed[i]
     );
 
-    float shaped = clamp(field * max(uLabStrength[i], 0.0), 0.0, 1.0);
+    float shaped = labShapeField(field, uLabStrength[i]);
     displacement += (shaped - 0.5) * uLabDisplacement[i] * uLabOpacity[i];
   }
 
@@ -194,7 +198,7 @@ LabSurface labEvaluateSurface(vec3 position) {
       uLabSeed[i]
     );
 
-    float shaped = clamp(field * max(uLabStrength[i], 0.0), 0.0, 1.0);
+    float shaped = labShapeField(field, uLabStrength[i]);
     float coverage = kind == 0 ? 1.0 : mix(0.55, 1.0, shaped);
     float opacity = clamp(uLabOpacity[i] * coverage, 0.0, 1.0);
     float roughnessWeight = kind == 0 ? 1.0 : mix(0.45, 1.0, shaped);
