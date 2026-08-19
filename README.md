@@ -18,7 +18,7 @@ A realtime Three.js material laboratory for building layered procedural surfaces
 - Strict project JSON validation with migration of older physical settings
 - Bounded in-session imported-file restoration for undo/redo
 - Professional compact desktop/tablet/mobile layout
-- Context radial menu on right click, `Space`, or touch long press without breaking right-drag viewport panning
+- Context radial menu on right click, `Space`, or touch long press, including project Open/Save access on narrow layouts without breaking right-drag viewport panning
 - Drag-and-drop layer ordering plus touch-friendly move controls
 - Material preset library including biological/adipose, marble, molten rock and alien dermis
 - Coalesced undo/redo for continuous slider and color edits
@@ -57,7 +57,7 @@ Editor defaults live in `config/lab.yaml`. It contains application limits, impor
 | Frame object | `F` |
 | Wireframe | `W` |
 | Undo | `Ctrl/Cmd + Z` |
-| Redo | `Ctrl/Cmd + Shift + Z` |
+| Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
 Native text-field undo and normal keyboard activation of focused buttons/menu items are preserved.
 
