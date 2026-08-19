@@ -39,19 +39,43 @@ function stripUriSuffix(value: string): string {
   return value.slice(0, end);
 }
 
-function normalizeResourcePath(value: string): string {
+function decodeResourcePath(value: string): string {
   const resourcePath = stripUriSuffix(value).replaceAll('\\', '/');
-  let decoded: string;
   try {
-    decoded = decodeURIComponent(resourcePath);
+    return decodeURIComponent(resourcePath);
   } catch {
-    decoded = resourcePath;
+    return resourcePath;
   }
-  return decoded.replace(/^\.\//u, '');
+}
+
+function canonicalPath(value: string): string {
+  const parts = value.replaceAll('\\', '/').split('/');
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (part.length === 0 || part === '.') continue;
+    if (part === '..') {
+      if (stack.length > 0 && stack.at(-1) !== '..') {
+        stack.pop();
+      } else {
+        stack.push('..');
+      }
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack.join('/');
+}
+
+function canonicalResourcePath(value: string): string {
+  return canonicalPath(decodeResourcePath(value));
+}
+
+function canonicalLocalPath(value: string): string {
+  return canonicalPath(value);
 }
 
 function isRemoteResourceUri(value: string): boolean {
-  return REMOTE_URI.test(normalizeResourcePath(value));
+  return REMOTE_URI.test(decodeResourcePath(value));
 }
 
 function collectExternalUris(value: unknown): string[] {
@@ -152,63 +176,44 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   return json;
 }
 
-function canonicalBundlePath(value: string): string {
-  const parts = normalizeResourcePath(value).split('/');
-  const stack: string[] = [];
-  for (const part of parts) {
-    if (part.length === 0 || part === '.') continue;
-    if (part === '..') {
-      if (stack.length > 0 && stack.at(-1) !== '..') {
-        stack.pop();
-      } else {
-        stack.push('..');
-      }
-      continue;
-    }
-    stack.push(part);
-  }
-  return stack.join('/');
-}
-
 function basename(value: string): string {
-  return canonicalBundlePath(value).split('/').at(-1) ?? '';
+  return value.split('/').at(-1) ?? '';
 }
 
 function dirname(value: string): string {
-  const normalized = canonicalBundlePath(value);
-  const slash = normalized.lastIndexOf('/');
-  return slash < 0 ? '' : normalized.slice(0, slash);
+  const slash = value.lastIndexOf('/');
+  return slash < 0 ? '' : value.slice(0, slash);
 }
 
 function joinBundlePath(base: string, relative: string): string {
-  return canonicalBundlePath(base.length === 0 ? relative : `${base}/${relative}`);
+  return canonicalPath(base.length === 0 ? relative : `${base}/${relative}`);
 }
 
 function bundleKeys(file: File): string[] {
   const relative = file.webkitRelativePath?.trim();
   return relative === undefined || relative.length === 0
-    ? [file.name]
-    : [relative, file.name];
+    ? [canonicalLocalPath(file.name)]
+    : [canonicalLocalPath(relative), canonicalLocalPath(file.name)];
 }
 
 function createBundleIndex(files: readonly File[]): Map<string, File[]> {
   const index = new Map<string, File[]>();
   for (const file of files) {
     for (const key of bundleKeys(file)) {
-      const normalized = canonicalBundlePath(key);
-      const values = index.get(normalized) ?? [];
+      const values = index.get(key) ?? [];
       if (!values.includes(file)) values.push(file);
-      index.set(normalized, values);
+      index.set(key, values);
     }
   }
   return index;
 }
 
 function primaryBundlePath(primary: File, index: ReadonlyMap<string, File[]>): string {
+  const primaryName = canonicalLocalPath(primary.name);
   for (const [path, files] of index) {
-    if (files.includes(primary) && path !== primary.name) return path;
+    if (files.includes(primary) && path !== primaryName) return path;
   }
-  return primary.name;
+  return primaryName;
 }
 
 function resolveBundleFile(
@@ -219,7 +224,7 @@ function resolveBundleFile(
   if (isRemoteResourceUri(uri)) {
     throw new Error(`Remote GLTF resource URIs are not supported: ${uri}`);
   }
-  const normalized = canonicalBundlePath(uri);
+  const normalized = canonicalResourcePath(uri);
   const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
   for (const candidate of [primaryRelative, normalized]) {
     const exact = index.get(candidate);
