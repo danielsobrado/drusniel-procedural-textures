@@ -12,7 +12,11 @@ import {
 } from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
 import { ImportedFileCache } from './ImportedFileCache';
-import { normalizeImportedAssetName, normalizeProject } from './ProjectFile';
+import {
+  MAX_IMPORTED_MESHES,
+  normalizeImportedAssetName,
+  normalizeProject
+} from './ProjectFile';
 import { LabRenderer } from '../engine/LabRenderer';
 import { describeImportedMeshes, ModelLoader } from '../engine/ModelLoader';
 import { disposeObjectResources } from '../engine/ObjectResources';
@@ -31,6 +35,8 @@ import { downloadBlob, downloadDataUrl, downloadText } from '../utils/download';
 const BYTES_PER_MIB = 1024 * 1024;
 const IMPORT_CACHE_ENTRY_LIMIT = HISTORY_LIMIT + 1;
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
+
+type ProductionOperation = 'bake' | 'export';
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
@@ -104,6 +110,7 @@ export class App {
   private suppressImportedRestore = false;
   private projectImportSequence = 0;
   private environmentLoadSequence = 0;
+  private productionOperation: ProductionOperation | null = null;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
@@ -382,6 +389,12 @@ export class App {
       const model = await this.modelLoader.load(files);
       if (model === null) return;
 
+      const meshes = describeImportedMeshes(model);
+      if (meshes.length > MAX_IMPORTED_MESHES) {
+        disposeObjectResources(model);
+        throw new Error(`Imported model exceeds the ${MAX_IMPORTED_MESHES} mesh target limit.`);
+      }
+
       try {
         this.importedFiles.remember(assetName, files);
       } catch (error) {
@@ -389,7 +402,6 @@ export class App {
         throw error;
       }
 
-      const meshes = describeImportedMeshes(model);
       const assignments = Object.fromEntries(meshes.map((mesh) => [mesh.id, true]));
       this.renderer.setImported(model, assignments);
       this.activeImportedName = assetName;
@@ -498,6 +510,7 @@ export class App {
   }
 
   private async bakeTextures(): Promise<void> {
+    if (!this.beginProductionOperation('bake')) return;
     try {
       const quality = this.renderer.getQualityTierSettings();
       this.shell.setStatus(`Baking PBR maps · ${quality.bakeResolution}²…`);
@@ -514,11 +527,13 @@ export class App {
       console.error('Texture bake failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
     } finally {
+      this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
   }
 
   private async exportGlb(): Promise<void> {
+    if (!this.beginProductionOperation('export')) return;
     try {
       this.shell.setStatus('Baking material and exporting GLB…');
       const blob = await this.renderer.exportCurrentGlb(this.state.snapshot.physical);
@@ -528,8 +543,19 @@ export class App {
       console.error('GLB export failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
     } finally {
+      this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
+  }
+
+  private beginProductionOperation(operation: ProductionOperation): boolean {
+    if (this.productionOperation !== null) {
+      const active = this.productionOperation === 'bake' ? 'Texture baking' : 'GLB export';
+      this.shell.toast(`${active} is already running.`, 'error');
+      return false;
+    }
+    this.productionOperation = operation;
+    return true;
   }
 
   private setQualityTier(tier: QualityTier): void {
