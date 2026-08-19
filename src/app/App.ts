@@ -25,11 +25,19 @@ import { downloadDataUrl, downloadText } from '../utils/download';
 
 const BYTES_PER_MIB = 1024 * 1024;
 
-function isEditableTarget(target: EventTarget | null): boolean {
+function isTextEditingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable);
+}
+
+function isInteractiveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+
+  return target.closest('button, a[href], summary, [role="button"], [role="menuitem"]') !== null;
 }
 
 function loadInitialProject(): ProjectState {
@@ -318,7 +326,7 @@ export class App {
 
   private bindKeyboard(): void {
     window.addEventListener('keydown', (event) => {
-      if (isEditableTarget(event.target)) {
+      if (isTextEditingTarget(event.target)) {
         return;
       }
 
@@ -333,7 +341,7 @@ export class App {
         return;
       }
 
-      if (modifier || event.altKey) {
+      if (isInteractiveTarget(event.target) || modifier || event.altKey) {
         return;
       }
 
