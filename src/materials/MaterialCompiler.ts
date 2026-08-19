@@ -209,17 +209,23 @@ export class MaterialCompiler {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
 
+      const varyings = [
+        'varying vec3 vLabPosition;',
+        'varying vec3 vLabWorldPosition;',
+        'varying float vLabDisplacement;'
+      ].join('\n');
+
       shader.vertexShader = shader.vertexShader
         .replace(
           '#include <common>',
-          `#include <common>\n${SHARED_GLSL}\nvarying vec3 vLabPosition;\nvarying vec3 vLabWorldPosition;`
+          `#include <common>\n${SHARED_GLSL}\n${varyings}`
         )
         .replace('#include <skinning_vertex>', SURFACE_VERTEX_DISPLACEMENT_GLSL);
 
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
-          `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\nvarying vec3 vLabPosition;\nvarying vec3 vLabWorldPosition;`
+          `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\n${varyings}`
         )
         .replace(
           '#include <color_fragment>',
@@ -234,7 +240,7 @@ export class MaterialCompiler {
         .replace('#include <lights_fragment_end>', SSS_LIGHT_GLSL);
     };
 
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v5';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v6';
   }
 
   private configureShadowShader(
@@ -248,6 +254,6 @@ export class MaterialCompiler {
         .replace('#include <begin_vertex>', SHADOW_NORMAL_GLSL)
         .replace('#include <skinning_vertex>', SHADOW_VERTEX_DISPLACEMENT_GLSL);
     };
-    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v2`;
+    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v3`;
   }
 }
