@@ -36,6 +36,26 @@ export interface BakeMeshSnapshot {
   readonly generatedUvAtlas: boolean;
 }
 
+interface UvTriangle {
+  readonly index: number;
+  readonly ax: number;
+  readonly ay: number;
+  readonly bx: number;
+  readonly by: number;
+  readonly cx: number;
+  readonly cy: number;
+  readonly minX: number;
+  readonly maxX: number;
+  readonly minY: number;
+  readonly maxY: number;
+}
+
+interface BakeContext {
+  scene: THREE.Scene;
+  mesh: THREE.Mesh;
+  target: THREE.WebGLRenderTarget;
+}
+
 const CHANNEL_MODE: Record<BakeChannel, number> = {
   albedo: 0,
   roughness: 1,
@@ -46,7 +66,9 @@ const CHANNEL_MODE: Record<BakeChannel, number> = {
 };
 
 const UV_EPSILON = 1e-5;
-const UV_OVERLAP_GRID_SIZE = 256;
+const UV_AREA_EPSILON = 1e-10;
+const MIN_UV_OVERLAP_GRID_SIZE = 16;
+const MAX_UV_OVERLAP_GRID_SIZE = 256;
 const TRIANGLE_ATLAS_PADDING = 0.14;
 
 function needsDeformedGeometry(mesh: THREE.Mesh): boolean {
@@ -57,49 +79,68 @@ function needsDeformedGeometry(mesh: THREE.Mesh): boolean {
 function triangleVertexIndex(
   geometry: THREE.BufferGeometry,
   triangle: number,
-  corner: number
+  corner: number,
+  vertexCount: number,
+  meshName: string
 ): number {
   const index = geometry.getIndex();
-  return index === null ? triangle * 3 + corner : index.getX(triangle * 3 + corner);
-}
-
-function shareEdge(
-  geometry: THREE.BufferGeometry,
-  firstTriangle: number,
-  secondTriangle: number
-): boolean {
-  let shared = 0;
-  for (let firstCorner = 0; firstCorner < 3; firstCorner += 1) {
-    const first = triangleVertexIndex(geometry, firstTriangle, firstCorner);
-    for (let secondCorner = 0; secondCorner < 3; secondCorner += 1) {
-      if (first === triangleVertexIndex(geometry, secondTriangle, secondCorner)) {
-        shared += 1;
-        break;
-      }
-    }
+  const value = index === null ? triangle * 3 + corner : index.getX(triangle * 3 + corner);
+  if (!Number.isInteger(value) || value < 0 || value >= vertexCount) {
+    throw new Error(`Mesh "${meshName}" contains an invalid triangle index.`);
   }
-  return shared >= 2;
+  return value;
 }
 
-function pointInTriangle(
-  px: number,
-  py: number,
-  ax: number,
-  ay: number,
-  bx: number,
-  by: number,
-  cx: number,
-  cy: number
+function projectionRange(
+  triangle: UvTriangle,
+  axisX: number,
+  axisY: number
+): readonly [number, number] {
+  const a = triangle.ax * axisX + triangle.ay * axisY;
+  const b = triangle.bx * axisX + triangle.by * axisY;
+  const c = triangle.cx * axisX + triangle.cy * axisY;
+  return [Math.min(a, b, c), Math.max(a, b, c)];
+}
+
+function hasPositiveProjectionOverlap(
+  first: UvTriangle,
+  second: UvTriangle,
+  edgeX: number,
+  edgeY: number
 ): boolean {
-  const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
-  const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
-  const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
-  const hasNegative = d1 < -UV_EPSILON || d2 < -UV_EPSILON || d3 < -UV_EPSILON;
-  const hasPositive = d1 > UV_EPSILON || d2 > UV_EPSILON || d3 > UV_EPSILON;
-  return !(hasNegative && hasPositive);
+  const axisLength = Math.hypot(edgeX, edgeY);
+  if (axisLength <= UV_AREA_EPSILON) return false;
+  const axisX = -edgeY / axisLength;
+  const axisY = edgeX / axisLength;
+  const firstRange = projectionRange(first, axisX, axisY);
+  const secondRange = projectionRange(second, axisX, axisY);
+  const overlap = Math.min(firstRange[1], secondRange[1]) - Math.max(firstRange[0], secondRange[0]);
+  return overlap > UV_EPSILON;
 }
 
-function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void {
+function trianglesOverlapWithArea(first: UvTriangle, second: UvTriangle): boolean {
+  if (
+    Math.min(first.maxX, second.maxX) - Math.max(first.minX, second.minX) <= UV_EPSILON ||
+    Math.min(first.maxY, second.maxY) - Math.max(first.minY, second.minY) <= UV_EPSILON
+  ) {
+    return false;
+  }
+
+  const edges = [
+    [first.bx - first.ax, first.by - first.ay],
+    [first.cx - first.bx, first.cy - first.by],
+    [first.ax - first.cx, first.ay - first.cy],
+    [second.bx - second.ax, second.by - second.ay],
+    [second.cx - second.bx, second.cy - second.by],
+    [second.ax - second.cx, second.ay - second.cy]
+  ] as const;
+
+  return edges.every(([edgeX, edgeY]) =>
+    hasPositiveProjectionOverlap(first, second, edgeX, edgeY)
+  );
+}
+
+function createUvTriangles(geometry: THREE.BufferGeometry, meshName: string): UvTriangle[] {
   const uv = geometry.getAttribute('uv');
   const position = geometry.getAttribute('position');
   if (uv === undefined || uv.count === 0) {
@@ -109,9 +150,9 @@ function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void 
     throw new Error(`Mesh "${meshName}" has invalid UV or position attributes.`);
   }
 
-  for (let index = 0; index < uv.count; index += 1) {
-    const u = uv.getX(index);
-    const v = uv.getY(index);
+  for (let vertex = 0; vertex < uv.count; vertex += 1) {
+    const u = uv.getX(vertex);
+    const v = uv.getY(vertex);
     if (!Number.isFinite(u) || !Number.isFinite(v)) {
       throw new Error(`Mesh "${meshName}" contains non-finite UV coordinates.`);
     }
@@ -122,16 +163,17 @@ function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void 
     }
   }
 
-  const index = geometry.getIndex();
-  const indexCount = index?.count ?? position.count;
-  const triangleCount = Math.floor(indexCount / 3);
-  const occupancy = new Int32Array(UV_OVERLAP_GRID_SIZE * UV_OVERLAP_GRID_SIZE);
-  occupancy.fill(-1);
+  const indexCount = geometry.getIndex()?.count ?? position.count;
+  if (indexCount < 3 || indexCount % 3 !== 0) {
+    throw new Error(`Mesh "${meshName}" does not contain a valid triangle list for texture baking.`);
+  }
 
+  const triangleCount = indexCount / 3;
+  const triangles: UvTriangle[] = [];
   for (let triangle = 0; triangle < triangleCount; triangle += 1) {
-    const ia = triangleVertexIndex(geometry, triangle, 0);
-    const ib = triangleVertexIndex(geometry, triangle, 1);
-    const ic = triangleVertexIndex(geometry, triangle, 2);
+    const ia = triangleVertexIndex(geometry, triangle, 0, position.count, meshName);
+    const ib = triangleVertexIndex(geometry, triangle, 1, position.count, meshName);
+    const ic = triangleVertexIndex(geometry, triangle, 2, position.count, meshName);
     const ax = uv.getX(ia);
     const ay = uv.getY(ia);
     const bx = uv.getX(ib);
@@ -139,33 +181,60 @@ function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void 
     const cx = uv.getX(ic);
     const cy = uv.getY(ic);
     const doubledArea = Math.abs((bx - ax) * (cy - ay) - (by - ay) * (cx - ax));
-    if (doubledArea <= 1e-10) continue;
+    if (doubledArea <= UV_AREA_EPSILON) {
+      throw new Error(
+        `Mesh "${meshName}" contains a degenerate UV triangle. Texture baking requires a non-degenerate unique unwrap.`
+      );
+    }
+    triangles.push({
+      index: triangle,
+      ax,
+      ay,
+      bx,
+      by,
+      cx,
+      cy,
+      minX: Math.min(ax, bx, cx),
+      maxX: Math.max(ax, bx, cx),
+      minY: Math.min(ay, by, cy),
+      maxY: Math.max(ay, by, cy)
+    });
+  }
+  return triangles;
+}
 
-    const minX = Math.max(0, Math.floor(Math.min(ax, bx, cx) * UV_OVERLAP_GRID_SIZE));
-    const maxX = Math.min(
-      UV_OVERLAP_GRID_SIZE - 1,
-      Math.floor(Math.max(ax, bx, cx) * UV_OVERLAP_GRID_SIZE)
-    );
-    const minY = Math.max(0, Math.floor(Math.min(ay, by, cy) * UV_OVERLAP_GRID_SIZE));
-    const maxY = Math.min(
-      UV_OVERLAP_GRID_SIZE - 1,
-      Math.floor(Math.max(ay, by, cy) * UV_OVERLAP_GRID_SIZE)
-    );
+function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void {
+  const triangles = createUvTriangles(geometry, meshName);
+  const gridSize = Math.min(
+    MAX_UV_OVERLAP_GRID_SIZE,
+    Math.max(MIN_UV_OVERLAP_GRID_SIZE, Math.ceil(Math.sqrt(triangles.length)))
+  );
+  const cells = new Map<number, number[]>();
+  const testedPairs = new Set<number>();
+
+  for (const triangle of triangles) {
+    const minX = Math.max(0, Math.min(gridSize - 1, Math.floor(triangle.minX * gridSize)));
+    const maxX = Math.max(0, Math.min(gridSize - 1, Math.floor(triangle.maxX * gridSize)));
+    const minY = Math.max(0, Math.min(gridSize - 1, Math.floor(triangle.minY * gridSize)));
+    const maxY = Math.max(0, Math.min(gridSize - 1, Math.floor(triangle.maxY * gridSize)));
 
     for (let y = minY; y <= maxY; y += 1) {
       for (let x = minX; x <= maxX; x += 1) {
-        const px = (x + 0.5) / UV_OVERLAP_GRID_SIZE;
-        const py = (y + 0.5) / UV_OVERLAP_GRID_SIZE;
-        if (!pointInTriangle(px, py, ax, ay, bx, by, cx, cy)) continue;
-
-        const cell = y * UV_OVERLAP_GRID_SIZE + x;
-        const previous = occupancy[cell];
-        if (previous >= 0 && previous !== triangle && !shareEdge(geometry, previous, triangle)) {
-          throw new Error(
-            `Mesh "${meshName}" contains overlapping or mirrored UV islands. Texture baking requires a unique unwrap.`
-          );
+        const cellId = y * gridSize + x;
+        const occupants = cells.get(cellId) ?? [];
+        for (const previousIndex of occupants) {
+          const pairId = previousIndex * triangles.length + triangle.index;
+          if (testedPairs.has(pairId)) continue;
+          testedPairs.add(pairId);
+          const previous = triangles[previousIndex];
+          if (previous !== undefined && trianglesOverlapWithArea(previous, triangle)) {
+            throw new Error(
+              `Mesh "${meshName}" contains overlapping or mirrored UV islands. Texture baking requires a unique unwrap.`
+            );
+          }
         }
-        occupancy[cell] = triangle;
+        occupants.push(triangle.index);
+        cells.set(cellId, occupants);
       }
     }
   }
@@ -174,12 +243,12 @@ function validateBakeUv(geometry: THREE.BufferGeometry, meshName: string): void 
 function createTriangleAtlas(source: THREE.BufferGeometry): THREE.BufferGeometry {
   const atlas = source.getIndex() === null ? source.clone() : source.toNonIndexed();
   const position = atlas.getAttribute('position');
-  if (position === undefined || position.count < 3) {
+  if (position === undefined || position.count < 3 || position.count % 3 !== 0) {
     atlas.dispose();
-    throw new Error('Cannot create a bake UV atlas for geometry without triangles.');
+    throw new Error('Cannot create a bake UV atlas for geometry without a valid triangle list.');
   }
 
-  const triangleCount = Math.floor(position.count / 3);
+  const triangleCount = position.count / 3;
   const grid = Math.ceil(Math.sqrt(triangleCount));
   const cell = 1 / grid;
   const padding = TRIANGLE_ATLAS_PADDING * cell;
@@ -306,13 +375,7 @@ function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-interface BakeContext {
-  mesh: THREE.Mesh;
-  target: THREE.WebGLRenderTarget;
-}
-
 export class TextureBaker {
-  private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
   public constructor(
@@ -346,7 +409,7 @@ export class TextureBaker {
       const common = await this.renderPbrSnapshot(snapshot, settings, resolution, material);
       const context = this.createContext(snapshot, material, resolution);
       try {
-        const height = await this.renderChannel(context.target, material, 'height', resolution);
+        const height = await this.renderChannel(context, material, 'height', resolution);
         return { ...common, height };
       } finally {
         this.disposeContext(context);
@@ -400,12 +463,12 @@ export class TextureBaker {
     }
 
     try {
-      const albedo = await this.renderChannel(context.target, material, 'albedo', resolution);
-      const roughness = await this.renderChannel(context.target, material, 'roughness', resolution);
-      const normal = await this.renderChannel(context.target, material, 'normal', resolution);
-      const clearcoat = await this.renderChannel(context.target, material, 'clearcoat', resolution);
+      const albedo = await this.renderChannel(context, material, 'albedo', resolution);
+      const roughness = await this.renderChannel(context, material, 'roughness', resolution);
+      const normal = await this.renderChannel(context, material, 'normal', resolution);
+      const clearcoat = await this.renderChannel(context, material, 'clearcoat', resolution);
       const clearcoatRoughness = await this.renderChannel(
-        context.target,
+        context,
         material,
         'clearcoat-roughness',
         resolution
@@ -421,11 +484,12 @@ export class TextureBaker {
     material: THREE.ShaderMaterial,
     resolution: number
   ): BakeContext {
+    const scene = new THREE.Scene();
     const mesh = new THREE.Mesh(snapshot.geometry, material);
     mesh.matrixAutoUpdate = false;
     mesh.matrix.copy(snapshot.matrixWorld);
     mesh.matrixWorld.copy(snapshot.matrixWorld);
-    this.scene.add(mesh);
+    scene.add(mesh);
 
     const target = new THREE.WebGLRenderTarget(resolution, resolution, {
       depthBuffer: false,
@@ -433,16 +497,16 @@ export class TextureBaker {
     });
     target.texture.colorSpace = THREE.NoColorSpace;
     target.texture.generateMipmaps = false;
-    return { mesh, target };
+    return { scene, mesh, target };
   }
 
   private disposeContext(context: BakeContext): void {
-    this.scene.remove(context.mesh);
+    context.scene.remove(context.mesh);
     context.target.dispose();
   }
 
   private async renderChannel(
-    target: THREE.WebGLRenderTarget,
+    context: BakeContext,
     material: THREE.ShaderMaterial,
     channel: BakeChannel,
     resolution: number
@@ -457,11 +521,11 @@ export class TextureBaker {
     const pixels = new Uint8Array(resolution * resolution * 4);
 
     try {
-      this.renderer.setRenderTarget(target);
+      this.renderer.setRenderTarget(context.target);
       this.renderer.setClearColor(0x000000, 0);
       this.renderer.clear(true, true, true);
-      this.renderer.render(this.scene, this.camera);
-      this.renderer.readRenderTargetPixels(target, 0, 0, resolution, resolution, pixels);
+      this.renderer.render(context.scene, this.camera);
+      this.renderer.readRenderTargetPixels(context.target, 0, 0, resolution, resolution, pixels);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       this.renderer.setClearColor(previousClearColor, previousClearAlpha);
@@ -477,11 +541,11 @@ export class TextureBaker {
     const canvas = document.createElement('canvas');
     canvas.width = resolution;
     canvas.height = resolution;
-    const context = canvas.getContext('2d');
-    if (context === null) {
+    const canvasContext = canvas.getContext('2d');
+    if (canvasContext === null) {
       throw new Error('Browser does not provide a 2D canvas required for texture baking.');
     }
-    context.putImageData(new ImageData(padded, resolution, resolution), 0, 0);
+    canvasContext.putImageData(new ImageData(padded, resolution, resolution), 0, 0);
     return { canvas, blob: await canvasToPng(canvas) };
   }
 }
