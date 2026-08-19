@@ -1,32 +1,58 @@
 # Procedural Texture Lab
 
-A realtime Three.js material laboratory for building layered procedural surfaces and applying them to built-in preview geometry or imported GLB/self-contained GLTF models.
+A realtime Three.js material laboratory for building layered procedural surfaces and applying them to built-in preview geometry or imported GLB/GLTF models.
 
 ## Current features
 
+### Procedural authoring
+
 - Layered procedural material stack with live physical rendering
-- Base, FBM, cellular, ridges, spots, veins and gradient generators
+- Base, FBM, cellular, ridges, spots, veins, gradient, branching vessels, wet-film and subsurface-tissue generators
 - Normal, multiply, add, screen and overlay blending
+- Per-layer output routing to surface, color, roughness, height, clearcoat/wetness or SSS
+- Layer masks sourced from another procedural layer with strength and inversion
+- Nested material groups with enable/opacity inheritance
 - Per-layer color, opacity, scale, strength, seed, roughness and displacement
-- Global physical surface controls for roughness, metalness, clearcoat, clearcoat roughness, specular intensity and IOR
-- Advanced physical controls for sheen, transmission, thickness and volumetric attenuation color/distance
-- Built-in sphere, icosphere, cube, rounded cube, torus and plane targets
-- GLB/self-contained GLTF import plus viewport drag/drop
-- Configured model/project import size limits
-- Automatic model normalization, stale-operation cancellation and GPU resource cleanup
-- Morph/skinning-aware procedural displacement with matching depth/distance shadow passes
-- Strict project JSON validation with migration of older physical settings
-- Bounded in-session imported-file restoration for undo/redo
-- Professional compact desktop/tablet/mobile layout
-- Context radial menu on right click, `Space`, or touch long press, including project Open/Save access on narrow layouts without breaking right-drag viewport panning
+- Displacement-aware fragment normals reconstructed from the displaced surface
+- Matching depth/distance displacement for shadows
+
+### Biological material depth
+
+- Branching multi-frequency vessel generator
+- Dedicated subsurface-tissue channel with realtime view-dependent scattering approximation
+- Procedural wet-film layer driving per-pixel clearcoat and coat roughness
+- Adipose SSS preset combining deep fat, lobules, fascia, vessels, subsurface depth and wet membrane
+
+### Physical rendering
+
+- Global roughness, metalness, clearcoat, clearcoat roughness, specular intensity and IOR
+- Sheen, transmission, thickness and volumetric attenuation color/distance
+- ACES filmic tone mapping and PMREM reflections
+- Neutral, warm, cool and night studio environments
+- Custom Radiance `.hdr` environment import
+
+### Geometry and imported assets
+
+- Sphere, icosphere, cube, rounded cube, torus and plane preview targets
+- GLB, self-contained GLTF and multi-file GLTF bundles
+- Multi-file GLTF resources are resolved only from the explicitly selected local bundle; remote resource URIs are rejected
+- Automatic model normalization, missing-normal generation, stale-operation cancellation and GPU cleanup
+- Imported scenes expose individual mesh targets
+- Click a mesh in the viewport or choose it in the inspector
+- Apply/remove the lab material per imported mesh while preserving its original material
+- Selected-mesh framing and viewport outline
+
+### Editor workflow
+
+- Compact responsive desktop/tablet/mobile layout
+- Context radial menu on right click, `Space`, or touch long press
 - Drag-and-drop layer ordering plus touch-friendly move controls
-- Material preset library including biological/adipose, marble, molten rock and alien dermis
-- Coalesced undo/redo for continuous slider and color edits
-- Wireframe preview
-- PNG viewport capture without permanently preserving the WebGL drawing buffer
-- Project JSON import/export
-- localStorage autosave
-- Validated YAML configuration for editor, interaction, numeric control ranges, catalog, material and renderer defaults
+- Material preset library
+- Coalesced undo/redo for continuous edits
+- Wireframe preview and PNG capture
+- Project JSON import/export and localStorage autosave
+- Version-1 project migration to the current version-2 format
+- Validated YAML configuration for limits, controls, catalogs, environments and renderer defaults
 
 ## Run locally
 
@@ -44,47 +70,65 @@ npm run preview
 
 ## Configuration
 
-Editor defaults live in `config/lab.yaml`. It contains application limits, import limits, history/autosave timing, radial/touch interaction values, layer and physical-control ranges, object/layer/blend catalogs, physical surface defaults and renderer/camera settings. The configuration is parsed and validated at startup; invalid or incomplete configuration fails explicitly instead of being cast into the runtime types.
+Editor defaults live in `config/lab.yaml`. It contains application/import/history limits, radial and touch interaction values, layer/group/physical numeric ranges, object/layer/channel/environment/blend catalogs, physical defaults and renderer settings.
+
+The YAML document is parsed and validated at startup. Missing, duplicate, unknown or out-of-range configuration fails explicitly.
 
 ## Controls
 
 | Action | Control |
 | --- | --- |
 | Orbit | Left drag |
+| Select imported mesh | Click mesh |
 | Pan | Right drag |
 | Zoom | Wheel / pinch |
 | Radial menu | Right click, `Space`, or touch long press |
-| Frame object | `F` |
+| Frame object/selected mesh | `F` |
 | Wireframe | `W` |
 | Undo | `Ctrl/Cmd + Z` |
 | Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
-Native text-field undo and normal keyboard activation of focused buttons/menu items are preserved.
+Native text-field undo and normal keyboard activation of focused controls are preserved. The radial menu supports arrow keys, Home/End and Escape.
 
 ## Architecture
 
-The editor state, Three.js renderer, material compiler and UI are intentionally separated.
-
-- `config/lab.yaml` — editable application, interaction, material, control-range and renderer configuration
+- `config/lab.yaml` — validated editor/material/renderer configuration
 - `src/config` — typed YAML parsing and validation
-- `src/app` — project state, bounded imported-file restoration, project-file validation and application orchestration
-- `src/engine` — viewport, procedural geometry, model loading and Three.js resource cleanup
-- `src/materials` — material domain types, presets, physical settings and isolated GLSL compiler/source
-- `src/ui` — compact panels, layer dock, touch interaction and radial menu
-- `src/utils` — browser downloads, IDs and safe HTML helpers
+- `src/app` — project state, migrations, history, imported-file cache and orchestration
+- `src/engine` — renderer, environments, procedural geometry, model loading and GPU resource cleanup
+- `src/materials` — material domain model, presets, physical settings and procedural GLSL compiler
+- `src/ui` — compact panels, inspector, layer dock and radial interactions
+- `src/utils` — browser downloads, IDs and HTML helpers
 
-The procedural compiler injects a fixed-size layer runtime into `MeshPhysicalMaterial`, preserving Three.js physical lighting while allowing the active material stack to drive color, roughness and vertex displacement. Procedural displacement is evaluated after morph/skinning deformation in normalized world space, so imported mesh transforms and source units do not unexpectedly change texture scale. Custom depth/distance materials apply the same displacement to shadow passes. The physical inspector controls the underlying PBR response independently from per-layer roughness contributions and can enable sheen/transmission volume features when required.
+The procedural compiler injects a fixed-size runtime into `MeshPhysicalMaterial`. Layers are evaluated in normalized world space after morph/skinning deformation. Masks and nested-group opacity are compiled into the same layer pass. Routed height modifies geometry and shadow passes; color/roughness/clearcoat/SSS channels only affect their intended response. Strong displacement lighting uses screen-space derivatives of the displaced world position rather than the original mesh normal.
 
 ## Project format
 
-Projects are JSON documents containing the material stack, physical material settings and viewport state. Project files and autosaves are normalized and range-validated before entering application state. Persisted names and IDs are length/format checked. Imported model bytes are intentionally not embedded in Phase 1 project JSON; re-import the referenced GLB/GLTF when reopening a project that used an external model.
+Current projects use format version `2`. Version `1` JSON imports are migrated automatically.
 
-External-resource GLTF bundles are rejected before loading. Use GLB or a self-contained GLTF for Phase 1. This avoids partially loaded models and unexpected external-resource requests.
+Project JSON stores:
+
+- procedural layers, masks and groups
+- physical settings
+- preview object/background/wireframe
+- environment selection
+- imported mesh catalog and per-mesh assignments
+- imported asset/HDR names as restoration metadata
+
+Imported model bytes and custom HDR bytes are intentionally not embedded in JSON. A reopened project may therefore ask you to re-select the referenced model bundle or HDR file. In-session model bundles are cached within configured limits for undo/redo restoration.
+
+## GLTF bundles
+
+For an external-resource GLTF, select the `.gltf`, referenced `.bin` files and textures together. Relative resources are resolved from that explicit selection and never fetched from the network. Missing or ambiguous resources fail with an explicit error.
+
+## Rendering notes
+
+The SSS layer is a realtime raster approximation intended for interactive biological-material authoring. It is not path-traced volumetric scattering. Wet-film layers modulate the physical clearcoat response per pixel. Displaced normals are reconstructed from screen-space derivatives, which is robust for arbitrary imported topology but remains a raster approximation at silhouettes and discontinuities.
 
 ## Verification
 
-The repository includes a GitHub Actions workflow that installs dependencies and runs `npm run build` on pushes to `main` and pull requests. Local verification uses the same production build command above.
+GitHub Actions installs dependencies and runs `npm run build` on pushes to `main` and pull requests. Local verification uses the same command.
 
 ## Roadmap
 
-See [`docs/PLAN.md`](docs/PLAN.md) for the implementation plan. Next material-focused milestones are masks/groups, dedicated biological SSS, procedural wet-film masks, environment libraries, displaced-normal lighting, texture baking and optimized GLB export.
+See [`docs/PLAN.md`](docs/PLAN.md). Phase 1 and Phase 2 are implemented. Phase 3 focuses on texture/height/normal baking, optimized GLB export, thumbnails and performance tooling.
