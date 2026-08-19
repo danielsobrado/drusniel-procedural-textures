@@ -35,6 +35,15 @@ import type {
 
 type MeshMaterial = THREE.Material | THREE.Material[];
 
+interface OriginalMeshState {
+  material: MeshMaterial;
+  castShadow: boolean;
+  receiveShadow: boolean;
+  frustumCulled: boolean;
+  customDepthMaterial: THREE.Material | undefined;
+  customDistanceMaterial: THREE.Material | undefined;
+}
+
 function materialSet(material: MeshMaterial): Set<THREE.Material> {
   return new Set(Array.isArray(material) ? material : [material]);
 }
@@ -73,7 +82,7 @@ export class LabRenderer {
 
   private currentRoot: THREE.Object3D | null = null;
   private readonly meshById = new Map<string, THREE.Mesh>();
-  private readonly originalMeshMaterials = new Map<string, MeshMaterial>();
+  private readonly originalMeshStates = new Map<string, OriginalMeshState>();
   private selectedMeshId: string | null = null;
   private meshSelectionCallback: ((id: string | null) => void) | null = null;
   private performanceCallback: ((stats: PerformanceStats) => void) | null = null;
@@ -167,7 +176,7 @@ export class LabRenderer {
   }
 
   public setImported(root: THREE.Object3D, assignments: Readonly<Record<string, boolean>> = {}): void {
-    const originals = new Map<string, MeshMaterial>();
+    const originals = new Map<string, OriginalMeshState>();
     const meshes = new Map<string, THREE.Mesh>();
 
     root.traverse((object) => {
@@ -180,7 +189,14 @@ export class LabRenderer {
       }
       const id = object.userData.labMeshId;
       if (typeof id !== 'string') return;
-      originals.set(id, object.material);
+      originals.set(id, {
+        material: object.material,
+        castShadow: object.castShadow,
+        receiveShadow: object.receiveShadow,
+        frustumCulled: object.frustumCulled,
+        customDepthMaterial: object.customDepthMaterial,
+        customDistanceMaterial: object.customDistanceMaterial
+      });
       meshes.set(id, object);
     });
 
@@ -195,13 +211,14 @@ export class LabRenderer {
         mesh.material = this.compiler.material;
         this.applyProceduralMeshSettings(mesh);
       } else {
-        const original = this.originalMeshMaterials.get(id);
-        if (original !== undefined) mesh.material = original;
-        mesh.customDepthMaterial = undefined;
-        mesh.customDistanceMaterial = undefined;
-        mesh.castShadow = true;
-        mesh.receiveShadow = true;
-        mesh.frustumCulled = true;
+        const original = this.originalMeshStates.get(id);
+        if (original === undefined) continue;
+        mesh.material = original.material;
+        mesh.customDepthMaterial = original.customDepthMaterial;
+        mesh.customDistanceMaterial = original.customDistanceMaterial;
+        mesh.castShadow = original.castShadow;
+        mesh.receiveShadow = original.receiveShadow;
+        mesh.frustumCulled = original.frustumCulled;
       }
     }
   }
@@ -310,6 +327,10 @@ export class LabRenderer {
     this.scene.remove(this.selectionHelper);
     this.selectionHelper.dispose();
     this.environments.dispose();
+    this.key.shadow.map?.dispose();
+    this.key.shadow.map = null;
+    this.key.shadow.mapPass?.dispose();
+    this.key.shadow.mapPass = null;
     this.compiler.dispose();
     this.renderer.dispose();
   }
@@ -389,13 +410,13 @@ export class LabRenderer {
 
   private replaceRoot(
     root: THREE.Object3D,
-    originals: Map<string, MeshMaterial>,
+    originals: Map<string, OriginalMeshState>,
     meshes: Map<string, THREE.Mesh>
   ): void {
     this.disposeCurrentRoot();
     this.currentRoot = root;
-    this.originalMeshMaterials.clear();
-    originals.forEach((material, id) => this.originalMeshMaterials.set(id, material));
+    this.originalMeshStates.clear();
+    originals.forEach((state, id) => this.originalMeshStates.set(id, state));
     this.meshById.clear();
     meshes.forEach((mesh, id) => this.meshById.set(id, mesh));
     this.selectedMeshId = null;
@@ -411,8 +432,8 @@ export class LabRenderer {
     const visibleMeshMaterials = collectMeshMaterials(root);
     const retainedNonMesh = collectNonMeshMaterials(root);
     const hiddenOriginals = new Set<THREE.Material>();
-    for (const material of this.originalMeshMaterials.values()) {
-      for (const item of materialSet(material)) {
+    for (const original of this.originalMeshStates.values()) {
+      for (const item of materialSet(original.material)) {
         if (!visibleMeshMaterials.has(item)) hiddenOriginals.add(item);
       }
     }
@@ -421,7 +442,7 @@ export class LabRenderer {
     this.scene.remove(root);
     disposeObjectResources(root, new Set([this.compiler.material]));
     this.currentRoot = null;
-    this.originalMeshMaterials.clear();
+    this.originalMeshStates.clear();
     this.meshById.clear();
     this.selectedMeshId = null;
     this.selectionHelper.visible = false;
