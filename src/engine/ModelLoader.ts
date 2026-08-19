@@ -31,6 +31,29 @@ function isContainer(value: unknown): boolean {
   return Array.isArray(value) || asRecord(value) !== null;
 }
 
+function stripUriSuffix(value: string): string {
+  const queryIndex = value.indexOf('?');
+  const fragmentIndex = value.indexOf('#');
+  const indexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
+  const end = indexes.length === 0 ? value.length : Math.min(...indexes);
+  return value.slice(0, end);
+}
+
+function normalizeResourcePath(value: string): string {
+  const resourcePath = stripUriSuffix(value).replaceAll('\\', '/');
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(resourcePath);
+  } catch {
+    decoded = resourcePath;
+  }
+  return decoded.replace(/^\.\//u, '');
+}
+
+function isRemoteResourceUri(value: string): boolean {
+  return REMOTE_URI.test(normalizeResourcePath(value));
+}
+
 function collectExternalUris(value: unknown): string[] {
   const uris = new Set<string>();
   const pending: unknown[] = [value];
@@ -44,7 +67,7 @@ function collectExternalUris(value: unknown): string[] {
     if (record === null) continue;
     for (const [key, child] of Object.entries(record)) {
       if (key === 'uri' && typeof child === 'string' && !DATA_URI.test(child)) {
-        if (REMOTE_URI.test(child)) {
+        if (isRemoteResourceUri(child)) {
           throw new Error(`Remote GLTF resource URIs are not supported: ${child}`);
         }
         uris.add(child);
@@ -129,19 +152,6 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
   return json;
 }
 
-function normalizeResourcePath(value: string): string {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(value);
-  } catch {
-    decoded = value;
-  }
-  return decoded
-    .split(/[?#]/u, 1)[0]
-    ?.replaceAll('\\', '/')
-    .replace(/^\.\//u, '') ?? '';
-}
-
 function canonicalBundlePath(value: string): string {
   const parts = normalizeResourcePath(value).split('/');
   const stack: string[] = [];
@@ -206,6 +216,9 @@ function resolveBundleFile(
   index: ReadonlyMap<string, File[]>,
   primaryPath: string
 ): File {
+  if (isRemoteResourceUri(uri)) {
+    throw new Error(`Remote GLTF resource URIs are not supported: ${uri}`);
+  }
   const normalized = canonicalBundlePath(uri);
   const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
   for (const candidate of [primaryRelative, normalized]) {
@@ -333,7 +346,7 @@ export class ModelLoader {
       }
 
       try {
-        const normalized = this.normalize(gltf.scene, primary.name);
+        const normalized = this.normalize(gltf.scene, primary.name, gltf.animations);
         if (sequence !== this.loadSequence) {
           disposeObjectResources(normalized);
           return null;
@@ -349,7 +362,11 @@ export class ModelLoader {
     }
   }
 
-  private normalize(root: THREE.Object3D, name: string): THREE.Object3D {
+  private normalize(
+    root: THREE.Object3D,
+    name: string,
+    animations: readonly THREE.AnimationClip[]
+  ): THREE.Object3D {
     root.updateMatrixWorld(true);
     if (!hasMeshGeometry(root)) {
       throw new Error('The imported model does not contain mesh geometry.');
@@ -368,6 +385,7 @@ export class ModelLoader {
 
     annotateMeshes(root);
     root.userData.labImportedSource = true;
+    root.animations = animations.map((clip) => clip.clone());
     const scale = PREVIEW_SIZE / largestDimension;
     const normalized = new THREE.Group();
     normalized.name = name;
