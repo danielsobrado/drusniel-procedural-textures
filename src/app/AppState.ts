@@ -243,14 +243,19 @@ export class AppState {
   }
 
   public applyPreset(preset: MaterialPreset): void {
-    this.commit();
     const layers = preset.layers.slice(0, MAX_LAYERS).map(cloneLayer);
-    this.project.layers = layers;
-    this.project.selectedLayerId = layers.at(-1)?.id ?? null;
-    this.project.physical = {
-      ...DEFAULT_PHYSICAL,
-      ...(preset.physical ?? {})
-    };
+    const next = normalizeProject({
+      ...this.project,
+      layers,
+      selectedLayerId: layers.at(-1)?.id ?? null,
+      physical: {
+        ...DEFAULT_PHYSICAL,
+        ...(preset.physical ?? {})
+      }
+    });
+
+    this.commit();
+    this.project = next;
     this.emit('layers');
   }
 
