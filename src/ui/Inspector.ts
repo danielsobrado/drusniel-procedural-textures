@@ -1,4 +1,5 @@
 import { BLEND_MODES, CONTROL_RANGES, LAYER_KINDS } from '../app/constants';
+import { MAX_LAYER_NAME_LENGTH } from '../app/ProjectFile';
 import type { MaterialLayer, PhysicalSettings, ProjectState } from '../materials/types';
 import { escapeHtml } from '../utils/html';
 
@@ -29,8 +30,6 @@ interface PhysicalField {
   max: number;
   step: number;
 }
-
-const MAX_LAYER_NAME_LENGTH = 120;
 
 const NUMERIC_FIELDS: readonly NumericField[] = [
   { key: 'opacity', label: 'Opacity', ...CONTROL_RANGES.layer.opacity },
@@ -77,16 +76,19 @@ const PHYSICAL_FIELDS: readonly PhysicalField[] = [
 
 export class Inspector {
   private currentLayerId: string | null = null;
+  private currentState: Readonly<ProjectState> | null = null;
 
   public constructor(
     private readonly container: HTMLElement,
     private readonly callbacks: InspectorCallbacks
   ) {
     this.container.addEventListener('input', (event) => this.handleInput(event));
+    this.container.addEventListener('change', (event) => this.handleChange(event));
     this.container.addEventListener('click', (event) => this.handleClick(event));
   }
 
   public render(state: Readonly<ProjectState>): void {
+    this.currentState = state;
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
 
     if (layer === null) {
@@ -366,6 +368,51 @@ export class Inspector {
     }
 
     this.callbacks.onLayerPatch(layerId, { [field]: target.value });
+  }
+
+  private handleChange(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement) || target.type !== 'number') {
+      return;
+    }
+
+    if (target.value.trim() !== '' && Number.isFinite(Number(target.value))) {
+      return;
+    }
+
+    const state = this.currentState;
+    if (state === null) {
+      return;
+    }
+
+    const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;
+    if (physicalField !== undefined) {
+      const value = state.physical[physicalField];
+      if (typeof value === 'number') {
+        this.restoreNumberPeers(`[data-physical-field="${physicalField}"]`, value);
+      }
+      return;
+    }
+
+    const layerId = this.currentLayerId;
+    const field = target.dataset.field as keyof MaterialLayer | undefined;
+    if (layerId === null || field === undefined) {
+      return;
+    }
+
+    const layer = state.layers.find((item) => item.id === layerId);
+    const value = layer?.[field];
+    if (typeof value === 'number') {
+      this.restoreNumberPeers(`[data-field="${field}"]`, value);
+    }
+  }
+
+  private restoreNumberPeers(selector: string, value: number): void {
+    const normalized = String(value);
+    const peers = this.container.querySelectorAll<HTMLInputElement>(selector);
+    for (const peer of peers) {
+      peer.value = normalized;
+    }
   }
 
   private handleClick(event: Event): void {
