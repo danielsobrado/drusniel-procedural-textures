@@ -47,6 +47,7 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'adipose-v8',
     name: 'Adipose Tissue · SSS',
     description: 'Layered adipose tissue with branching vessels, subsurface depth and a procedural wet film.',
+    tags: ['biological', 'organic', 'sss', 'wet'],
     physical: {
       roughness: 0.34,
       metalness: 0,
@@ -136,6 +137,7 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'storm-marble',
     name: 'Storm Marble',
     description: 'Dark stone with layered mineral veins and soft depth.',
+    tags: ['stone', 'marble', 'mineral', 'architectural'],
     physical: {
       roughness: 0.24,
       metalness: 0,
@@ -169,6 +171,7 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'molten-rock',
     name: 'Molten Rock',
     description: 'Cracked dark crust with hot procedural fissures.',
+    tags: ['rock', 'lava', 'cracked', 'terrain'],
     physical: {
       roughness: 0.48,
       metalness: 0,
@@ -202,6 +205,7 @@ export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
     id: 'alien-dermis',
     name: 'Alien Dermis',
     description: 'Organic cool dermis with spots, ridges and subtle vessel depth.',
+    tags: ['organic', 'skin', 'sci-fi', 'wet'],
     physical: {
       roughness: 0.36,
       metalness: 0,
