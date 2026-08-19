@@ -1,5 +1,6 @@
 import { parse } from 'yaml';
 import rawConfig from '../../config/lab.yaml?raw';
+import type { FixedQualityTier, QualityTier, QualityTierSettings } from '../engine/Quality';
 import type {
   BlendMode,
   EnvironmentPreset,
@@ -66,6 +67,19 @@ interface RendererConfig {
   displacedNormalStrength: number;
 }
 
+interface ExportConfig {
+  texturePaddingPx: number;
+  thumbnailSize: number;
+  textureFileStem: string;
+  glbFileName: string;
+}
+
+interface PerformanceConfig {
+  defaultTier: QualityTier;
+  sampleIntervalMs: number;
+  tiers: Record<FixedQualityTier, QualityTierSettings>;
+}
+
 interface LabConfig {
   app: {
     name: string;
@@ -92,6 +106,8 @@ interface LabConfig {
   channels: CatalogItem<LayerChannel>[];
   environments: CatalogItem<EnvironmentPreset>[];
   blendModes: CatalogItem<BlendMode>[];
+  export: ExportConfig;
+  performance: PerformanceConfig;
   renderer: RendererConfig;
 }
 
@@ -111,6 +127,9 @@ const ENVIRONMENT_IDS: readonly EnvironmentPreset[] = [
 const BLEND_MODE_IDS: readonly BlendMode[] = [
   'normal', 'multiply', 'add', 'screen', 'overlay'
 ];
+const FIXED_QUALITY_TIER_IDS: readonly FixedQualityTier[] = [
+  'mobile', 'balanced', 'high', 'ultra'
+];
 const LAYER_CONTROL_KEYS: readonly LayerControlKey[] = [
   'opacity', 'scale', 'strength', 'seed', 'roughness', 'displacement', 'maskStrength'
 ];
@@ -119,6 +138,7 @@ const PHYSICAL_CONTROL_KEYS: readonly PhysicalControlKey[] = [
   'ior', 'sheen', 'sheenRoughness', 'transmission', 'thickness', 'attenuationDistance'
 ];
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+const SAFE_FILENAME = /^[a-z0-9][a-z0-9._-]*$/i;
 
 function asRecord(value: unknown, name: string): Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -166,6 +186,21 @@ function asInteger(value: unknown, name: string, min: number, max: number): numb
     throw new Error(`Configuration value ${name} must be an integer.`);
   }
   return parsed;
+}
+
+function asFilename(value: unknown, name: string, extension?: string): string {
+  const filename = asString(value, name, 128);
+  if (!SAFE_FILENAME.test(filename) || (extension !== undefined && !filename.toLowerCase().endsWith(extension))) {
+    throw new Error(`Invalid configuration filename: ${name}.`);
+  }
+  return filename;
+}
+
+function asQualityTier(value: unknown, name: string): QualityTier {
+  if (value === 'auto' || FIXED_QUALITY_TIER_IDS.includes(value as FixedQualityTier)) {
+    return value as QualityTier;
+  }
+  throw new Error(`Invalid configuration quality tier: ${name}.`);
 }
 
 function parseControlRange(value: unknown, name: string): NumericControlRange {
@@ -347,6 +382,50 @@ function parseRenderer(value: unknown): RendererConfig {
   };
 }
 
+function parseExport(value: unknown): ExportConfig {
+  const config = asRecord(value, 'export');
+  return {
+    texturePaddingPx: asInteger(config.texturePaddingPx, 'export.texturePaddingPx', 0, 64),
+    thumbnailSize: asInteger(config.thumbnailSize, 'export.thumbnailSize', 64, 512),
+    textureFileStem: asFilename(config.textureFileStem, 'export.textureFileStem'),
+    glbFileName: asFilename(config.glbFileName, 'export.glbFileName', '.glb')
+  };
+}
+
+function parsePerformance(value: unknown): PerformanceConfig {
+  const performance = asRecord(value, 'performance');
+  const tiers = asRecord(performance.tiers, 'performance.tiers');
+  const supported = new Set<string>(FIXED_QUALITY_TIER_IDS);
+  for (const key of Object.keys(tiers)) {
+    if (!supported.has(key)) {
+      throw new Error(`Unsupported performance tier: ${key}.`);
+    }
+  }
+
+  const parsedTiers = {} as Record<FixedQualityTier, QualityTierSettings>;
+  for (const id of FIXED_QUALITY_TIER_IDS) {
+    const tier = asRecord(tiers[id], `performance.tiers.${id}`);
+    parsedTiers[id] = {
+      label: asString(tier.label, `performance.tiers.${id}.label`, 32),
+      maxPixelRatio: asNumber(tier.maxPixelRatio, `performance.tiers.${id}.maxPixelRatio`, 0.5, 4),
+      shadowMapSize: asInteger(tier.shadowMapSize, `performance.tiers.${id}.shadowMapSize`, 128, 8192),
+      bakeResolution: asInteger(tier.bakeResolution, `performance.tiers.${id}.bakeResolution`, 128, 4096),
+      maxExportTextureSize: asInteger(
+        tier.maxExportTextureSize,
+        `performance.tiers.${id}.maxExportTextureSize`,
+        128,
+        4096
+      )
+    };
+  }
+
+  return {
+    defaultTier: asQualityTier(performance.defaultTier, 'performance.defaultTier'),
+    sampleIntervalMs: asInteger(performance.sampleIntervalMs, 'performance.sampleIntervalMs', 250, 10000),
+    tiers: parsedTiers
+  };
+}
+
 function parseConfig(value: unknown): LabConfig {
   const root = asRecord(value, 'root');
   const app = asRecord(root.app, 'app');
@@ -399,6 +478,8 @@ function parseConfig(value: unknown): LabConfig {
     channels,
     environments,
     blendModes,
+    export: parseExport(root.export),
+    performance: parsePerformance(root.performance),
     renderer: parseRenderer(root.renderer)
   };
 }
