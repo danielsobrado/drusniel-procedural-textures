@@ -151,6 +151,8 @@ export:
 
 performance:
   defaultTier: auto
+  autoMobileTier: mobile
+  autoDesktopTier: high
   sampleIntervalMs: 750
   tiers:
     mobile:
@@ -162,7 +164,7 @@ performance:
     balanced:
       label: Balanced
       maxPixelRatio: 1.25
-      shadowMapSize: 768
+      shadowMapSize: 1024
       bakeResolution: 1024
       maxExportTextureSize: 1024
     high:
