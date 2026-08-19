@@ -1,6 +1,7 @@
 import {
   AUTOSAVE_DELAY_MS,
   HISTORY_LIMIT,
+  LEGACY_STORAGE_KEYS,
   MAX_MODEL_FILE_BYTES,
   MAX_PROJECT_FILE_BYTES,
   OBJECT_PRESETS,
@@ -61,13 +62,27 @@ async function readUtf8File(file: File, label: string): Promise<string> {
 }
 
 function loadInitialProject(): ProjectState {
-  try {
-    const serialized = localStorage.getItem(STORAGE_KEY);
-    return serialized === null ? createDefaultProject() : normalizeProject(JSON.parse(serialized));
-  } catch (error) {
-    console.warn('Ignoring invalid autosaved project.', error);
-    return createDefaultProject();
+  const storageKeys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
+  for (const storageKey of storageKeys) {
+    try {
+      const serialized = localStorage.getItem(storageKey);
+      if (serialized === null) {
+        continue;
+      }
+      const project = normalizeProject(JSON.parse(serialized));
+      if (storageKey !== STORAGE_KEY) {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(project));
+        } catch (error) {
+          console.warn('Could not persist migrated autosave.', error);
+        }
+      }
+      return project;
+    } catch (error) {
+      console.warn(`Ignoring invalid autosaved project from ${storageKey}.`, error);
+    }
   }
+  return createDefaultProject();
 }
 
 export class App {
@@ -401,11 +416,12 @@ export class App {
   private async importEnvironment(file: File): Promise<void> {
     const sequence = ++this.environmentLoadSequence;
     try {
-      this.shell.setStatus(`Loading ${file.name}…`);
+      const assetName = normalizeImportedAssetName(file.name);
+      this.shell.setStatus(`Loading ${assetName}…`);
       const loaded = await this.renderer.loadEnvironmentHdr(file);
       if (!loaded || sequence !== this.environmentLoadSequence) return;
-      this.state.setEnvironment('custom', file.name);
-      this.shell.toast(`Loaded HDR environment ${file.name}`);
+      this.state.setEnvironment('custom', assetName);
+      this.shell.toast(`Loaded HDR environment ${assetName}`);
     } catch (error) {
       if (sequence !== this.environmentLoadSequence) return;
       console.error('HDR environment import failed.', error);
