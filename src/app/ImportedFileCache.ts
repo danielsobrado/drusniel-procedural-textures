@@ -24,32 +24,34 @@ export class ImportedFileCache {
     const existing = this.files.get(file.name);
     if (existing !== undefined && !sameFileMetadata(existing, file)) {
       this.remove(file.name);
-      this.ambiguousNames.add(file.name);
+      this.rememberAmbiguousName(file.name);
       return;
     }
 
     if (this.ambiguousNames.has(file.name)) {
+      this.refreshAmbiguousName(file.name);
       return;
     }
 
     if (existing !== undefined) {
-      this.files.delete(file.name);
-      this.files.set(file.name, existing);
+      this.refreshFile(file.name, existing);
       return;
     }
 
     this.files.set(file.name, file);
     this.totalBytes += file.size;
-    this.evictToLimits();
+    this.evictFilesToLimits();
   }
 
   public lookup(name: string): ImportedFileLookup {
     const file = this.files.get(name);
     if (file !== undefined) {
+      this.refreshFile(name, file);
       return { status: 'found', file };
     }
 
     if (this.ambiguousNames.has(name)) {
+      this.refreshAmbiguousName(name);
       return { status: 'ambiguous' };
     }
 
@@ -62,7 +64,28 @@ export class ImportedFileCache {
     this.totalBytes = 0;
   }
 
-  private evictToLimits(): void {
+  private rememberAmbiguousName(name: string): void {
+    this.ambiguousNames.add(name);
+    while (this.ambiguousNames.size > this.maxEntries) {
+      const oldest = this.ambiguousNames.values().next();
+      if (oldest.done) {
+        break;
+      }
+      this.ambiguousNames.delete(oldest.value);
+    }
+  }
+
+  private refreshAmbiguousName(name: string): void {
+    this.ambiguousNames.delete(name);
+    this.ambiguousNames.add(name);
+  }
+
+  private refreshFile(name: string, file: File): void {
+    this.files.delete(name);
+    this.files.set(name, file);
+  }
+
+  private evictFilesToLimits(): void {
     while (this.files.size > this.maxEntries || this.totalBytes > this.maxBytes) {
       const oldest = this.files.keys().next();
       if (oldest.done) {
