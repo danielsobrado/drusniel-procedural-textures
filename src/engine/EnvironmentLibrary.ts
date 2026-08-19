@@ -61,6 +61,7 @@ export class EnvironmentLibrary {
   private readonly pmrem: THREE.PMREMGenerator;
   private readonly studioTarget: THREE.WebGLRenderTarget;
   private customTarget: THREE.WebGLRenderTarget | null = null;
+  private customName: string | null = null;
 
   public constructor(renderer: THREE.WebGLRenderer) {
     this.pmrem = new THREE.PMREMGenerator(renderer);
@@ -69,13 +70,17 @@ export class EnvironmentLibrary {
     room.dispose();
   }
 
-  public get hasCustomEnvironment(): boolean {
-    return this.customTarget !== null;
+  public hasCustomEnvironment(name: string | null): boolean {
+    return name !== null && this.customTarget !== null && this.customName === name;
   }
 
-  public apply(scene: THREE.Scene, preset: EnvironmentPreset): StudioLightProfile {
-    if (preset === 'custom' && this.customTarget !== null) {
-      scene.environment = this.customTarget.texture;
+  public apply(
+    scene: THREE.Scene,
+    preset: EnvironmentPreset,
+    customName: string | null = null
+  ): StudioLightProfile {
+    if (preset === 'custom' && this.hasCustomEnvironment(customName)) {
+      scene.environment = this.customTarget?.texture ?? this.studioTarget.texture;
       scene.environmentIntensity = 1;
       return PROFILES.studio;
     }
@@ -99,6 +104,7 @@ export class EnvironmentLibrary {
       texture.dispose();
       this.customTarget?.dispose();
       this.customTarget = target;
+      this.customName = file.name;
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -106,6 +112,8 @@ export class EnvironmentLibrary {
 
   public dispose(): void {
     this.customTarget?.dispose();
+    this.customTarget = null;
+    this.customName = null;
     this.studioTarget.dispose();
     this.pmrem.dispose();
   }
