@@ -32,6 +32,7 @@ export class MaterialCompiler {
   public readonly depthMaterial = new THREE.MeshDepthMaterial();
   public readonly distanceMaterial = new THREE.MeshDistanceMaterial();
 
+  private displacementExtentValue = 0;
   private readonly uniforms = {
     uLabCount: { value: 0 },
     uLabEnabled: { value: new Array<number>(MAX_LAYERS).fill(0) },
@@ -63,9 +64,14 @@ export class MaterialCompiler {
     this.configureShadowShader(this.distanceMaterial, 'distance');
   }
 
+  public get displacementExtent(): number {
+    return this.displacementExtentValue;
+  }
+
   public sync(layers: readonly MaterialLayer[], wireframe: boolean): void {
     const count = Math.min(layers.length, MAX_LAYERS);
     this.uniforms.uLabCount.value = count;
+    this.displacementExtentValue = 0;
 
     for (let index = 0; index < MAX_LAYERS; index += 1) {
       const layer = layers[index];
@@ -82,6 +88,10 @@ export class MaterialCompiler {
       this.uniforms.uLabDisplacement.value[index] = active ? layer.displacement : 0;
       this.uniforms.uLabColorA.value[index]?.set(active ? layer.colorA : '#000000');
       this.uniforms.uLabColorB.value[index]?.set(active ? layer.colorB : '#000000');
+
+      if (active && layer.enabled) {
+        this.displacementExtentValue += Math.abs(layer.displacement) * layer.opacity * 0.5;
+      }
     }
 
     this.material.wireframe = wireframe;
