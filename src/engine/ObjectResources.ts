@@ -1,17 +1,40 @@
 import * as THREE from 'three';
 
+type GeometryRenderable = THREE.Mesh | THREE.Line | THREE.Points;
+
+function isGeometryRenderable(object: THREE.Object3D): object is GeometryRenderable {
+  return object instanceof THREE.Mesh ||
+    object instanceof THREE.Line ||
+    object instanceof THREE.Points;
+}
+
+function addMaterials(
+  materials: Set<THREE.Material>,
+  material: THREE.Material | THREE.Material[]
+): void {
+  const values = Array.isArray(material) ? material : [material];
+  values.forEach((value) => materials.add(value));
+}
+
 export function collectObjectMaterials(root: THREE.Object3D): Set<THREE.Material> {
   const materials = new Set<THREE.Material>();
 
   root.traverse((object) => {
-    if (!(object instanceof THREE.Mesh)) {
-      return;
+    if (isGeometryRenderable(object)) {
+      addMaterials(materials, object.material);
     }
+  });
 
-    const sourceMaterials = Array.isArray(object.material)
-      ? object.material
-      : [object.material];
-    sourceMaterials.forEach((material) => materials.add(material));
+  return materials;
+}
+
+export function collectMeshMaterials(root: THREE.Object3D): Set<THREE.Material> {
+  const materials = new Set<THREE.Material>();
+
+  root.traverse((object) => {
+    if (object instanceof THREE.Mesh) {
+      addMaterials(materials, object.material);
+    }
   });
 
   return materials;
@@ -21,7 +44,7 @@ export function disposeObjectGeometries(root: THREE.Object3D): void {
   const geometries = new Set<THREE.BufferGeometry>();
 
   root.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
+    if (isGeometryRenderable(object)) {
       geometries.add(object.geometry);
     }
   });
@@ -50,8 +73,15 @@ export function disposeMaterialResources(materials: Iterable<THREE.Material>): v
   }
 }
 
-export function disposeObjectResources(root: THREE.Object3D): void {
+export function disposeObjectResources(
+  root: THREE.Object3D,
+  preservedMaterials: ReadonlySet<THREE.Material> = new Set()
+): void {
   const materials = collectObjectMaterials(root);
+  for (const material of preservedMaterials) {
+    materials.delete(material);
+  }
+
   disposeObjectGeometries(root);
   disposeMaterialResources(materials);
 }
