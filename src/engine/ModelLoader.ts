@@ -125,6 +125,10 @@ export class ModelLoader {
   private readonly loader = new GLTFLoader();
   private loadSequence = 0;
 
+  public cancelPending(): void {
+    this.loadSequence += 1;
+  }
+
   public async load(file: File): Promise<THREE.Object3D | null> {
     const sequence = ++this.loadSequence;
 
