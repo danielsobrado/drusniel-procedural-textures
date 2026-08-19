@@ -10,7 +10,7 @@ function clickDownload(filename: string, url: string): void {
 export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   clickDownload(filename, url);
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function downloadText(
