@@ -32,6 +32,8 @@ export function createProceduralMesh(
   geometry.computeVertexNormals();
 
   const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.labProceduralPreview = true;
+  mesh.userData.labObjectPreset = preset;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
 
