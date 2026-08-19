@@ -48,7 +48,7 @@ export class LabRenderer {
       Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio)
     );
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
     this.scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 
