@@ -76,6 +76,8 @@ interface ExportConfig {
 
 interface PerformanceConfig {
   defaultTier: QualityTier;
+  autoMobileTier: FixedQualityTier;
+  autoDesktopTier: FixedQualityTier;
   sampleIntervalMs: number;
   tiers: Record<FixedQualityTier, QualityTierSettings>;
 }
@@ -188,6 +190,14 @@ function asInteger(value: unknown, name: string, min: number, max: number): numb
   return parsed;
 }
 
+function asPowerOfTwo(value: unknown, name: string, min: number, max: number): number {
+  const parsed = asInteger(value, name, min, max);
+  if ((parsed & (parsed - 1)) !== 0) {
+    throw new Error(`Configuration value ${name} must be a power of two.`);
+  }
+  return parsed;
+}
+
 function asFilename(value: unknown, name: string, extension?: string): string {
   const filename = asString(value, name, 128);
   if (!SAFE_FILENAME.test(filename) || (extension !== undefined && !filename.toLowerCase().endsWith(extension))) {
@@ -196,11 +206,16 @@ function asFilename(value: unknown, name: string, extension?: string): string {
   return filename;
 }
 
-function asQualityTier(value: unknown, name: string): QualityTier {
-  if (value === 'auto' || FIXED_QUALITY_TIER_IDS.includes(value as FixedQualityTier)) {
-    return value as QualityTier;
+function asFixedQualityTier(value: unknown, name: string): FixedQualityTier {
+  if (FIXED_QUALITY_TIER_IDS.includes(value as FixedQualityTier)) {
+    return value as FixedQualityTier;
   }
-  throw new Error(`Invalid configuration quality tier: ${name}.`);
+  throw new Error(`Invalid configuration fixed quality tier: ${name}.`);
+}
+
+function asQualityTier(value: unknown, name: string): QualityTier {
+  if (value === 'auto') return 'auto';
+  return asFixedQualityTier(value, name);
 }
 
 function parseControlRange(value: unknown, name: string): NumericControlRange {
@@ -408,9 +423,19 @@ function parsePerformance(value: unknown): PerformanceConfig {
     parsedTiers[id] = {
       label: asString(tier.label, `performance.tiers.${id}.label`, 32),
       maxPixelRatio: asNumber(tier.maxPixelRatio, `performance.tiers.${id}.maxPixelRatio`, 0.5, 4),
-      shadowMapSize: asInteger(tier.shadowMapSize, `performance.tiers.${id}.shadowMapSize`, 128, 8192),
-      bakeResolution: asInteger(tier.bakeResolution, `performance.tiers.${id}.bakeResolution`, 128, 4096),
-      maxExportTextureSize: asInteger(
+      shadowMapSize: asPowerOfTwo(
+        tier.shadowMapSize,
+        `performance.tiers.${id}.shadowMapSize`,
+        128,
+        8192
+      ),
+      bakeResolution: asPowerOfTwo(
+        tier.bakeResolution,
+        `performance.tiers.${id}.bakeResolution`,
+        128,
+        4096
+      ),
+      maxExportTextureSize: asPowerOfTwo(
         tier.maxExportTextureSize,
         `performance.tiers.${id}.maxExportTextureSize`,
         128,
@@ -421,6 +446,8 @@ function parsePerformance(value: unknown): PerformanceConfig {
 
   return {
     defaultTier: asQualityTier(performance.defaultTier, 'performance.defaultTier'),
+    autoMobileTier: asFixedQualityTier(performance.autoMobileTier, 'performance.autoMobileTier'),
+    autoDesktopTier: asFixedQualityTier(performance.autoDesktopTier, 'performance.autoDesktopTier'),
     sampleIntervalMs: asInteger(performance.sampleIntervalMs, 'performance.sampleIntervalMs', 250, 10000),
     tiers: parsedTiers
   };
