@@ -89,6 +89,12 @@ interface LabConfig {
     legacyStorageKeys: string[];
     maxLayers: number;
     maxGroups: number;
+    maxGroupDepth: number;
+    maxImportedMeshes: number;
+    maxLayerNameLength: number;
+    maxGroupNameLength: number;
+    maxImportedAssetNameLength: number;
+    maxMeshLabelLength: number;
     historyLimit: number;
     historyCoalesceMs: number;
     autosaveDelayMs: number;
@@ -270,9 +276,7 @@ function assertExactCatalog<T extends string>(
     throw new Error(`Configuration catalog ${name} must contain each supported id exactly once.`);
   }
   for (const id of expected) {
-    if (!unique.has(id)) {
-      throw new Error(`Configuration catalog ${name} is missing ${id}.`);
-    }
+    if (!unique.has(id)) throw new Error(`Configuration catalog ${name} is missing ${id}.`);
   }
 }
 
@@ -281,16 +285,12 @@ function parseCatalog<T extends string>(
   expected: readonly T[],
   name: string
 ): CatalogItem<T>[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`Configuration ${name} must be an array.`);
-  }
+  if (!Array.isArray(value)) throw new Error(`Configuration ${name} must be an array.`);
   const supported = new Set<string>(expected);
   const items = value.map((item, index) => {
     const record = asRecord(item, `${name}[${index}]`);
     const id = asString(record.id, `${name}[${index}].id`) as T;
-    if (!supported.has(id)) {
-      throw new Error(`Unsupported ${name} id in configuration: ${id}.`);
-    }
+    if (!supported.has(id)) throw new Error(`Unsupported ${name} id in configuration: ${id}.`);
     return {
       id,
       label: asString(record.label, `${name}[${index}].label`, 64)
@@ -301,16 +301,12 @@ function parseCatalog<T extends string>(
 }
 
 function parseObjects(value: unknown): ObjectCatalogItem[] {
-  if (!Array.isArray(value)) {
-    throw new Error('Configuration objects must be an array.');
-  }
+  if (!Array.isArray(value)) throw new Error('Configuration objects must be an array.');
   const supported = new Set<string>(OBJECT_IDS);
   const objects = value.map((item, index) => {
     const record = asRecord(item, `objects[${index}]`);
     const id = asString(record.id, `objects[${index}].id`) as ObjectPreset;
-    if (!supported.has(id)) {
-      throw new Error(`Unsupported object id in configuration: ${id}.`);
-    }
+    if (!supported.has(id)) throw new Error(`Unsupported object id in configuration: ${id}.`);
     return {
       id,
       label: asString(record.label, `objects[${index}].label`, 64),
@@ -412,9 +408,7 @@ function parsePerformance(value: unknown): PerformanceConfig {
   const tiers = asRecord(performance.tiers, 'performance.tiers');
   const supported = new Set<string>(FIXED_QUALITY_TIER_IDS);
   for (const key of Object.keys(tiers)) {
-    if (!supported.has(key)) {
-      throw new Error(`Unsupported performance tier: ${key}.`);
-    }
+    if (!supported.has(key)) throw new Error(`Unsupported performance tier: ${key}.`);
   }
 
   const parsedTiers = {} as Record<FixedQualityTier, QualityTierSettings>;
@@ -423,18 +417,8 @@ function parsePerformance(value: unknown): PerformanceConfig {
     parsedTiers[id] = {
       label: asString(tier.label, `performance.tiers.${id}.label`, 32),
       maxPixelRatio: asNumber(tier.maxPixelRatio, `performance.tiers.${id}.maxPixelRatio`, 0.5, 4),
-      shadowMapSize: asPowerOfTwo(
-        tier.shadowMapSize,
-        `performance.tiers.${id}.shadowMapSize`,
-        128,
-        8192
-      ),
-      bakeResolution: asPowerOfTwo(
-        tier.bakeResolution,
-        `performance.tiers.${id}.bakeResolution`,
-        128,
-        4096
-      ),
+      shadowMapSize: asPowerOfTwo(tier.shadowMapSize, `performance.tiers.${id}.shadowMapSize`, 128, 8192),
+      bakeResolution: asPowerOfTwo(tier.bakeResolution, `performance.tiers.${id}.bakeResolution`, 128, 4096),
       maxExportTextureSize: asPowerOfTwo(
         tier.maxExportTextureSize,
         `performance.tiers.${id}.maxExportTextureSize`,
@@ -486,6 +470,17 @@ function parseConfig(value: unknown): LabConfig {
       legacyStorageKeys,
       maxLayers: asInteger(app.maxLayers, 'app.maxLayers', 1, 32),
       maxGroups: asInteger(app.maxGroups, 'app.maxGroups', 0, 32),
+      maxGroupDepth: asInteger(app.maxGroupDepth, 'app.maxGroupDepth', 1, 16),
+      maxImportedMeshes: asInteger(app.maxImportedMeshes, 'app.maxImportedMeshes', 1, 100000),
+      maxLayerNameLength: asInteger(app.maxLayerNameLength, 'app.maxLayerNameLength', 1, 1024),
+      maxGroupNameLength: asInteger(app.maxGroupNameLength, 'app.maxGroupNameLength', 1, 1024),
+      maxImportedAssetNameLength: asInteger(
+        app.maxImportedAssetNameLength,
+        'app.maxImportedAssetNameLength',
+        1,
+        4096
+      ),
+      maxMeshLabelLength: asInteger(app.maxMeshLabelLength, 'app.maxMeshLabelLength', 1, 4096),
       historyLimit: asInteger(app.historyLimit, 'app.historyLimit', 1, 1000),
       historyCoalesceMs: asInteger(app.historyCoalesceMs, 'app.historyCoalesceMs', 0, 5000),
       autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000),
