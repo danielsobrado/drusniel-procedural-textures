@@ -3,6 +3,7 @@ export type ImportedFileLookup =
   | { status: 'missing' };
 
 interface FileMetadata {
+  path: string;
   name: string;
   size: number;
   lastModified: number;
@@ -14,8 +15,14 @@ interface BundleEntry {
   bytes: number;
 }
 
+function filePath(file: File): string {
+  const relativePath = file.webkitRelativePath.trim();
+  return relativePath.length > 0 ? relativePath.replaceAll('\\', '/') : file.name;
+}
+
 function metadataOf(file: File): FileMetadata {
   return {
+    path: filePath(file),
     name: file.name,
     size: file.size,
     lastModified: file.lastModified,
@@ -24,7 +31,9 @@ function metadataOf(file: File): FileMetadata {
 }
 
 function bundleMetadata(files: readonly File[]): FileMetadata[] {
-  return files.map(metadataOf).sort((a, b) => a.name.localeCompare(b.name));
+  return files
+    .map(metadataOf)
+    .sort((left, right) => left.path.localeCompare(right.path) || left.name.localeCompare(right.name));
 }
 
 function sameMetadata(left: readonly FileMetadata[], right: readonly FileMetadata[]): boolean {
@@ -34,6 +43,7 @@ function sameMetadata(left: readonly FileMetadata[], right: readonly FileMetadat
   return left.every((item, index) => {
     const other = right[index];
     return other !== undefined &&
+      item.path === other.path &&
       item.name === other.name &&
       item.size === other.size &&
       item.lastModified === other.lastModified &&
