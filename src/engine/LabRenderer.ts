@@ -1,21 +1,46 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { DEFAULT_BACKGROUND, DEFAULT_ENVIRONMENT, RENDERER_CONFIG } from '../app/constants';
-import type { EnvironmentPreset, ObjectPreset } from '../materials/types';
+import {
+  DEFAULT_BACKGROUND,
+  DEFAULT_ENVIRONMENT,
+  DEFAULT_PHYSICAL,
+  PERFORMANCE_CONFIG,
+  RENDERER_CONFIG
+} from '../app/constants';
+import { GlbExporter } from '../export/GlbExporter';
+import { PresetThumbnailRenderer } from '../export/PresetThumbnailRenderer';
+import { TextureBaker, type BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import { createProceduralMesh } from './MeshFactory';
+import type {
+  EnvironmentPreset,
+  MaterialPreset,
+  ObjectPreset,
+  PhysicalSettings
+} from '../materials/types';
 import { EnvironmentLibrary, type StudioLightProfile } from './EnvironmentLibrary';
+import { createProceduralMesh } from './MeshFactory';
 import {
   collectMeshMaterials,
   collectNonMeshMaterials,
   disposeMaterialResources,
   disposeObjectResources
 } from './ObjectResources';
+import { PerformanceProfiler } from './PerformanceProfiler';
+import type {
+  FixedQualityTier,
+  PerformanceStats,
+  QualityTier,
+  QualityTierSettings
+} from './Quality';
 
 type MeshMaterial = THREE.Material | THREE.Material[];
 
 function materialSet(material: MeshMaterial): Set<THREE.Material> {
   return new Set(Array.isArray(material) ? material : [material]);
+}
+
+function isQualityTier(value: string): value is QualityTier {
+  return value === 'auto' || Object.prototype.hasOwnProperty.call(PERFORMANCE_CONFIG.tiers, value);
 }
 
 export class LabRenderer {
@@ -33,6 +58,9 @@ export class LabRenderer {
   private readonly resizeObserver: ResizeObserver;
   private readonly compiler: MaterialCompiler;
   private readonly environments: EnvironmentLibrary;
+  private readonly baker: TextureBaker;
+  private readonly glbExporter: GlbExporter;
+  private readonly profiler = new PerformanceProfiler(PERFORMANCE_CONFIG.sampleIntervalMs);
   private readonly hemisphere = new THREE.HemisphereLight('#edf4ff', '#231d1a', 1.2);
   private readonly key = new THREE.DirectionalLight('#fff3e4', 3.1);
   private readonly fill = new THREE.DirectionalLight('#b8d5ff', 1.15);
@@ -48,6 +76,9 @@ export class LabRenderer {
   private readonly originalMeshMaterials = new Map<string, MeshMaterial>();
   private selectedMeshId: string | null = null;
   private meshSelectionCallback: ((id: string | null) => void) | null = null;
+  private performanceCallback: ((stats: PerformanceStats) => void) | null = null;
+  private requestedQualityTier: QualityTier = PERFORMANCE_CONFIG.defaultTier;
+  private activeQualityTier: FixedQualityTier = PERFORMANCE_CONFIG.autoDesktopTier;
   private animationFrame = 0;
 
   public constructor(container: HTMLElement, compiler: MaterialCompiler) {
@@ -69,6 +100,8 @@ export class LabRenderer {
     this.scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 
     this.environments = new EnvironmentLibrary(this.renderer);
+    this.baker = new TextureBaker(this.renderer, this.compiler);
+    this.glbExporter = new GlbExporter(this.baker, this.compiler);
     this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
@@ -78,6 +111,7 @@ export class LabRenderer {
     this.controls.maxDistance = RENDERER_CONFIG.maxDistance;
 
     this.addStudioLighting();
+    this.setQualityTier(PERFORMANCE_CONFIG.defaultTier);
     this.setEnvironment(DEFAULT_ENVIRONMENT);
     this.selectionHelper.visible = false;
     this.scene.add(this.selectionHelper);
@@ -91,6 +125,39 @@ export class LabRenderer {
 
   public setMeshSelectionCallback(callback: (id: string | null) => void): void {
     this.meshSelectionCallback = callback;
+  }
+
+  public setPerformanceCallback(callback: (stats: PerformanceStats) => void): void {
+    this.performanceCallback = callback;
+  }
+
+  public setQualityTier(tier: QualityTier): FixedQualityTier {
+    if (!isQualityTier(tier)) {
+      throw new Error(`Unsupported quality tier: ${String(tier)}.`);
+    }
+    this.requestedQualityTier = tier;
+    const active = this.resolveQualityTier(tier);
+    const settings = PERFORMANCE_CONFIG.tiers[active];
+    this.activeQualityTier = active;
+
+    if (
+      this.key.shadow.mapSize.x !== settings.shadowMapSize ||
+      this.key.shadow.mapSize.y !== settings.shadowMapSize
+    ) {
+      this.key.shadow.map?.dispose();
+      this.key.shadow.map = null;
+      this.key.shadow.mapPass?.dispose();
+      this.key.shadow.mapPass = null;
+      this.key.shadow.mapSize.set(settings.shadowMapSize, settings.shadowMapSize);
+      this.key.shadow.needsUpdate = true;
+    }
+
+    this.resize();
+    return active;
+  }
+
+  public getQualityTierSettings(): Readonly<QualityTierSettings> {
+    return PERFORMANCE_CONFIG.tiers[this.activeQualityTier];
   }
 
   public setPrimitive(preset: ObjectPreset): void {
@@ -205,6 +272,35 @@ export class LabRenderer {
     return this.canvas.toDataURL('image/png');
   }
 
+  public async bakeCurrentMaterial(settings: Readonly<PhysicalSettings>): Promise<BakedTextureSet> {
+    const target = this.getBakeTarget();
+    const resolution = this.effectiveTextureResolution(this.getQualityTierSettings().bakeResolution);
+    return this.baker.bake(target, settings, resolution);
+  }
+
+  public async exportCurrentGlb(settings: Readonly<PhysicalSettings>): Promise<Blob> {
+    if (this.currentRoot === null) {
+      throw new Error('There is no preview object to export.');
+    }
+    const quality = this.getQualityTierSettings();
+    const bakeResolution = this.effectiveTextureResolution(quality.bakeResolution);
+    const maxTextureSize = this.effectiveTextureResolution(quality.maxExportTextureSize);
+    return this.glbExporter.export(this.currentRoot, settings, bakeResolution, maxTextureSize);
+  }
+
+  public generatePresetThumbnails(presets: readonly MaterialPreset[]): ReadonlyMap<string, string> {
+    const renderer = new PresetThumbnailRenderer(this.renderer, DEFAULT_PHYSICAL);
+    const thumbnails = new Map<string, string>();
+    try {
+      for (const preset of presets) {
+        thumbnails.set(preset.id, renderer.render(preset));
+      }
+      return thumbnails;
+    } finally {
+      renderer.dispose();
+    }
+  }
+
   public dispose(): void {
     cancelAnimationFrame(this.animationFrame);
     this.interactionAbort.abort();
@@ -216,6 +312,47 @@ export class LabRenderer {
     this.environments.dispose();
     this.compiler.dispose();
     this.renderer.dispose();
+  }
+
+  private getBakeTarget(): THREE.Mesh {
+    if (this.selectedMeshId !== null) {
+      const selected = this.meshById.get(this.selectedMeshId);
+      if (selected !== undefined) {
+        if (selected.material !== this.compiler.material) {
+          throw new Error('The selected mesh is using its original material. Apply the lab material before baking it.');
+        }
+        return selected;
+      }
+    }
+
+    if (this.currentRoot instanceof THREE.Mesh && this.currentRoot.material === this.compiler.material) {
+      return this.currentRoot;
+    }
+
+    let firstAssigned: THREE.Mesh | null = null;
+    this.currentRoot?.traverse((object) => {
+      if (firstAssigned === null && object instanceof THREE.Mesh && object.material === this.compiler.material) {
+        firstAssigned = object;
+      }
+    });
+    if (firstAssigned === null) {
+      throw new Error('No mesh currently uses the lab material.');
+    }
+    return firstAssigned;
+  }
+
+  private resolveQualityTier(tier: QualityTier): FixedQualityTier {
+    if (tier !== 'auto') return tier;
+    return window.matchMedia('(pointer: coarse)').matches
+      ? PERFORMANCE_CONFIG.autoMobileTier
+      : PERFORMANCE_CONFIG.autoDesktopTier;
+  }
+
+  private effectiveTextureResolution(requested: number): number {
+    const maxTextureSize = Math.max(this.renderer.capabilities.maxTextureSize, 128);
+    let resolution = Math.min(requested, maxTextureSize);
+    resolution = 2 ** Math.floor(Math.log2(resolution));
+    return Math.max(resolution, 128);
   }
 
   private applyProceduralMeshSettings(mesh: THREE.Mesh): void {
@@ -230,7 +367,6 @@ export class LabRenderer {
     this.scene.add(this.hemisphere);
     this.key.position.set(-3.5, 4.2, 4.5);
     this.key.castShadow = true;
-    this.key.shadow.mapSize.set(1024, 1024);
     this.key.shadow.camera.near = 0.1;
     this.key.shadow.camera.far = 15;
     this.key.shadow.bias = -0.0002;
@@ -329,7 +465,12 @@ export class LabRenderer {
     if (parent === null) return;
     const width = Math.max(parent.clientWidth, 1);
     const height = Math.max(parent.clientHeight, 1);
-    const pixelRatio = Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio);
+    const quality = PERFORMANCE_CONFIG.tiers[this.activeQualityTier];
+    const pixelRatio = Math.min(
+      window.devicePixelRatio,
+      RENDERER_CONFIG.maxPixelRatio,
+      quality.maxPixelRatio
+    );
     if (this.renderer.getPixelRatio() !== pixelRatio) this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
@@ -345,6 +486,12 @@ export class LabRenderer {
         if (mesh !== undefined) this.selectionBox.setFromObject(mesh);
       }
       this.renderer.render(this.scene, this.camera);
+      const stats = this.profiler.sample(
+        this.renderer,
+        this.requestedQualityTier,
+        this.activeQualityTier
+      );
+      if (stats !== null) this.performanceCallback?.(stats);
     };
     render();
   }
