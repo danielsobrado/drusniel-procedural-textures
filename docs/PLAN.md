@@ -26,6 +26,7 @@ The first implementation focuses on a fast professional editing workflow rather 
 - Every material update is previewed immediately.
 - Continuous edits coalesce into useful undo steps instead of one history entry per input event.
 - Keyboard shortcuts cover the common workflow without overriding native undo while editing a field.
+- Right-click opens the radial menu while right-drag remains available for viewport panning.
 - Narrow layouts reorganize panels without removing authoring features.
 
 ## Material model
@@ -62,7 +63,7 @@ Initial blend modes:
 - screen
 - overlay
 
-The shader compiler evaluates the active stack inside `MeshPhysicalMaterial`. Color, roughness and displacement use the same procedural fields so layers remain spatially coherent. Procedural coordinates are evaluated in normalized world space so imported meshes with different source units and sub-mesh transforms receive a consistent material scale.
+The shader compiler evaluates the active stack inside `MeshPhysicalMaterial`. Color, roughness and displacement use the same procedural fields so layers remain spatially coherent. Procedural coordinates are evaluated after morph/skinning deformation and in normalized world space so imported meshes with different source units, skinning and sub-mesh transforms receive a consistent material scale. Layer strength is centered around the generator midpoint, so zero strength produces a neutral field rather than maximum negative displacement.
 
 Global physical controls are independent from layer contributions:
 
@@ -96,14 +97,18 @@ Imported mesh handling:
 
 - validate GLB container metadata before parsing
 - reject external GLTF resource URIs before loading
+- enforce configured model-file size limits before reading
+- reject assets without mesh geometry
 - traverse all meshes
 - preserve model hierarchy/transforms
 - normalize to a preview volume
 - compute missing vertex normals
-- apply the lab material to mesh nodes
-- dispose replaced source materials/textures
+- apply the lab material to mesh nodes while preserving line/point resources
+- dispose replaced source materials, textures, geometries and skeleton GPU resources
 - discard and clean stale concurrent imports
-- frame imported content automatically
+- cancel an in-flight import when a newer object/project action supersedes it
+- keep a bounded in-session file cache for safe undo/redo restoration
+- frame imported content automatically, including narrow viewport aspect ratios
 
 Multi-file GLTF packages with external buffers/textures are deferred until the importer can accept a complete asset bundle rather than silently resolving missing files.
 
@@ -117,9 +122,12 @@ Phase 1 renderer:
 - key/fill/rim studio lighting
 - configurable background
 - optional wireframe
-- procedural vertex displacement
+- procedural vertex displacement after morph/skinning deformation
+- matching procedural depth/distance shadow passes
 - physical material controls
+- displacement-aware framing and conservative culling behavior
 - explicit resource cleanup when preview objects are replaced
+- screenshot capture without permanently preserving the WebGL drawing buffer
 
 The architecture keeps renderer/material services isolated so WebGPU/TSL, improved displaced normals and dedicated biological scattering can be added without rewriting the UI or project model.
 
@@ -128,13 +136,15 @@ The architecture keeps renderer/material services isolated so WebGPU/TSL, improv
 Editable application and renderer defaults live in `config/lab.yaml` rather than being spread through feature code. The YAML configuration owns:
 
 - application limits and persistence/history timing
+- model/project import size limits
 - radial and touch interaction timing/layout
+- layer and physical-control numeric ranges
 - object/layer/blend catalogs
 - default physical material values
 - default viewport/background
 - camera and renderer limits
 
-The YAML document is parsed and range-validated at startup. Supported catalogs are checked for missing, duplicate and unknown IDs. Algorithm-specific shader constants remain local to the implementation where they are part of the generator itself rather than deployment/editor configuration.
+The YAML document is parsed and range-validated at startup. Supported catalogs and numeric control groups are checked for missing, duplicate and unknown IDs/keys. Algorithm-specific shader constants remain local to the implementation where they are part of the generator itself rather than deployment/editor configuration.
 
 ## Project persistence
 
@@ -150,9 +160,11 @@ Initial persistence:
 
 - localStorage autosave
 - JSON export/import
-- strict runtime validation of project structure, enums, ranges, IDs and colors
+- configured project-file size limit before reading
+- strict runtime validation of project structure, enums, ranges, IDs, colors and persisted string lengths
 - migration of older Phase 1 JSON that predates advanced physical-surface settings
 - coalesced undo history for continuous editor changes
+- bounded in-session imported-file restoration cache; imported bytes are not persisted in project JSON
 
 Later:
 
@@ -170,6 +182,7 @@ src/
   app/
     App.ts
     AppState.ts
+    ImportedFileCache.ts
     ProjectFile.ts
     constants.ts
   config/
@@ -182,6 +195,7 @@ src/
   materials/
     MaterialCompiler.ts
     PhysicalMaterial.ts
+    ProceduralShader.ts
     presets.ts
     types.ts
   ui/
@@ -205,10 +219,11 @@ Rules:
 - UI does not mutate Three.js scene objects directly.
 - `AppState` is the source of truth for the editable project.
 - Untrusted project/import data is validated before entering application state or resource loading.
+- Async model/project operations use last-action-wins cancellation semantics.
 - Engine code reacts to explicit state changes.
 - Material compilation is isolated and deterministic for a given layer stack.
-- Three.js resources replaced by the lab are explicitly disposed.
-- User/editor defaults are sourced from validated YAML configuration.
+- Three.js resources replaced by the lab are explicitly disposed without invalidating retained shared resources.
+- User/editor defaults and numeric editor ranges are sourced from validated YAML configuration.
 - No UI framework is required for Phase 1; TypeScript + DOM keeps the first implementation small and transparent.
 
 ## Delivery phases
@@ -220,17 +235,18 @@ Implemented in `main`:
 - Professional responsive shell
 - Procedural primitives
 - GLB/self-contained GLTF import and drag/drop
-- Input/container validation and stale-import protection
+- Input/container validation, import size limits and stale-operation protection
 - Layer stack with seven procedural layer types
 - Live physical shader composition
+- Morph/skinning-aware procedural displacement with matching shadow passes
 - Compact layer and physical-surface inspector
-- Desktop + touch + keyboard radial menu
+- Desktop + touch + keyboard radial menu without breaking right-drag panning
 - Material presets
 - Strict JSON project import/export
 - local autosave
 - coalesced undo/redo and keyboard shortcuts
 - PNG viewport capture
-- Validated YAML application/UI configuration
+- Validated YAML application/UI/control configuration
 - CI build workflow
 - Three.js resource cleanup for replaced/imported preview assets
 
@@ -245,7 +261,7 @@ Build/runtime verification still needs a dependency install/browser run in an en
 - better procedural vessel branching
 - environment/HDRI library
 - per-mesh selection and material assignment for imported scenes
-- displaced-normal and shadow-depth strategy for stronger displacement on arbitrary imported meshes
+- displaced-normal strategy for stronger displacement lighting on arbitrary imported meshes
 - multi-file GLTF asset bundles
 
 ### Phase 3 — Production export
@@ -267,6 +283,7 @@ Build/runtime verification still needs a dependency install/browser run in an en
 - User can switch among built-in meshes.
 - User can drag/drop or import GLB/self-contained GLTF.
 - Unsupported external GLTF resources fail explicitly instead of causing hidden network requests.
-- Radial menu works with mouse, keyboard and touch long press.
+- Superseded model/project imports cannot overwrite a newer user action.
+- Radial menu works with mouse, keyboard and touch long press while right-drag still pans.
 - Project JSON can be exported and safely imported.
 - Layout remains usable on desktop, tablet and narrow mobile screens.
