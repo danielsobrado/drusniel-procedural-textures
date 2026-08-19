@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build a browser-based Three.js material laboratory for authoring layered procedural materials, previewing them on procedural meshes or imported GLB/GLTF assets, and saving/reusing material presets.
+Build a browser-based Three.js material laboratory for authoring layered procedural materials, previewing them on procedural meshes or imported GLB/GLTF assets, baking reusable PBR textures and exporting portable production assets.
 
 The product favors a compact layer workflow over a general node editor. High-frequency actions stay in the layer dock and contextual radial menu while advanced routing remains in the inspector.
 
@@ -10,12 +10,12 @@ The product favors a compact layer workflow over a general node editor. High-fre
 
 ### Main layout
 
-- **Top command bar** — project/import/export, undo/redo and viewport commands.
-- **Left compact library** — material presets and procedural object presets.
-- **Center viewport** — realtime Three.js preview, imported-mesh picking and drag/drop model bundles.
+- **Top command bar** — project/import/export, bake, quality, undo/redo and viewport commands.
+- **Left compact library** — searchable/tagged material presets with rendered thumbnails plus procedural object presets.
+- **Center viewport** — realtime Three.js preview, imported-mesh picking, performance HUD and drag/drop model bundles.
 - **Right inspector** — layer parameters, output routing, masks/groups, PBR, environment and mesh assignment.
 - **Bottom layer strip** — reorder, enable/disable, duplicate and quick layer creation.
-- **Radial menu** — right click, `Space`, or touch long press for common layer/object/project actions.
+- **Two-ring radial menu** — right click, `Space`, or touch long press for layer/object/project/bake/export actions.
 
 ### Interaction principles
 
@@ -24,8 +24,9 @@ The product favors a compact layer workflow over a general node editor. High-fre
 - Continuous edits coalesce into useful undo steps.
 - Keyboard shortcuts do not override native text editing.
 - Right-click opens the radial menu while right-drag remains viewport pan.
-- Narrow layouts retain authoring features through the radial menu.
+- Narrow layouts retain authoring, bake and export actions through the radial menu.
 - Imported meshes can be selected directly in the viewport or from the inspector.
+- Quality tiers control viewport cost and production bake/export resolution from one compact selector.
 
 ## Material model
 
@@ -60,7 +61,7 @@ Each layer exposes common procedural parameters plus:
 - mask strength/inversion
 - optional group membership
 
-Groups support enable/opacity inheritance and bounded nesting. Masks use another layer's procedural field without requiring duplicate texture evaluation assets.
+Groups support enable/opacity inheritance and bounded nesting. Masks use another layer's procedural field without requiring duplicate texture assets.
 
 Global physical controls remain independent from layer routing:
 
@@ -135,6 +136,44 @@ Current renderer:
 - realtime SSS approximation
 - explicit GPU resource cleanup
 - PNG capture without permanent `preserveDrawingBuffer`
+- configurable Auto/Mobile/Balanced/High/Ultra quality tiers
+- realtime FPS/frame-time/draw-call/triangle/resource profiler
+
+## Production baking and export
+
+Phase 3 converts the realtime procedural material into conventional portable PBR assets.
+
+Texture baker:
+
+- renders the same procedural field/runtime into UV space
+- bakes albedo, roughness, tangent-space normal, height, clearcoat and clearcoat-roughness maps
+- uses current morph/skinning-deformed vertex positions for bake geometry
+- preserves normalized-world procedural scale through the source mesh world transform
+- dilates UV islands by a configured padding distance to reduce filtering seams
+- exports PNG maps
+- clamps requested bake resolution to the GPU texture-size capability
+- fails explicitly when a target mesh has no usable UV coordinates
+
+GLB exporter:
+
+- clones the active preview hierarchy without mutating the editor scene
+- bakes every mesh currently assigned to the lab material
+- converts those meshes to standard `MeshPhysicalMaterial` texture inputs
+- keeps original materials on imported meshes not assigned to the lab material
+- embeds images in binary glTF
+- constrains export texture size by quality tier
+- avoids custom procedural GLSL in the exported asset
+
+Standard glTF has no core displacement/height texture slot. Height is therefore exported as a separate PNG, while GLB uses the baked normal map to preserve surface lighting detail.
+
+## Preset production workflow
+
+The preset browser now provides:
+
+- text search across name, description and tags
+- tag chips for fast filtering
+- GPU-rendered material sphere thumbnails using the preset's real procedural material and PBR settings
+- searchable preset metadata without changing the material project format
 
 ## Configuration
 
@@ -146,9 +185,12 @@ Current renderer:
 - layer/group/physical numeric ranges
 - object, layer, output-channel, environment and blend catalogs
 - default physical material and environment
+- export filenames, thumbnail size and texture-island padding
+- default/automatic quality policy
+- per-tier pixel ratio, shadow size, bake resolution and GLB texture limit
 - camera/renderer settings including displaced-normal strength
 
-Configuration is parsed and range-validated at startup. Unknown, missing or duplicate catalog/range entries fail explicitly.
+Configuration is parsed and range-validated at startup. Unknown, missing or duplicate catalog/range entries fail explicitly. Texture and shadow dimensions that require power-of-two behavior are validated as powers of two.
 
 ## Project persistence
 
@@ -165,7 +207,7 @@ Project format version `2` stores:
 
 Version `1` project JSON migrates to version `2` on import.
 
-Initial persistence remains JSON/localStorage. Imported model/HDR bytes are not embedded in project JSON; model bundles are cached only in-session within configured limits.
+Initial persistence remains JSON/localStorage. Imported model/HDR bytes are not embedded in project JSON; model bundles are cached only in-session within configured limits. Quality tier remains an editor/runtime preference and is not material project content.
 
 ## Architecture
 
@@ -187,6 +229,13 @@ src/
     MeshFactory.ts
     ModelLoader.ts
     ObjectResources.ts
+    PerformanceProfiler.ts
+    Quality.ts
+  export/
+    GlbExporter.ts
+    PresetThumbnailRenderer.ts
+    TextureBaker.ts
+    TextureBakeShader.ts
   materials/
     MaterialCompiler.ts
     PhysicalMaterial.ts
@@ -216,8 +265,10 @@ Rules:
 - Async model/project operations use last-action-wins semantics.
 - Engine code reacts to explicit state changes.
 - Material compilation is deterministic for a given stack/group state.
+- Bake shaders reuse the procedural compiler's field semantics rather than reimplementing material logic in the UI.
+- Export operates on clones and does not mutate editor scene resources.
 - Replaced Three.js resources are explicitly disposed without invalidating retained shared/original resources.
-- Editor defaults and numeric ranges come from validated YAML.
+- Editor, export and quality defaults come from validated YAML.
 
 ## Delivery phases
 
@@ -249,28 +300,36 @@ Rules:
 - multi-file GLTF asset bundles
 - project-format migration and validation for Phase 2 state
 
-### Phase 3 — Production export
+### Phase 3 — Production export — implemented
 
-- texture baking
-- normal/height baking
-- optimized GLB export
-- material thumbnails
-- preset browser/search/tags
-- performance profiler and mobile quality tiers
+- albedo/roughness/clearcoat texture baking
+- tangent-space normal and height baking
+- UV-island dilation padding
+- morph/skinning-aware bake source geometry
+- baked standard-PBR binary GLB export
+- per-mesh material preservation during export
+- rendered material thumbnails
+- preset browser search and tags
+- realtime performance profiler
+- Auto/Mobile/Balanced/High/Ultra quality tiers
+- compact toolbar plus two-ring radial bake/export workflow
+- YAML validation for export and performance policy
 
-## Phase 2 acceptance criteria
+## Phase 3 acceptance criteria
 
-- A layer can target color, roughness, height, clearcoat or SSS independently.
-- A layer can use another layer as a mask and invert/scale the mask.
-- Layers can belong to nested groups with inherited enable/opacity.
-- Wet-film layers visibly alter clearcoat locally.
-- SSS layers add visible internal tissue depth without replacing the PBR surface.
-- Branching-vessel layers produce multi-scale vascular structures.
-- Displaced geometry uses matching shadow displacement and corrected surface normals.
-- Users can switch among built-in studio environments and load a local HDR.
-- Imported scenes expose selectable mesh targets and per-mesh lab-material assignment.
-- External-resource GLTFs load when their resource bundle is selected together and never silently fetch remote resources.
-- Version-1 project JSON imports into the version-2 model.
+- `Bake maps` exports albedo, roughness, normal, height, clearcoat and clearcoat-roughness PNGs from the authored procedural stack.
+- Baked color/roughness/clearcoat values use the same layer masks, groups and channel routing as the realtime material.
+- Baked normal detail is derived from the procedural displacement field.
+- Current morph/skinning deformation is used when generating bake geometry.
+- Baking fails explicitly instead of silently producing invalid output when UV coordinates are unavailable.
+- GLB export embeds conventional PBR textures and does not depend on the lab's custom runtime shader.
+- Imported meshes not assigned to the lab material keep their original material in the exported hierarchy.
+- Presets can be filtered by text or tag and display generated material thumbnails.
+- The viewport reports FPS, frame time, draw calls, triangles, geometries and textures.
+- Quality tier controls pixel ratio, shadow resolution, bake resolution and export texture limits.
+- Mobile/narrow layouts retain Bake and GLB actions through the radial menu even when toolbar export buttons are hidden.
 - Production CI continues to run `npm run build` on `main`.
 
-Runtime/browser verification still depends on the repository CI or a local environment with package-registry access.
+## Future work
+
+The core three-phase editor is complete. Further work should be selected by production need rather than added automatically. Candidate follow-ups are automatic UV unwrapping, atlas packing across multiple material targets, WebGPU/TSL migration, offline/path-traced reference rendering, mesh-displacement baking for silhouette-preserving export and specialized DCC/engine export profiles.
