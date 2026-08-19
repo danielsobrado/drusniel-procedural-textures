@@ -1,18 +1,30 @@
 export type ImportedFileLookup =
   | { status: 'found'; file: File }
-  | { status: 'ambiguous' }
   | { status: 'missing' };
 
-function sameFileMetadata(left: File, right: File): boolean {
-  return left.name === right.name &&
-    left.size === right.size &&
-    left.lastModified === right.lastModified &&
-    left.type === right.type;
+interface FileMetadata {
+  size: number;
+  lastModified: number;
+  type: string;
+}
+
+function metadataOf(file: File): FileMetadata {
+  return {
+    size: file.size,
+    lastModified: file.lastModified,
+    type: file.type
+  };
+}
+
+function sameFileMetadata(metadata: FileMetadata, file: File): boolean {
+  return metadata.size === file.size &&
+    metadata.lastModified === file.lastModified &&
+    metadata.type === file.type;
 }
 
 export class ImportedFileCache {
   private readonly files = new Map<string, File>();
-  private readonly ambiguousNames = new Set<string>();
+  private readonly knownMetadata = new Map<string, FileMetadata>();
   private totalBytes = 0;
 
   public constructor(
@@ -21,18 +33,16 @@ export class ImportedFileCache {
   ) {}
 
   public remember(file: File): void {
+    const metadata = this.knownMetadata.get(file.name);
+    if (metadata !== undefined && !sameFileMetadata(metadata, file)) {
+      throw new Error(
+        `A different imported asset is already known as "${file.name}". Rename the file before importing it so project history can restore the correct model.`
+      );
+    }
+
+    this.rememberMetadata(file.name, metadata ?? metadataOf(file));
+
     const existing = this.files.get(file.name);
-    if (existing !== undefined && !sameFileMetadata(existing, file)) {
-      this.remove(file.name);
-      this.rememberAmbiguousName(file.name);
-      return;
-    }
-
-    if (this.ambiguousNames.has(file.name)) {
-      this.refreshAmbiguousName(file.name);
-      return;
-    }
-
     if (existing !== undefined) {
       this.refreshFile(file.name, existing);
       return;
@@ -45,39 +55,35 @@ export class ImportedFileCache {
 
   public lookup(name: string): ImportedFileLookup {
     const file = this.files.get(name);
-    if (file !== undefined) {
-      this.refreshFile(name, file);
-      return { status: 'found', file };
+    if (file === undefined) {
+      return { status: 'missing' };
     }
 
-    if (this.ambiguousNames.has(name)) {
-      this.refreshAmbiguousName(name);
-      return { status: 'ambiguous' };
+    this.refreshFile(name, file);
+    const metadata = this.knownMetadata.get(name);
+    if (metadata !== undefined) {
+      this.rememberMetadata(name, metadata);
     }
-
-    return { status: 'missing' };
+    return { status: 'found', file };
   }
 
   public clear(): void {
     this.files.clear();
-    this.ambiguousNames.clear();
+    this.knownMetadata.clear();
     this.totalBytes = 0;
   }
 
-  private rememberAmbiguousName(name: string): void {
-    this.ambiguousNames.add(name);
-    while (this.ambiguousNames.size > this.maxEntries) {
-      const oldest = this.ambiguousNames.values().next();
+  private rememberMetadata(name: string, metadata: FileMetadata): void {
+    this.knownMetadata.delete(name);
+    this.knownMetadata.set(name, metadata);
+
+    while (this.knownMetadata.size > this.maxEntries) {
+      const oldest = this.knownMetadata.keys().next();
       if (oldest.done) {
         break;
       }
-      this.ambiguousNames.delete(oldest.value);
+      this.knownMetadata.delete(oldest.value);
     }
-  }
-
-  private refreshAmbiguousName(name: string): void {
-    this.ambiguousNames.delete(name);
-    this.ambiguousNames.add(name);
   }
 
   private refreshFile(name: string, file: File): void {
@@ -91,11 +97,11 @@ export class ImportedFileCache {
       if (oldest.done) {
         break;
       }
-      this.remove(oldest.value);
+      this.removeFile(oldest.value);
     }
   }
 
-  private remove(name: string): void {
+  private removeFile(name: string): void {
     const file = this.files.get(name);
     if (file === undefined) {
       return;
