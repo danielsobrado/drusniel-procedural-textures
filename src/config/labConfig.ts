@@ -38,6 +38,7 @@ interface ControlsConfig {
 interface UiConfig {
   longPressDelayMs: number;
   longPressMoveTolerancePx: number;
+  radialClickMoveTolerancePx: number;
   radialRadiusPx: number;
   radialEdgePaddingPx: number;
   toastInfoMs: number;
@@ -394,6 +395,12 @@ function parseUi(value: unknown): UiConfig {
     longPressMoveTolerancePx: asNumber(
       ui.longPressMoveTolerancePx,
       'ui.longPressMoveTolerancePx',
+      1,
+      100
+    ),
+    radialClickMoveTolerancePx: asNumber(
+      ui.radialClickMoveTolerancePx,
+      'ui.radialClickMoveTolerancePx',
       1,
       100
     ),
