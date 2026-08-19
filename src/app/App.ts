@@ -3,7 +3,8 @@ import {
   HISTORY_LIMIT,
   MAX_PROJECT_FILE_BYTES,
   OBJECT_PRESETS,
-  STORAGE_KEY
+  STORAGE_KEY,
+  UI_CONFIG
 } from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
 import { normalizeProject } from './ProjectFile';
@@ -231,10 +232,52 @@ export class App {
 
   private bindViewportGestures(): void {
     const viewport = this.shell.elements.viewport;
+    let rightPress: { pointerId: number; startX: number; startY: number } | null = null;
 
     viewport.addEventListener('contextmenu', (event) => {
       event.preventDefault();
-      this.radial.open(event.clientX, event.clientY);
+      if (event.button !== 2) {
+        this.radial.open(event.clientX, event.clientY);
+      }
+    });
+
+    viewport.addEventListener('pointerdown', (event) => {
+      if (event.pointerType === 'mouse' && event.button === 2) {
+        rightPress = {
+          pointerId: event.pointerId,
+          startX: event.clientX,
+          startY: event.clientY
+        };
+      }
+    });
+
+    viewport.addEventListener('pointermove', (event) => {
+      if (rightPress === null || event.pointerId !== rightPress.pointerId) {
+        return;
+      }
+
+      const distance = Math.hypot(
+        event.clientX - rightPress.startX,
+        event.clientY - rightPress.startY
+      );
+      if (distance > UI_CONFIG.radialClickMoveTolerancePx) {
+        rightPress = null;
+      }
+    });
+
+    viewport.addEventListener('pointerup', (event) => {
+      if (
+        rightPress !== null &&
+        event.pointerId === rightPress.pointerId &&
+        event.button === 2
+      ) {
+        this.radial.open(event.clientX, event.clientY);
+      }
+      rightPress = null;
+    });
+
+    viewport.addEventListener('pointercancel', () => {
+      rightPress = null;
     });
 
     viewport.addEventListener('dragenter', (event) => {
