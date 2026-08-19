@@ -21,7 +21,9 @@ export type StateChangeReason =
   | 'layers'
   | 'selection'
   | 'object'
-  | 'viewport';
+  | 'background'
+  | 'wireframe'
+  | 'physical';
 
 export type StateListener = (
   state: Readonly<ProjectState>,
@@ -287,7 +289,7 @@ export class AppState {
 
     this.commit('viewport:background');
     this.project.background = color;
-    this.emit('viewport');
+    this.emit('background');
   }
 
   public setWireframe(enabled: boolean): void {
@@ -297,7 +299,7 @@ export class AppState {
 
     this.commit();
     this.project.wireframe = enabled;
-    this.emit('viewport');
+    this.emit('wireframe');
   }
 
   public setPhysical(patch: Partial<PhysicalSettings>): void {
@@ -310,7 +312,7 @@ export class AppState {
       ...this.project.physical,
       ...patch
     };
-    this.emit('viewport');
+    this.emit('physical');
   }
 
   public toggleWireframe(): void {
