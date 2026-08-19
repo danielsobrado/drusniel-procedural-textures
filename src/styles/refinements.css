@@ -16,6 +16,42 @@
   display: none !important;
 }
 
+.routing-field {
+  margin-top: 8px;
+}
+
+.inspector-action {
+  width: 100%;
+  margin-top: 8px;
+  justify-content: center;
+}
+
+.group-editor,
+.mesh-target-editor {
+  margin-top: 9px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.group-editor .section-heading {
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.asset-note {
+  margin-top: 6px;
+  color: var(--subtle);
+  font-size: 8px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.layer-copy small {
+  text-transform: none;
+}
+
 @media (max-width: 600px) {
   .toolbar-project .compact-button[data-command="open-project"],
   .toolbar-project .compact-button[data-command="save-project"] {
@@ -24,5 +60,10 @@
 
   .toolbar-project .compact-button[data-command="import-model"] {
     display: inline-flex;
+  }
+
+  .group-editor,
+  .mesh-target-editor {
+    padding: 7px;
   }
 }
