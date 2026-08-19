@@ -195,11 +195,6 @@ export class App {
       return;
     }
 
-    if (cached.status === 'ambiguous') {
-      this.shell.toast('Multiple imported files share this name. Re-import the intended GLB to restore it.');
-      return;
-    }
-
     this.shell.toast('Imported mesh is not embedded in project JSON. Re-import the GLB to restore it.');
   }
 
@@ -398,8 +393,14 @@ export class App {
         return;
       }
 
+      try {
+        this.importedFiles.remember(file);
+      } catch (error) {
+        disposeObjectResources(model);
+        throw error;
+      }
+
       this.renderer.setImported(model);
-      this.importedFiles.remember(file);
       this.activeImportedName = assetName;
       this.state.setImportedAsset(assetName);
       this.shell.setObjectLabel(assetName);
