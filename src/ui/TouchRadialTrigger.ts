@@ -2,7 +2,6 @@ import { UI_CONFIG } from '../app/constants';
 
 interface ActivePress {
   pointerId: number;
-  pointerType: string;
   startX: number;
   startY: number;
   clientX: number;
@@ -22,14 +21,15 @@ export class TouchRadialTrigger {
   }
 
   private handlePointerDown(event: PointerEvent): void {
-    if (event.pointerType === 'mouse' || event.button !== 0) {
+    if (event.pointerType === 'mouse' || event.button !== 0) return;
+    if (!event.isPrimary) {
+      this.cancel();
       return;
     }
 
     this.cancel();
     const active: ActivePress = {
       pointerId: event.pointerId,
-      pointerType: event.pointerType,
       startX: event.clientX,
       startY: event.clientY,
       clientX: event.clientX,
@@ -39,9 +39,7 @@ export class TouchRadialTrigger {
     };
 
     active.timer = window.setTimeout(() => {
-      if (this.active !== active) {
-        return;
-      }
+      if (this.active !== active) return;
       active.triggered = true;
       this.target.dispatchEvent(new MouseEvent('contextmenu', {
         bubbles: true,
@@ -57,26 +55,30 @@ export class TouchRadialTrigger {
 
   private handlePointerMove(event: PointerEvent): void {
     const active = this.active;
-    if (active === null || active.pointerId !== event.pointerId) {
-      return;
-    }
+    if (active === null || active.pointerId !== event.pointerId) return;
 
     active.clientX = event.clientX;
     active.clientY = event.clientY;
-    const distance = Math.hypot(event.clientX - active.startX, event.clientY - active.startY);
-    if (!active.triggered && distance > UI_CONFIG.longPressMoveTolerancePx) {
-      this.cancel();
+    if (active.triggered) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
     }
+
+    const distance = Math.hypot(event.clientX - active.startX, event.clientY - active.startY);
+    if (distance > UI_CONFIG.longPressMoveTolerancePx) this.cancel();
   }
 
   private handlePointerEnd(event: PointerEvent): void {
     const active = this.active;
-    if (active === null || active.pointerId !== event.pointerId) {
-      return;
-    }
+    if (active === null || active.pointerId !== event.pointerId) return;
 
     window.clearTimeout(active.timer);
     this.active = null;
+    if (active.triggered) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
   }
 
   private cancel(): void {
