@@ -138,7 +138,8 @@ function dilateCanvas(source: HTMLCanvasElement, iterations: number): HTMLCanvas
       for (let x = 1; x < width - 1; x += 1) {
         const offset = (y * width + x) * 4;
         if (image.data[offset + 3] !== 0) continue;
-        for (let dy = -1; dy <= 1; dy += 1) {
+        let filled = false;
+        for (let dy = -1; dy <= 1 && !filled; dy += 1) {
           for (let dx = -1; dx <= 1; dx += 1) {
             if (dx === 0 && dy === 0) continue;
             const neighbor = ((y + dy) * width + x + dx) * 4;
@@ -147,8 +148,8 @@ function dilateCanvas(source: HTMLCanvasElement, iterations: number): HTMLCanvas
             next[offset + 1] = image.data[neighbor + 1];
             next[offset + 2] = image.data[neighbor + 2];
             next[offset + 3] = 255;
-            dx = 2;
-            dy = 2;
+            filled = true;
+            break;
           }
         }
       }
