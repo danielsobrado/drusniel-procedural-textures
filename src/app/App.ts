@@ -135,6 +135,10 @@ export class App {
   }
 
   private handleStateChange(state: Readonly<ProjectState>, reason: StateChangeReason): void {
+    if (reason === 'project' || reason === 'environment') {
+      this.environmentLoadSequence += 1;
+    }
+
     if (reason === 'layers' || reason === 'groups' || reason === 'project') {
       this.syncMaterial(state);
     } else if (reason === 'wireframe') {
@@ -398,8 +402,8 @@ export class App {
     const sequence = ++this.environmentLoadSequence;
     try {
       this.shell.setStatus(`Loading ${file.name}…`);
-      await this.renderer.loadEnvironmentHdr(file);
-      if (sequence !== this.environmentLoadSequence) return;
+      const loaded = await this.renderer.loadEnvironmentHdr(file);
+      if (!loaded || sequence !== this.environmentLoadSequence) return;
       this.state.setEnvironment('custom', file.name);
       this.shell.toast(`Loaded HDR environment ${file.name}`);
     } catch (error) {
