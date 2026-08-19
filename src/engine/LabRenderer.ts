@@ -6,9 +6,9 @@ import type { ObjectPreset } from '../materials/types';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { createProceduralMesh } from './MeshFactory';
 import {
-  collectObjectMaterials,
+  collectMeshMaterials,
   disposeMaterialResources,
-  disposeObjectGeometries
+  disposeObjectResources
 } from './ObjectResources';
 
 export class LabRenderer {
@@ -81,7 +81,7 @@ export class LabRenderer {
   }
 
   public setImported(root: THREE.Object3D): void {
-    const replacedMaterials = collectObjectMaterials(root);
+    const replacedMaterials = collectMeshMaterials(root);
 
     root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
@@ -204,7 +204,7 @@ export class LabRenderer {
 
   private disposeRoot(root: THREE.Object3D | null): void {
     if (root !== null) {
-      disposeObjectGeometries(root);
+      disposeObjectResources(root, new Set([this.compiler.material]));
     }
   }
 
