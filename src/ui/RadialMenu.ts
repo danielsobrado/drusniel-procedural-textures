@@ -11,6 +11,8 @@ export type RadialCommand =
   | 'import'
   | 'open-project'
   | 'save-project'
+  | 'bake-textures'
+  | 'export-glb'
   | 'frame'
   | 'wireframe';
 
@@ -18,21 +20,24 @@ interface RadialItem {
   command: RadialCommand;
   label: string;
   glyph: string;
+  ring: 'inner' | 'outer';
 }
 
 const ITEMS: readonly RadialItem[] = [
-  { command: 'add-noise', label: 'Noise', glyph: '≈' },
-  { command: 'add-cells', label: 'Cells', glyph: '⬡' },
-  { command: 'add-veins', label: 'Vessels', glyph: '⌁' },
-  { command: 'add-wet', label: 'Wet', glyph: '◌' },
-  { command: 'add-sss', label: 'SSS', glyph: '◐' },
-  { command: 'sphere', label: 'Sphere', glyph: '●' },
-  { command: 'torus', label: 'Torus', glyph: '◉' },
-  { command: 'import', label: 'Import', glyph: '↥' },
-  { command: 'open-project', label: 'Open', glyph: '↗' },
-  { command: 'save-project', label: 'Save', glyph: '↓' },
-  { command: 'frame', label: 'Frame', glyph: '⌗' },
-  { command: 'wireframe', label: 'Wire', glyph: '◇' }
+  { command: 'add-noise', label: 'Noise', glyph: '≈', ring: 'outer' },
+  { command: 'add-cells', label: 'Cells', glyph: '⬡', ring: 'outer' },
+  { command: 'add-veins', label: 'Vessels', glyph: '⌁', ring: 'outer' },
+  { command: 'add-wet', label: 'Wet', glyph: '◌', ring: 'outer' },
+  { command: 'add-sss', label: 'SSS', glyph: '◐', ring: 'outer' },
+  { command: 'import', label: 'Import', glyph: '↥', ring: 'outer' },
+  { command: 'bake-textures', label: 'Bake', glyph: '▦', ring: 'outer' },
+  { command: 'export-glb', label: 'GLB', glyph: '⬇', ring: 'outer' },
+  { command: 'sphere', label: 'Sphere', glyph: '●', ring: 'inner' },
+  { command: 'torus', label: 'Torus', glyph: '◉', ring: 'inner' },
+  { command: 'frame', label: 'Frame', glyph: '⌗', ring: 'inner' },
+  { command: 'wireframe', label: 'Wire', glyph: '◇', ring: 'inner' },
+  { command: 'open-project', label: 'Open', glyph: '↗', ring: 'inner' },
+  { command: 'save-project', label: 'Save', glyph: '↓', ring: 'inner' }
 ];
 
 const NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown']);
@@ -43,6 +48,17 @@ function safeCenter(position: number, extent: number, margin: number): number {
   const minimum = Math.min(margin, center);
   const maximum = Math.max(extent - margin, center);
   return Math.max(minimum, Math.min(maximum, position));
+}
+
+function ringPosition(item: RadialItem, radius: number): { x: number; y: number } {
+  const ringItems = ITEMS.filter((candidate) => candidate.ring === item.ring);
+  const index = ringItems.indexOf(item);
+  const ringRadius = item.ring === 'outer' ? radius : radius * 0.64;
+  const angle = -Math.PI / 2 + (index / ringItems.length) * Math.PI * 2;
+  return {
+    x: Math.cos(angle) * ringRadius,
+    y: Math.sin(angle) * ringRadius
+  };
 }
 
 export class RadialMenu {
@@ -74,17 +90,15 @@ export class RadialMenu {
           <strong>Quick</strong>
           <span>actions</span>
         </div>
-        ${ITEMS.map((item, index) => {
-          const angle = -Math.PI / 2 + (index / ITEMS.length) * Math.PI * 2;
-          const px = Math.cos(angle) * radius;
-          const py = Math.sin(angle) * radius;
+        ${ITEMS.map((item) => {
+          const position = ringPosition(item, radius);
           return `
             <button
-              class="radial-item"
+              class="radial-item radial-${item.ring}"
               data-radial-command="${item.command}"
               role="menuitem"
               aria-label="${item.label}"
-              style="--radial-x:${px.toFixed(2)}px;--radial-y:${py.toFixed(2)}px"
+              style="--radial-x:${position.x.toFixed(2)}px;--radial-y:${position.y.toFixed(2)}px"
               title="${item.label}"
             >
               <span aria-hidden="true">${item.glyph}</span>
