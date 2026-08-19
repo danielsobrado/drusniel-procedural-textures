@@ -9,7 +9,7 @@ import {
 } from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
 import { ImportedFileCache } from './ImportedFileCache';
-import { normalizeProject } from './ProjectFile';
+import { normalizeImportedAssetName, normalizeProject } from './ProjectFile';
 import { LabRenderer } from '../engine/LabRenderer';
 import { ModelLoader } from '../engine/ModelLoader';
 import { disposeObjectResources } from '../engine/ObjectResources';
@@ -383,7 +383,8 @@ export class App {
     this.projectImportSequence += 1;
 
     try {
-      this.shell.setStatus(`Loading ${file.name}…`);
+      const assetName = normalizeImportedAssetName(file.name);
+      this.shell.setStatus(`Loading ${assetName}…`);
       const model = await this.modelLoader.load(file);
       if (model === null) {
         return;
@@ -391,10 +392,10 @@ export class App {
 
       this.renderer.setImported(model);
       this.importedFiles.remember(file);
-      this.activeImportedName = file.name;
-      this.state.setImportedAsset(file.name);
-      this.shell.setObjectLabel(file.name);
-      this.shell.toast(`Imported ${file.name}`);
+      this.activeImportedName = assetName;
+      this.state.setImportedAsset(assetName);
+      this.shell.setObjectLabel(assetName);
+      this.shell.toast(`Imported ${assetName}`);
     } catch (error) {
       console.error('Model import failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
