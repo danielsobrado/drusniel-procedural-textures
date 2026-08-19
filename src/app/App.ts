@@ -24,6 +24,7 @@ import { Shell } from '../ui/Shell';
 import { downloadDataUrl, downloadText } from '../utils/download';
 
 const BYTES_PER_MIB = 1024 * 1024;
+const IMPORT_CACHE_ENTRY_LIMIT = HISTORY_LIMIT + 1;
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
@@ -38,6 +39,15 @@ function isInteractiveTarget(target: EventTarget | null): boolean {
   }
 
   return target.closest('button, a[href], summary, [role="button"], [role="menuitem"]') !== null;
+}
+
+async function readUtf8File(file: File, label: string): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw new Error(`${label} is not valid UTF-8.`, { cause: error });
+  }
 }
 
 function loadInitialProject(): ProjectState {
@@ -64,8 +74,12 @@ export class App {
   private readonly inspector: Inspector;
   private readonly layers: LayerStrip;
   private readonly radial: RadialMenu;
-  private readonly importedFiles = new ImportedFileCache(HISTORY_LIMIT, MAX_MODEL_FILE_BYTES);
+  private readonly importedFiles = new ImportedFileCache(
+    IMPORT_CACHE_ENTRY_LIMIT,
+    MAX_MODEL_FILE_BYTES
+  );
   private autosaveTimer: number | null = null;
+  private autosaveFailureShown = false;
   private activeImportedName: string | null = null;
   private suppressImportedRestore = false;
   private projectImportSequence = 0;
@@ -446,7 +460,7 @@ export class App {
         throw new Error(`Project file exceeds the configured ${limitMiB.toFixed(1)} MiB limit.`);
       }
 
-      const text = await file.text();
+      const text = await readUtf8File(file, 'Project file');
       if (sequence !== this.projectImportSequence) {
         return;
       }
@@ -485,8 +499,13 @@ export class App {
     this.autosaveTimer = window.setTimeout(() => {
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+        this.autosaveFailureShown = false;
       } catch (error) {
         console.warn('Autosave failed.', error);
+        if (!this.autosaveFailureShown) {
+          this.shell.toast('Autosave failed. Use Save to keep a project JSON copy.', 'error');
+          this.autosaveFailureShown = true;
+        }
       }
       this.autosaveTimer = null;
     }, AUTOSAVE_DELAY_MS);
