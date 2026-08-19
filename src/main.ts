@@ -1,13 +1,18 @@
 import './styles/app.css';
 import './styles/refinements.css';
 import { App } from './app/App';
-import { installLongPressContextMenu } from './ui/LongPressContextMenu';
+import { TouchRadialTrigger } from './ui/TouchRadialTrigger';
 
 const root = document.querySelector<HTMLElement>('#app');
-
 if (root === null) {
-  throw new Error('Application root not found.');
+  throw new Error('Application root was not found.');
 }
 
 new App(root);
-installLongPressContextMenu();
+
+const viewport = root.querySelector<HTMLElement>('[data-role="viewport"]');
+if (viewport === null) {
+  throw new Error('Viewport was not created.');
+}
+
+new TouchRadialTrigger(viewport);
