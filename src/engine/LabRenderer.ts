@@ -7,6 +7,7 @@ import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { createProceduralMesh } from './MeshFactory';
 import {
   collectMeshMaterials,
+  collectNonMeshMaterials,
   disposeMaterialResources,
   disposeObjectResources
 } from './ObjectResources';
@@ -79,6 +80,11 @@ export class LabRenderer {
 
   public setImported(root: THREE.Object3D): void {
     const replacedMaterials = collectMeshMaterials(root);
+    const retainedMaterials = collectNonMeshMaterials(root);
+
+    for (const material of retainedMaterials) {
+      replacedMaterials.delete(material);
+    }
 
     root.traverse((object) => {
       if (!(object instanceof THREE.Mesh)) {
@@ -96,7 +102,7 @@ export class LabRenderer {
       this.applyProceduralMeshSettings(object);
     });
 
-    disposeMaterialResources(replacedMaterials);
+    disposeMaterialResources(replacedMaterials, retainedMaterials);
     this.replaceRoot(root);
   }
 
