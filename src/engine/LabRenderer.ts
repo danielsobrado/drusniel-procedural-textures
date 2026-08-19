@@ -104,9 +104,7 @@ export class LabRenderer {
     const meshes = new Map<string, THREE.Mesh>();
 
     root.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) {
-        return;
-      }
+      if (!(object instanceof THREE.Mesh)) return;
       if (
         object.geometry.getAttribute('position') !== undefined &&
         object.geometry.getAttribute('normal') === undefined
@@ -114,9 +112,7 @@ export class LabRenderer {
         object.geometry.computeVertexNormals();
       }
       const id = object.userData.labMeshId;
-      if (typeof id !== 'string') {
-        return;
-      }
+      if (typeof id !== 'string') return;
       originals.set(id, object.material);
       meshes.set(id, object);
     });
@@ -133,9 +129,7 @@ export class LabRenderer {
         this.applyProceduralMeshSettings(mesh);
       } else {
         const original = this.originalMeshMaterials.get(id);
-        if (original !== undefined) {
-          mesh.material = original;
-        }
+        if (original !== undefined) mesh.material = original;
         mesh.customDepthMaterial = undefined;
         mesh.customDistanceMaterial = undefined;
         mesh.castShadow = true;
@@ -156,14 +150,13 @@ export class LabRenderer {
     this.selectionHelper.visible = !this.selectionBox.isEmpty();
   }
 
-  public setEnvironment(preset: EnvironmentPreset): void {
-    const profile = this.environments.apply(this.scene, preset);
+  public setEnvironment(preset: EnvironmentPreset, customName: string | null = null): void {
+    const profile = this.environments.apply(this.scene, preset, customName);
     this.applyLightProfile(profile);
   }
 
   public async loadEnvironmentHdr(file: File): Promise<void> {
     await this.environments.loadHdr(file);
-    this.setEnvironment('custom');
   }
 
   public setBackground(color: string): void {
@@ -173,14 +166,10 @@ export class LabRenderer {
   public frameSelection(): void {
     const selected = this.selectedMeshId === null ? null : this.meshById.get(this.selectedMeshId) ?? null;
     const target = selected ?? this.currentRoot;
-    if (target === null) {
-      return;
-    }
+    if (target === null) return;
 
     const bounds = new THREE.Box3().setFromObject(target);
-    if (bounds.isEmpty()) {
-      return;
-    }
+    if (bounds.isEmpty()) return;
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
     const radius = Math.max(sphere.radius + this.compiler.displacementExtent, 0.1);
     const verticalHalfFov = THREE.MathUtils.degToRad(this.camera.fov * 0.5);
@@ -280,18 +269,14 @@ export class LabRenderer {
 
   private disposeCurrentRoot(): void {
     const root = this.currentRoot;
-    if (root === null) {
-      return;
-    }
+    if (root === null) return;
 
     const visibleMeshMaterials = collectMeshMaterials(root);
     const retainedNonMesh = collectNonMeshMaterials(root);
     const hiddenOriginals = new Set<THREE.Material>();
     for (const material of this.originalMeshMaterials.values()) {
       for (const item of materialSet(material)) {
-        if (!visibleMeshMaterials.has(item)) {
-          hiddenOriginals.add(item);
-        }
+        if (!visibleMeshMaterials.has(item)) hiddenOriginals.add(item);
       }
     }
     disposeMaterialResources(hiddenOriginals, new Set([...visibleMeshMaterials, ...retainedNonMesh]));
@@ -310,9 +295,7 @@ export class LabRenderer {
     const signal = this.interactionAbort.signal;
 
     this.canvas.addEventListener('pointerdown', (event) => {
-      if (event.button === 0) {
-        pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
-      }
+      if (event.button === 0) pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
     }, { signal });
 
     this.canvas.addEventListener('pointerup', (event) => {
@@ -322,9 +305,8 @@ export class LabRenderer {
       }
       const moved = Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y);
       pointerStart = null;
-      if (moved > 5 || this.meshById.size === 0) {
-        return;
-      }
+      if (moved > 5 || this.meshById.size === 0) return;
+
       const rect = this.canvas.getBoundingClientRect();
       this.pointer.set(
         ((event.clientX - rect.left) / Math.max(rect.width, 1)) * 2 - 1,
@@ -338,22 +320,16 @@ export class LabRenderer {
       this.meshSelectionCallback?.(id);
     }, { signal });
 
-    this.canvas.addEventListener('pointercancel', () => {
-      pointerStart = null;
-    }, { signal });
+    this.canvas.addEventListener('pointercancel', () => { pointerStart = null; }, { signal });
   }
 
   private resize(): void {
     const parent = this.canvas.parentElement;
-    if (parent === null) {
-      return;
-    }
+    if (parent === null) return;
     const width = Math.max(parent.clientWidth, 1);
     const height = Math.max(parent.clientHeight, 1);
     const pixelRatio = Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio);
-    if (this.renderer.getPixelRatio() !== pixelRatio) {
-      this.renderer.setPixelRatio(pixelRatio);
-    }
+    if (this.renderer.getPixelRatio() !== pixelRatio) this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
@@ -365,9 +341,7 @@ export class LabRenderer {
       this.controls.update();
       if (this.selectionHelper.visible && this.selectedMeshId !== null) {
         const mesh = this.meshById.get(this.selectedMeshId);
-        if (mesh !== undefined) {
-          this.selectionBox.setFromObject(mesh);
-        }
+        if (mesh !== undefined) this.selectionBox.setFromObject(mesh);
       }
       this.renderer.render(this.scene, this.camera);
     };
