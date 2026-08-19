@@ -7,6 +7,8 @@ export type RadialCommand =
   | 'sphere'
   | 'torus'
   | 'import'
+  | 'open-project'
+  | 'save-project'
   | 'frame'
   | 'wireframe';
 
@@ -23,9 +25,14 @@ const ITEMS: readonly RadialItem[] = [
   { command: 'sphere', label: 'Sphere', glyph: '●' },
   { command: 'torus', label: 'Torus', glyph: '◉' },
   { command: 'import', label: 'Import', glyph: '↥' },
+  { command: 'open-project', label: 'Open', glyph: '↗' },
+  { command: 'save-project', label: 'Save', glyph: '↓' },
   { command: 'frame', label: 'Frame', glyph: '⌗' },
   { command: 'wireframe', label: 'Wire', glyph: '◇' }
 ];
+
+const NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown']);
+const PREVIOUS_KEYS = new Set(['ArrowLeft', 'ArrowUp']);
 
 function safeCenter(position: number, extent: number, margin: number): number {
   const center = extent / 2;
@@ -43,11 +50,7 @@ export class RadialMenu {
     private readonly onCommand: (command: RadialCommand) => void
   ) {
     this.host.addEventListener('click', (event) => this.handleClick(event));
-    window.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') {
-        this.hide();
-      }
-    });
+    window.addEventListener('keydown', (event) => this.handleKeyDown(event));
   }
 
   public open(x: number, y: number, focusFirst = false): void {
@@ -92,7 +95,7 @@ export class RadialMenu {
     this.visible = true;
 
     if (focusFirst) {
-      this.host.querySelector<HTMLButtonElement>('[data-radial-command]')?.focus({ preventScroll: true });
+      this.focusItem(0);
     }
   }
 
@@ -127,5 +130,60 @@ export class RadialMenu {
     if (target.closest('[data-radial-dismiss]') !== null) {
       this.hide();
     }
+  }
+
+  private handleKeyDown(event: KeyboardEvent): void {
+    if (!this.visible) {
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this.hide();
+      return;
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault();
+      this.focusItem(0);
+      return;
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault();
+      this.focusItem(ITEMS.length - 1);
+      return;
+    }
+
+    const direction = NEXT_KEYS.has(event.key)
+      ? 1
+      : PREVIOUS_KEYS.has(event.key)
+        ? -1
+        : 0;
+    if (direction === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    const buttons = this.buttons();
+    if (buttons.length === 0) {
+      return;
+    }
+
+    const activeIndex = document.activeElement instanceof HTMLButtonElement
+      ? buttons.indexOf(document.activeElement)
+      : -1;
+    const nextIndex = activeIndex < 0
+      ? direction > 0 ? 0 : buttons.length - 1
+      : (activeIndex + direction + buttons.length) % buttons.length;
+    buttons[nextIndex]?.focus({ preventScroll: true });
+  }
+
+  private focusItem(index: number): void {
+    this.buttons()[index]?.focus({ preventScroll: true });
+  }
+
+  private buttons(): HTMLButtonElement[] {
+    return Array.from(this.host.querySelectorAll<HTMLButtonElement>('[data-radial-command]'));
   }
 }
