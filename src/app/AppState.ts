@@ -8,8 +8,11 @@ import {
 } from './constants';
 import {
   MAX_LAYER_NAME_LENGTH,
+  normalizeBackgroundColor,
   normalizeImportedAssetName,
-  normalizeLayerName,
+  normalizeMaterialLayer,
+  normalizeObjectPreset,
+  normalizePhysicalSettings,
   normalizeProject
 } from './ProjectFile';
 import type {
@@ -162,8 +165,8 @@ export class AppState {
       throw new Error(`A material can contain at most ${MAX_LAYERS} layers.`);
     }
 
+    const layer = normalizeMaterialLayer(createDefaultLayer(kind), this.project.layers.length);
     this.commit();
-    const layer = createDefaultLayer(kind);
     this.project.layers.push(layer);
     this.project.selectedLayerId = layer.id;
     this.emit('layers');
@@ -176,20 +179,18 @@ export class AppState {
       return;
     }
 
-    const normalizedPatch = patch.name === undefined
-      ? patch
-      : { ...patch, name: normalizeLayerName(patch.name) };
+    const next = normalizeMaterialLayer({
+      ...current,
+      ...patch,
+      id
+    }, index);
 
-    if (!patchChanges(current, normalizedPatch)) {
+    if (!patchChanges(current, next)) {
       return;
     }
 
-    this.commit(layerCoalesceKey(id, normalizedPatch));
-    this.project.layers[index] = {
-      ...current,
-      ...normalizedPatch,
-      id
-    };
+    this.commit(layerCoalesceKey(id, patch));
+    this.project.layers[index] = next;
     this.emit('layers');
   }
 
@@ -225,11 +226,13 @@ export class AppState {
       return;
     }
 
-    this.commit();
     const duplicate = cloneLayer(source);
     duplicate.name = duplicateLayerName(source.name);
-    this.project.layers.splice(index + 1, 0, duplicate);
-    this.project.selectedLayerId = duplicate.id;
+    const normalizedDuplicate = normalizeMaterialLayer(duplicate, index + 1);
+
+    this.commit();
+    this.project.layers.splice(index + 1, 0, normalizedDuplicate);
+    this.project.selectedLayerId = normalizedDuplicate.id;
     this.emit('layers');
   }
 
@@ -237,6 +240,9 @@ export class AppState {
     const sourceIndex = this.project.layers.findIndex((layer) => layer.id === id);
     if (sourceIndex < 0) {
       return;
+    }
+    if (!Number.isInteger(targetIndex)) {
+      throw new Error('Layer target index must be an integer.');
     }
 
     const clampedIndex = Math.max(0, Math.min(targetIndex, this.project.layers.length - 1));
@@ -282,12 +288,16 @@ export class AppState {
   }
 
   public setObjectPreset(preset: ObjectPreset): void {
-    if (this.project.selectedObject === preset && this.project.importedAssetName === null) {
+    const normalizedPreset = normalizeObjectPreset(preset);
+    if (
+      this.project.selectedObject === normalizedPreset &&
+      this.project.importedAssetName === null
+    ) {
       return;
     }
 
     this.commit();
-    this.project.selectedObject = preset;
+    this.project.selectedObject = normalizedPreset;
     this.project.importedAssetName = null;
     this.emit('object');
   }
@@ -304,12 +314,13 @@ export class AppState {
   }
 
   public setBackground(color: string): void {
-    if (this.project.background === color) {
+    const normalizedColor = normalizeBackgroundColor(color);
+    if (this.project.background === normalizedColor) {
       return;
     }
 
     this.commit('viewport:background');
-    this.project.background = color;
+    this.project.background = normalizedColor;
     this.emit('background');
   }
 
@@ -324,15 +335,16 @@ export class AppState {
   }
 
   public setPhysical(patch: Partial<PhysicalSettings>): void {
-    if (!patchChanges(this.project.physical, patch)) {
+    const next = normalizePhysicalSettings({
+      ...this.project.physical,
+      ...patch
+    });
+    if (!patchChanges(this.project.physical, next)) {
       return;
     }
 
     this.commit(patchKey('physical', patch));
-    this.project.physical = {
-      ...this.project.physical,
-      ...patch
-    };
+    this.project.physical = next;
     this.emit('physical');
   }
 
