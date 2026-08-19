@@ -4,6 +4,8 @@ export type RadialCommand =
   | 'add-noise'
   | 'add-cells'
   | 'add-veins'
+  | 'add-wet'
+  | 'add-sss'
   | 'sphere'
   | 'torus'
   | 'import'
@@ -21,7 +23,9 @@ interface RadialItem {
 const ITEMS: readonly RadialItem[] = [
   { command: 'add-noise', label: 'Noise', glyph: '≈' },
   { command: 'add-cells', label: 'Cells', glyph: '⬡' },
-  { command: 'add-veins', label: 'Veins', glyph: '⌁' },
+  { command: 'add-veins', label: 'Vessels', glyph: '⌁' },
+  { command: 'add-wet', label: 'Wet', glyph: '◌' },
+  { command: 'add-sss', label: 'SSS', glyph: '◐' },
   { command: 'sphere', label: 'Sphere', glyph: '●' },
   { command: 'torus', label: 'Torus', glyph: '◉' },
   { command: 'import', label: 'Import', glyph: '↥' },
@@ -93,21 +97,14 @@ export class RadialMenu {
 
     this.host.classList.add('is-open');
     this.visible = true;
-
-    if (focusFirst) {
-      this.focusItem(0);
-    }
+    if (focusFirst) this.focusItem(0);
   }
 
   public hide(): void {
-    if (!this.visible) {
-      return;
-    }
-
+    if (!this.visible) return;
     this.host.classList.remove('is-open');
     this.host.replaceChildren();
     this.visible = false;
-
     const previousFocus = this.previousFocus;
     this.previousFocus = null;
     previousFocus?.focus({ preventScroll: true });
@@ -115,10 +112,7 @@ export class RadialMenu {
 
   private handleClick(event: Event): void {
     const target = event.target instanceof Element ? event.target : null;
-    if (target === null) {
-      return;
-    }
-
+    if (target === null) return;
     const commandButton = target.closest<HTMLElement>('[data-radial-command]');
     const command = commandButton?.dataset.radialCommand as RadialCommand | undefined;
     if (command !== undefined) {
@@ -126,50 +120,31 @@ export class RadialMenu {
       this.onCommand(command);
       return;
     }
-
-    if (target.closest('[data-radial-dismiss]') !== null) {
-      this.hide();
-    }
+    if (target.closest('[data-radial-dismiss]') !== null) this.hide();
   }
 
   private handleKeyDown(event: KeyboardEvent): void {
-    if (!this.visible) {
-      return;
-    }
-
+    if (!this.visible) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       this.hide();
       return;
     }
-
     if (event.key === 'Home') {
       event.preventDefault();
       this.focusItem(0);
       return;
     }
-
     if (event.key === 'End') {
       event.preventDefault();
       this.focusItem(ITEMS.length - 1);
       return;
     }
-
-    const direction = NEXT_KEYS.has(event.key)
-      ? 1
-      : PREVIOUS_KEYS.has(event.key)
-        ? -1
-        : 0;
-    if (direction === 0) {
-      return;
-    }
-
+    const direction = NEXT_KEYS.has(event.key) ? 1 : PREVIOUS_KEYS.has(event.key) ? -1 : 0;
+    if (direction === 0) return;
     event.preventDefault();
     const buttons = this.buttons();
-    if (buttons.length === 0) {
-      return;
-    }
-
+    if (buttons.length === 0) return;
     const activeIndex = document.activeElement instanceof HTMLButtonElement
       ? buttons.indexOf(document.activeElement)
       : -1;
