@@ -143,6 +143,41 @@ blendModes:
   - id: overlay
     label: Overlay
 
+export:
+  texturePaddingPx: 8
+  thumbnailSize: 144
+  textureFileStem: procedural-texture
+  glbFileName: procedural-texture-material.glb
+
+performance:
+  defaultTier: auto
+  sampleIntervalMs: 750
+  tiers:
+    mobile:
+      label: Mobile
+      maxPixelRatio: 1.0
+      shadowMapSize: 512
+      bakeResolution: 512
+      maxExportTextureSize: 1024
+    balanced:
+      label: Balanced
+      maxPixelRatio: 1.25
+      shadowMapSize: 768
+      bakeResolution: 1024
+      maxExportTextureSize: 1024
+    high:
+      label: High
+      maxPixelRatio: 1.75
+      shadowMapSize: 1024
+      bakeResolution: 2048
+      maxExportTextureSize: 2048
+    ultra:
+      label: Ultra
+      maxPixelRatio: 2.0
+      shadowMapSize: 2048
+      bakeResolution: 2048
+      maxExportTextureSize: 2048
+
 renderer:
   maxPixelRatio: 2.0
   cameraFov: 34
