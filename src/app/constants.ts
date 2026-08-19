@@ -10,6 +10,7 @@ import type {
 
 export const APP_NAME = labConfig.app.name;
 export const STORAGE_KEY = labConfig.app.storageKey;
+export const LEGACY_STORAGE_KEYS: readonly string[] = labConfig.app.legacyStorageKeys;
 export const MAX_LAYERS = labConfig.app.maxLayers;
 export const MAX_GROUPS = labConfig.app.maxGroups;
 export const HISTORY_LIMIT = labConfig.app.historyLimit;
