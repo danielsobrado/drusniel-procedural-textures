@@ -34,8 +34,7 @@ export class LabRenderer {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
       alpha: false,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true
+      powerPreference: 'high-performance'
     });
     this.canvas = this.renderer.domElement;
     this.canvas.className = 'lab-canvas';
@@ -44,9 +43,6 @@ export class LabRenderer {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
-    this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio)
-    );
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
 
@@ -223,6 +219,10 @@ export class LabRenderer {
 
     const width = Math.max(parent.clientWidth, 1);
     const height = Math.max(parent.clientHeight, 1);
+    const pixelRatio = Math.min(window.devicePixelRatio, RENDERER_CONFIG.maxPixelRatio);
+    if (this.renderer.getPixelRatio() !== pixelRatio) {
+      this.renderer.setPixelRatio(pixelRatio);
+    }
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
