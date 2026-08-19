@@ -17,8 +17,9 @@ import type {
 
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
-const MAX_LAYER_NAME_LENGTH = 120;
-const MAX_ASSET_NAME_LENGTH = 255;
+
+export const MAX_LAYER_NAME_LENGTH = 120;
+export const MAX_IMPORTED_ASSET_NAME_LENGTH = 255;
 
 const OBJECT_IDS = new Set<ObjectPreset>(OBJECT_PRESETS.map((item) => item.id));
 const LAYER_KIND_IDS = new Set<LayerKind>(LAYER_KINDS.map((item) => item.id));
@@ -115,11 +116,23 @@ function asBlendMode(value: unknown, index: number): BlendMode {
   return value as BlendMode;
 }
 
+export function normalizeLayerName(value: unknown, name = 'Layer name'): string {
+  return asString(value, name, MAX_LAYER_NAME_LENGTH);
+}
+
+export function normalizeImportedAssetName(value: unknown): string {
+  return asNonEmptyString(
+    value,
+    'Imported asset name',
+    MAX_IMPORTED_ASSET_NAME_LENGTH
+  );
+}
+
 function normalizeLayer(value: unknown, index: number): MaterialLayer {
   const layer = asRecord(value, `Layer ${index + 1}`);
   return {
     id: asId(layer.id, `Layer ${index + 1} id`),
-    name: asString(layer.name, `Layer ${index + 1} name`, MAX_LAYER_NAME_LENGTH),
+    name: normalizeLayerName(layer.name, `Layer ${index + 1} name`),
     kind: asLayerKind(layer.kind, index),
     enabled: asBoolean(layer.enabled, `Layer ${index + 1} enabled`),
     blendMode: asBlendMode(layer.blendMode, index),
@@ -251,11 +264,7 @@ export function normalizeProject(value: unknown): ProjectState {
 
   const importedAssetName = project.importedAssetName === null || project.importedAssetName === undefined
     ? null
-    : asNonEmptyString(
-        project.importedAssetName,
-        'Imported asset name',
-        MAX_ASSET_NAME_LENGTH
-      );
+    : normalizeImportedAssetName(project.importedAssetName);
 
   return {
     version: 1,
