@@ -184,9 +184,10 @@ export class MaterialCompiler {
   }
 
   public createBakeMaterial(settings: Readonly<PhysicalSettings>): THREE.ShaderMaterial {
+    const bakeUniforms = THREE.UniformsUtils.clone(this.uniforms);
     const material = new THREE.ShaderMaterial({
       uniforms: {
-        ...this.uniforms,
+        ...bakeUniforms,
         uBakeMode: { value: 0 },
         uBakeBaseRoughness: { value: settings.roughness },
         uBakeBaseClearcoat: { value: settings.clearcoat },
@@ -198,7 +199,7 @@ export class MaterialCompiler {
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,
-      transparent: true,
+      transparent: false,
       toneMapped: false
     });
     material.name = 'Procedural Texture Lab Bake';
