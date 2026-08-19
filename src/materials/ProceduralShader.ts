@@ -134,9 +134,7 @@ float labShapeField(float field, float strength) {
 
 float labMaskForLayer(int layerIndex, vec3 position) {
   int maskIndex = uLabMaskIndex[layerIndex];
-  if (maskIndex < 0 || maskIndex >= uLabCount) {
-    return 1.0;
-  }
+  if (maskIndex < 0 || maskIndex >= uLabCount) return 1.0;
   float field = labLayerField(
     uLabLayerKind[maskIndex],
     position,
@@ -144,9 +142,7 @@ float labMaskForLayer(int layerIndex, vec3 position) {
     uLabSeed[maskIndex]
   );
   float shaped = labShapeField(field, uLabStrength[maskIndex]);
-  if (uLabMaskInvert[layerIndex] > 0.5) {
-    shaped = 1.0 - shaped;
-  }
+  if (uLabMaskInvert[layerIndex] > 0.5) shaped = 1.0 - shaped;
   return mix(1.0, shaped, clamp(uLabMaskStrength[layerIndex], 0.0, 1.0));
 }
 
@@ -242,27 +238,30 @@ LabSurface labEvaluateSurface(vec3 position) {
       surface.color = labBlend(surface.color, layerColor, uLabBlendMode[i], opacity);
     }
 
-    if (channel == 0 || channel == 2 || channel == 4) {
+    if (channel == 0 || channel == 2) {
       float roughnessWeight = kind == 0 ? 1.0 : mix(0.4, 1.0, shaped);
       surface.roughness += uLabRoughness[i] * opacity * roughnessWeight;
     }
 
-    if (channel == 4 || kind == 8) {
+    if (channel == 4) {
       float wetness = clamp(opacity * shaped * max(uLabStrength[i], 0.0), 0.0, 1.0);
+      float coatTarget = clamp(
+        0.12 + uLabRoughness[i] * 0.5 + (1.0 - shaped) * 0.18,
+        0.02,
+        1.0
+      );
       surface.clearcoat = max(surface.clearcoat, wetness);
-      surface.clearcoatRoughness = mix(surface.clearcoatRoughness, 0.045 + (1.0 - shaped) * 0.18, wetness);
+      surface.clearcoatRoughness = mix(surface.clearcoatRoughness, coatTarget, wetness);
     }
 
-    if (channel == 5 || kind == 9) {
+    if (channel == 5) {
       float scatter = clamp(opacity * mix(0.45, 1.0, shaped), 0.0, 1.0);
       surface.sssColor += layerColor * scatter;
       surface.sss += scatter;
     }
   }
 
-  if (surface.sss > 0.0001) {
-    surface.sssColor /= surface.sss;
-  }
+  if (surface.sss > 0.0001) surface.sssColor /= surface.sss;
   surface.sss = clamp(surface.sss, 0.0, 1.0);
   return surface;
 }
@@ -296,9 +295,7 @@ if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
   vec3 labDy = dFdy(vLabWorldPosition);
   vec3 labWorldNormal = normalize(cross(labDx, labDy));
   vec3 labViewNormal = normalize(mat3(viewMatrix) * labWorldNormal);
-  if (dot(labViewNormal, normal) < 0.0) {
-    labViewNormal = -labViewNormal;
-  }
+  if (dot(labViewNormal, normal) < 0.0) labViewNormal = -labViewNormal;
   normal = normalize(mix(normal, labViewNormal, uLabNormalStrength));
 }
 `;
