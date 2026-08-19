@@ -82,6 +82,7 @@ Phase 3 implementation is functionally complete when:
 
 ## Remaining verification work
 
+- Generate and commit `package-lock.json`, then switch CI from `npm install` to `npm ci`.
 - Add a real browser/WebGL smoke suite that compiles the injected procedural shaders.
 - Bake a deterministic fixture and verify non-empty/aligned maps.
 - Export and reload a fixture GLB to verify transforms, materials, and texture bindings round-trip correctly.
