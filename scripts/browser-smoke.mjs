@@ -86,7 +86,7 @@ async function waitForPreview() {
   return url;
 }
 
-function startChrome(executable, profileDir, pageUrl) {
+function startChrome(executable, profileDir) {
   const args = [
     '--headless=new',
     `--remote-debugging-port=${DEBUG_PORT}`,
@@ -99,7 +99,7 @@ function startChrome(executable, profileDir, pageUrl) {
     '--use-angle=swiftshader',
     '--enable-unsafe-swiftshader',
     '--window-size=1280,900',
-    pageUrl
+    'about:blank'
   ];
   if (typeof process.getuid === 'function' && process.getuid() === 0) args.unshift('--no-sandbox');
 
@@ -131,6 +131,10 @@ class CdpClient {
   async open() {
     if (this.socket.readyState === WebSocket.OPEN) return;
     await new Promise((resolveOpen, rejectOpen) => {
+      const cleanup = () => {
+        this.socket.removeEventListener('open', onOpen);
+        this.socket.removeEventListener('error', onError);
+      };
       const onOpen = () => {
         cleanup();
         resolveOpen();
@@ -138,10 +142,6 @@ class CdpClient {
       const onError = () => {
         cleanup();
         rejectOpen(new Error('Unable to connect to Chrome DevTools.'));
-      };
-      const cleanup = () => {
-        this.socket.removeEventListener('open', onOpen);
-        this.socket.removeEventListener('error', onError);
       };
       this.socket.addEventListener('open', onOpen);
       this.socket.addEventListener('error', onError);
@@ -242,7 +242,6 @@ async function exerciseBake(client) {
 async function main() {
   const root = resolve(import.meta.dirname, '..');
   const profileDir = await mkdtemp(join(tmpdir(), 'procedural-texture-lab-chrome-'));
-  const downloadDir = await mkdtemp(join(tmpdir(), 'procedural-texture-lab-downloads-'));
   let preview = null;
   let chrome = null;
   let client = null;
@@ -251,7 +250,7 @@ async function main() {
     preview = startPreview(root);
     const pageUrl = await waitForPreview();
     const executable = await findChrome();
-    chrome = startChrome(executable, profileDir, pageUrl);
+    chrome = startChrome(executable, profileDir);
     client = new CdpClient(await pageDebuggerUrl());
     await client.open();
 
@@ -276,7 +275,7 @@ async function main() {
     await client.command('Runtime.enable');
     await client.command('Log.enable');
     await client.command('Page.enable');
-    await client.command('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadDir });
+    await client.command('Page.navigate', { url: pageUrl });
 
     await waitForApp(client);
     await assertWebGl(client);
@@ -291,10 +290,7 @@ async function main() {
     client?.close();
     terminate(chrome);
     terminate(preview);
-    await Promise.all([
-      rm(profileDir, { recursive: true, force: true }),
-      rm(downloadDir, { recursive: true, force: true })
-    ]);
+    await rm(profileDir, { recursive: true, force: true });
   }
 }
 
