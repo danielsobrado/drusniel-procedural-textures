@@ -192,6 +192,7 @@ struct LabSurface {
   float clearcoatRoughness;
   float sss;
   vec3 sssColor;
+  float displacement;
 };
 
 vec3 labBlend(vec3 base, vec3 layerColor, int mode, float opacity) {
@@ -218,6 +219,7 @@ LabSurface labEvaluateSurface(vec3 position) {
   surface.clearcoatRoughness = 0.18;
   surface.sss = 0.0;
   surface.sssColor = vec3(0.0);
+  surface.displacement = 0.0;
 
   for (int i = 0; i < LAB_MAX_LAYERS; i++) {
     if (i >= uLabCount) break;
@@ -233,6 +235,10 @@ LabSurface labEvaluateSurface(vec3 position) {
     float coverage = kind == 0 ? 1.0 : mix(0.48, 1.0, shaped);
     float opacity = clamp(opacityBase * coverage, 0.0, 1.0);
     vec3 layerColor = mix(uLabColorA[i], uLabColorB[i], shaped);
+
+    if (labRoutesHeight(channel) && abs(uLabDisplacement[i]) > 0.000001) {
+      surface.displacement += (shaped - 0.5) * uLabDisplacement[i] * opacityBase;
+    }
 
     if (channel == 0 || channel == 1) {
       surface.color = labBlend(surface.color, layerColor, uLabBlendMode[i], opacity);
@@ -307,7 +313,6 @@ vLabPosition = labPosition;
 export const DISPLACED_NORMAL_GLSL = /* glsl */ `
 #include <normal_fragment_begin>
 if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
-  float labFragmentDisplacement = labEvaluateDisplacement(vLabPosition);
   mat3 labViewRotation = mat3(viewMatrix);
   mat3 labInverseViewRotation = mat3(
     vec3(labViewRotation[0].x, labViewRotation[1].x, labViewRotation[2].x),
@@ -322,8 +327,8 @@ if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
   float labDeterminant = dot(labSigmaX, labR1);
   if (abs(labDeterminant) > 0.00000001) {
     vec3 labSurfaceGradient = (
-      dFdx(labFragmentDisplacement) * labR1 +
-      dFdy(labFragmentDisplacement) * labR2
+      dFdx(labSurface.displacement) * labR1 +
+      dFdy(labSurface.displacement) * labR2
     );
     if (labDeterminant < 0.0) labSurfaceGradient = -labSurfaceGradient;
     vec3 labWorldNormal = normalize(
