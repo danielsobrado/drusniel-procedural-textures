@@ -302,13 +302,12 @@ export const SURFACE_VERTEX_DISPLACEMENT_GLSL = /* glsl */ `
 #include <skinning_vertex>
 ${WORLD_MATRIX_GLSL}
 vLabPosition = labPosition;
-vLabWorldPosition = (labWorldMatrix * vec4(transformed, 1.0)).xyz;
-vLabDisplacement = labDisplacement;
 `;
 
 export const DISPLACED_NORMAL_GLSL = /* glsl */ `
 #include <normal_fragment_begin>
 if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
+  float labFragmentDisplacement = labEvaluateDisplacement(vLabPosition);
   mat3 labViewRotation = mat3(viewMatrix);
   mat3 labInverseViewRotation = mat3(
     vec3(labViewRotation[0].x, labViewRotation[1].x, labViewRotation[2].x),
@@ -323,8 +322,8 @@ if (uLabHasDisplacement > 0.5 && uLabNormalStrength > 0.0001) {
   float labDeterminant = dot(labSigmaX, labR1);
   if (abs(labDeterminant) > 0.00000001) {
     vec3 labSurfaceGradient = (
-      dFdx(vLabDisplacement) * labR1 +
-      dFdy(vLabDisplacement) * labR2
+      dFdx(labFragmentDisplacement) * labR1 +
+      dFdy(labFragmentDisplacement) * labR2
     );
     if (labDeterminant < 0.0) labSurfaceGradient = -labSurfaceGradient;
     vec3 labWorldNormal = normalize(

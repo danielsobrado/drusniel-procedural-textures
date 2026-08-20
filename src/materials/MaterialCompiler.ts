@@ -209,11 +209,7 @@ export class MaterialCompiler {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
 
-      const varyings = [
-        'varying vec3 vLabPosition;',
-        'varying vec3 vLabWorldPosition;',
-        'varying float vLabDisplacement;'
-      ].join('\n');
+      const varyings = 'varying vec3 vLabPosition;';
 
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -240,7 +236,7 @@ export class MaterialCompiler {
         .replace('#include <lights_fragment_end>', SSS_LIGHT_GLSL);
     };
 
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v6';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v7';
   }
 
   private configureShadowShader(
