@@ -98,6 +98,12 @@ npm run build
 npm run preview
 ```
 
+Browser/WebGL production smoke:
+
+```bash
+npm run test:browser
+```
+
 Dependency versions in `package.json` are pinned. The repository does not yet contain a generated `package-lock.json`, so CI currently uses `npm install`; once a lockfile is committed, CI should switch to `npm ci`.
 
 ## Configuration
@@ -135,6 +141,7 @@ Native text-field undo and normal keyboard activation of focused controls are pr
 - `src/materials` — material domain model, presets, physical settings and procedural GLSL compiler
 - `src/ui` — compact panels, inspector, tagged preset browser, layer dock and radial interactions
 - `src/utils` — browser downloads, IDs and HTML helpers
+- `scripts` — browser/WebGL production smoke and deterministic GLB fixture helpers
 
 The procedural compiler injects a fixed-size runtime into `MeshPhysicalMaterial`. Layers are evaluated in world space after morph/skinning deformation. Masks and nested-group opacity are compiled into the same layer pass. Routed height modifies geometry and shadow passes; color/roughness/clearcoat/SSS channels only affect their intended response. Vertex displacement is converted from the desired world-normal offset back into local coordinates, which avoids skew from non-uniform transforms. Lighting normals use the smooth base normal plus screen-space derivatives of the interpolated displacement scalar, avoiding the faceted face-normal result produced by directly crossing displaced-position derivatives.
 
@@ -192,8 +199,10 @@ The baked normal map captures higher-frequency procedural displacement lighting 
 
 ## Verification
 
-GitHub Actions installs dependencies and runs `npm run build` on pushes to `main` and pull requests. Local verification uses the same command. A real browser/WebGL smoke suite is still planned because TypeScript/Vite cannot validate injected GLSL without a graphics context.
+GitHub Actions installs dependencies, runs `npm run build`, and then runs `npm run test:browser` on pushes to `main` and pull requests. The browser suite launches the production Vite build in headless Chrome/SwiftShader, captures runtime/WebGL shader failures, executes a real six-map GPU bake, validates each downloaded PNG against the configured Mobile resolution, imports a deterministic two-mesh GLB fixture, preserves one original textured material, exports the other mesh through the baked PTL material, validates source TRS and glTF texture bindings in the binary result, and reloads the exported GLB through the application importer.
+
+This smoke test covers the browser-only shader path and the main bake/export round-trip that TypeScript/Vite cannot validate statically.
 
 ## Roadmap
 
-See [`docs/PLAN.md`](docs/PLAN.md). Phase 1, Phase 2 and Phase 3 are implemented. Future work can focus on WebGPU/TSL migration, offline/path-traced reference rendering, stronger automatic UV unwrapping/packing, automated browser export round-trips and more specialized production exporters rather than expanding the core editor model.
+See [`docs/PLAN.md`](docs/PLAN.md). Phase 1, Phase 2 and Phase 3 are implemented. Remaining production follow-ups are dependency lockfile reproducibility and broader compatibility fixtures for unusually nested, multi-material, skinned and morphed assets, followed by production-driven work such as WebGPU/TSL migration, offline/path-traced reference rendering or stronger automatic UV unwrapping/packing.
