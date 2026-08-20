@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:browser": "node scripts/browser-smoke.mjs"
   },
   "dependencies": {
     "three": "0.185.1",
