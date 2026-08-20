@@ -226,8 +226,11 @@ async function assertWebGl(client) {
 
 async function exerciseBake(client) {
   const clicked = await evaluate(client, `(() => {
+    const quality = document.querySelector('[data-role="quality-select"]');
     const button = document.querySelector('[data-command="bake-textures"]');
-    if (!(button instanceof HTMLButtonElement)) return false;
+    if (!(quality instanceof HTMLSelectElement) || !(button instanceof HTMLButtonElement)) return false;
+    quality.value = 'mobile';
+    quality.dispatchEvent(new Event('change', { bubbles: true }));
     button.click();
     return true;
   })()`);
