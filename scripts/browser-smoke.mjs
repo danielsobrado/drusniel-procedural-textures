@@ -1,4 +1,4 @@
-import { access, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { constants as fsConstants } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,16 @@ const DEBUG_PORT = 9222;
 const START_TIMEOUT_MS = 30_000;
 const BAKE_TIMEOUT_MS = 90_000;
 const POLL_INTERVAL_MS = 150;
+const EXPECTED_BAKE_RESOLUTION = 512;
+const EXPECTED_MAP_SUFFIXES = [
+  '-albedo.png',
+  '-roughness.png',
+  '-normal.png',
+  '-height.png',
+  '-clearcoat.png',
+  '-clearcoat-roughness.png'
+];
+const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 const FATAL_CONSOLE_PATTERN = /shader error|validate_status false|error:\s*0:|webglprogram.*error|uncaught|unhandled/i;
 const CHROME_CANDIDATES = [
   process.env.CHROME_BIN,
@@ -242,9 +252,34 @@ async function exerciseBake(client) {
   })()`), BAKE_TIMEOUT_MS, 'GPU texture bake');
 }
 
+async function verifyBakedMaps(downloadDir) {
+  const files = await waitFor(async () => {
+    const entries = await readdir(downloadDir);
+    if (entries.some((entry) => entry.endsWith('.crdownload'))) return null;
+    return EXPECTED_MAP_SUFFIXES.every((suffix) => entries.some((entry) => entry.endsWith(suffix)))
+      ? entries
+      : null;
+  }, BAKE_TIMEOUT_MS, 'baked PNG downloads');
+
+  for (const suffix of EXPECTED_MAP_SUFFIXES) {
+    const filename = files.find((entry) => entry.endsWith(suffix));
+    if (filename === undefined) throw new Error(`Missing baked map for ${suffix}.`);
+    const data = await readFile(join(downloadDir, filename));
+    if (data.length < 33 || !data.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE)) {
+      throw new Error(`Baked map ${filename} is not a valid PNG.`);
+    }
+    const width = data.readUInt32BE(16);
+    const height = data.readUInt32BE(20);
+    if (width !== EXPECTED_BAKE_RESOLUTION || height !== EXPECTED_BAKE_RESOLUTION) {
+      throw new Error(`Baked map ${filename} has unexpected dimensions ${width}x${height}.`);
+    }
+  }
+}
+
 async function main() {
   const root = resolve(import.meta.dirname, '..');
   const profileDir = await mkdtemp(join(tmpdir(), 'procedural-texture-lab-chrome-'));
+  const downloadDir = await mkdtemp(join(tmpdir(), 'procedural-texture-lab-downloads-'));
   let preview = null;
   let chrome = null;
   let client = null;
@@ -278,22 +313,27 @@ async function main() {
     await client.command('Runtime.enable');
     await client.command('Log.enable');
     await client.command('Page.enable');
+    await client.command('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: downloadDir });
     await client.command('Page.navigate', { url: pageUrl });
 
     await waitForApp(client);
     await assertWebGl(client);
     await exerciseBake(client);
+    await verifyBakedMaps(downloadDir);
     await delay(500);
 
     if (failures.length > 0) {
       throw new Error(`Browser/WebGL smoke failures:\n${[...new Set(failures)].join('\n')}`);
     }
-    console.log('Browser/WebGL smoke suite passed.');
+    console.log('Browser/WebGL smoke suite passed with six aligned 512x512 baked PNG maps.');
   } finally {
     client?.close();
     terminate(chrome);
     terminate(preview);
-    await rm(profileDir, { recursive: true, force: true });
+    await Promise.all([
+      rm(profileDir, { recursive: true, force: true }),
+      rm(downloadDir, { recursive: true, force: true })
+    ]);
   }
 }
 
