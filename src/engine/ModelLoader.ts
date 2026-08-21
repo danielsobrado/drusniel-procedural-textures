@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MAX_MODEL_FILE_BYTES } from '../app/constants';
 import type { ImportedMeshTarget } from '../materials/types';
+import {
+  collectExternalUris,
+  createBundleIndex,
+  isDataUri,
+  primaryBundlePath,
+  resolveBundleFile
+} from './GltfBundleResolver';
 import { disposeObjectResources } from './ObjectResources';
 
 const SUPPORTED_EXTENSIONS = new Set(['glb', 'gltf']);
@@ -13,94 +20,10 @@ const GLB_CHUNK_HEADER_BYTES = 8;
 const GLB_ALIGNMENT_BYTES = 4;
 const PREVIEW_SIZE = 2.35;
 const BYTES_PER_MIB = 1024 * 1024;
-const DATA_URI = /^data:/i;
-const REMOTE_URI = /^(?:https?:|file:|blob:|\/\/)/i;
 
 function fileExtension(name: string): string {
   const parts = name.toLowerCase().split('.');
   return parts.length > 1 ? parts.at(-1) ?? '' : '';
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null;
-}
-
-function isContainer(value: unknown): boolean {
-  return Array.isArray(value) || asRecord(value) !== null;
-}
-
-function stripUriSuffix(value: string): string {
-  const queryIndex = value.indexOf('?');
-  const fragmentIndex = value.indexOf('#');
-  const indexes = [queryIndex, fragmentIndex].filter((index) => index >= 0);
-  const end = indexes.length === 0 ? value.length : Math.min(...indexes);
-  return value.slice(0, end);
-}
-
-function decodeResourcePath(value: string): string {
-  const resourcePath = stripUriSuffix(value).replaceAll('\\', '/');
-  try {
-    return decodeURIComponent(resourcePath);
-  } catch {
-    return resourcePath;
-  }
-}
-
-function canonicalPath(value: string): string {
-  const parts = value.replaceAll('\\', '/').split('/');
-  const stack: string[] = [];
-  for (const part of parts) {
-    if (part.length === 0 || part === '.') continue;
-    if (part === '..') {
-      if (stack.length > 0 && stack.at(-1) !== '..') {
-        stack.pop();
-      } else {
-        stack.push('..');
-      }
-      continue;
-    }
-    stack.push(part);
-  }
-  return stack.join('/');
-}
-
-function canonicalResourcePath(value: string): string {
-  return canonicalPath(decodeResourcePath(value));
-}
-
-function canonicalLocalPath(value: string): string {
-  return canonicalPath(value);
-}
-
-function isRemoteResourceUri(value: string): boolean {
-  return REMOTE_URI.test(decodeResourcePath(value));
-}
-
-function collectExternalUris(value: unknown): string[] {
-  const uris = new Set<string>();
-  const pending: unknown[] = [value];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (Array.isArray(current)) {
-      pending.push(...current.filter(isContainer));
-      continue;
-    }
-    const record = asRecord(current);
-    if (record === null) continue;
-    for (const [key, child] of Object.entries(record)) {
-      if (key === 'uri' && typeof child === 'string' && !DATA_URI.test(child)) {
-        if (isRemoteResourceUri(child)) {
-          throw new Error(`Remote GLTF resource URIs are not supported: ${child}`);
-        }
-        uris.add(child);
-      } else if (isContainer(child)) {
-        pending.push(child);
-      }
-    }
-  }
-  return [...uris];
 }
 
 function parseGltfJson(text: string): unknown {
@@ -125,20 +48,11 @@ function decodeGlbJson(bytes: Uint8Array): unknown {
 }
 
 function readGlbJson(buffer: ArrayBuffer): unknown {
-  if (buffer.byteLength < GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES) {
-    throw new Error('The GLB file is truncated.');
-  }
-
+  if (buffer.byteLength < GLB_HEADER_BYTES + GLB_CHUNK_HEADER_BYTES) throw new Error('The GLB file is truncated.');
   const view = new DataView(buffer);
-  if (view.getUint32(0, true) !== GLB_MAGIC) {
-    throw new Error('The file is not a valid GLB container.');
-  }
-  if (view.getUint32(4, true) !== GLB_VERSION) {
-    throw new Error('Only GLB version 2 is supported.');
-  }
-  if (view.getUint32(8, true) !== buffer.byteLength) {
-    throw new Error('The GLB container length is invalid.');
-  }
+  if (view.getUint32(0, true) !== GLB_MAGIC) throw new Error('The file is not a valid GLB container.');
+  if (view.getUint32(4, true) !== GLB_VERSION) throw new Error('Only GLB version 2 is supported.');
+  if (view.getUint32(8, true) !== buffer.byteLength) throw new Error('The GLB container length is invalid.');
 
   let offset = GLB_HEADER_BYTES;
   let json: unknown;
@@ -151,99 +65,18 @@ function readGlbJson(buffer: ArrayBuffer): unknown {
     const chunkType = view.getUint32(offset + 4, true);
     const chunkStart = offset + GLB_CHUNK_HEADER_BYTES;
     const chunkEnd = chunkStart + chunkLength;
-    if (chunkLength % GLB_ALIGNMENT_BYTES !== 0) {
-      throw new Error('The GLB container contains a misaligned chunk.');
-    }
-    if (chunkEnd > buffer.byteLength) {
-      throw new Error('The GLB container contains a truncated chunk.');
-    }
-    if (chunkIndex === 0 && chunkType !== GLB_JSON_CHUNK) {
-      throw new Error('The first GLB chunk must contain JSON.');
-    }
+    if (chunkLength % GLB_ALIGNMENT_BYTES !== 0) throw new Error('The GLB container contains a misaligned chunk.');
+    if (chunkEnd > buffer.byteLength) throw new Error('The GLB container contains a truncated chunk.');
+    if (chunkIndex === 0 && chunkType !== GLB_JSON_CHUNK) throw new Error('The first GLB chunk must contain JSON.');
     if (chunkType === GLB_JSON_CHUNK) {
-      if (json !== undefined) {
-        throw new Error('The GLB container contains multiple JSON chunks.');
-      }
+      if (json !== undefined) throw new Error('The GLB container contains multiple JSON chunks.');
       json = decodeGlbJson(new Uint8Array(buffer, chunkStart, chunkLength));
     }
     offset = chunkEnd;
     chunkIndex += 1;
   }
-
-  if (json === undefined) {
-    throw new Error('The GLB container does not contain a JSON chunk.');
-  }
+  if (json === undefined) throw new Error('The GLB container does not contain a JSON chunk.');
   return json;
-}
-
-function basename(value: string): string {
-  return value.split('/').at(-1) ?? '';
-}
-
-function dirname(value: string): string {
-  const slash = value.lastIndexOf('/');
-  return slash < 0 ? '' : value.slice(0, slash);
-}
-
-function joinBundlePath(base: string, relative: string): string {
-  return canonicalPath(base.length === 0 ? relative : `${base}/${relative}`);
-}
-
-function bundleKeys(file: File): string[] {
-  const relative = file.webkitRelativePath?.trim();
-  return relative === undefined || relative.length === 0
-    ? [canonicalLocalPath(file.name)]
-    : [canonicalLocalPath(relative), canonicalLocalPath(file.name)];
-}
-
-function createBundleIndex(files: readonly File[]): Map<string, File[]> {
-  const index = new Map<string, File[]>();
-  for (const file of files) {
-    for (const key of bundleKeys(file)) {
-      const values = index.get(key) ?? [];
-      if (!values.includes(file)) values.push(file);
-      index.set(key, values);
-    }
-  }
-  return index;
-}
-
-function primaryBundlePath(primary: File, index: ReadonlyMap<string, File[]>): string {
-  const primaryName = canonicalLocalPath(primary.name);
-  for (const [path, files] of index) {
-    if (files.includes(primary) && path !== primaryName) return path;
-  }
-  return primaryName;
-}
-
-function resolveBundleFile(
-  uri: string,
-  index: ReadonlyMap<string, File[]>,
-  primaryPath: string
-): File {
-  if (isRemoteResourceUri(uri)) {
-    throw new Error(`Remote GLTF resource URIs are not supported: ${uri}`);
-  }
-  const normalized = canonicalResourcePath(uri);
-  const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
-  for (const candidate of [primaryRelative, normalized]) {
-    const exact = index.get(candidate);
-    if (exact?.length === 1 && exact[0] !== undefined) return exact[0];
-    if ((exact?.length ?? 0) > 1) {
-      throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
-    }
-  }
-
-  const wantedBasename = basename(normalized);
-  const matches = new Set<File>();
-  for (const [path, files] of index) {
-    if (basename(path) === wantedBasename) files.forEach((file) => matches.add(file));
-  }
-  if (matches.size === 1) return [...matches][0] as File;
-  if (matches.size > 1) {
-    throw new Error(`GLTF resource "${uri}" is ambiguous in the selected bundle.`);
-  }
-  throw new Error(`GLTF resource "${uri}" is missing. Select the GLTF, BIN and texture files together.`);
 }
 
 function primaryFile(files: readonly File[]): File {
@@ -257,10 +90,9 @@ function primaryFile(files: readonly File[]): File {
 function hasMeshGeometry(root: THREE.Object3D): boolean {
   let found = false;
   root.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
-      const position = object.geometry.getAttribute('position');
-      found ||= position !== undefined && position.count > 0;
-    }
+    if (!(object instanceof THREE.Mesh)) return;
+    const position = object.geometry.getAttribute('position');
+    found ||= position !== undefined && position.count > 0;
   });
   return found;
 }
@@ -269,10 +101,8 @@ function annotateMeshes(root: THREE.Object3D): void {
   let meshIndex = 0;
   root.traverse((object) => {
     if (!(object instanceof THREE.Mesh)) return;
-    const id = `mesh-${meshIndex}`;
-    const label = object.name.trim().length > 0 ? object.name : `Mesh ${meshIndex + 1}`;
-    object.userData.labMeshId = id;
-    object.userData.labMeshLabel = label;
+    object.userData.labMeshId = `mesh-${meshIndex}`;
+    object.userData.labMeshLabel = object.name.trim().length > 0 ? object.name : `Mesh ${meshIndex + 1}`;
     meshIndex += 1;
   });
 }
@@ -283,9 +113,7 @@ export function describeImportedMeshes(root: THREE.Object3D): ImportedMeshTarget
     if (!(object instanceof THREE.Mesh)) return;
     const id = object.userData.labMeshId;
     const label = object.userData.labMeshLabel;
-    if (typeof id === 'string' && typeof label === 'string') {
-      result.push({ id, label: label.slice(0, 160) });
-    }
+    if (typeof id === 'string' && typeof label === 'string') result.push({ id, label: label.slice(0, 160) });
   });
   return result;
 }
@@ -322,17 +150,15 @@ export class ModelLoader {
         gltfJson = parseGltfJson(payload);
       }
 
-      const externalUris = collectExternalUris(gltfJson);
       const bundleIndex = createBundleIndex(files);
       const primaryPath = primaryBundlePath(primary, bundleIndex);
-      for (const uri of externalUris) resolveBundleFile(uri, bundleIndex, primaryPath);
-
+      for (const uri of collectExternalUris(gltfJson)) resolveBundleFile(uri, bundleIndex, primaryPath);
       if (sequence !== this.loadSequence) return null;
 
       const manager = new THREE.LoadingManager();
       const objectUrls = new Map<File, string>();
       manager.setURLModifier((url) => {
-        if (DATA_URI.test(url) || url.startsWith('blob:')) return url;
+        if (isDataUri(url) || url.startsWith('blob:')) return url;
         const file = resolveBundleFile(url, bundleIndex, primaryPath);
         let objectUrl = objectUrls.get(file);
         if (objectUrl === undefined) {
@@ -367,26 +193,15 @@ export class ModelLoader {
     }
   }
 
-  private normalize(
-    root: THREE.Object3D,
-    name: string,
-    animations: readonly THREE.AnimationClip[]
-  ): THREE.Object3D {
+  private normalize(root: THREE.Object3D, name: string, animations: readonly THREE.AnimationClip[]): THREE.Object3D {
     root.updateMatrixWorld(true);
-    if (!hasMeshGeometry(root)) {
-      throw new Error('The imported model does not contain mesh geometry.');
-    }
-
+    if (!hasMeshGeometry(root)) throw new Error('The imported model does not contain mesh geometry.');
     const bounds = new THREE.Box3().setFromObject(root);
-    if (bounds.isEmpty()) {
-      throw new Error('The imported model does not contain visible geometry.');
-    }
+    if (bounds.isEmpty()) throw new Error('The imported model does not contain visible geometry.');
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
     const largestDimension = Math.max(size.x, size.y, size.z);
-    if (!Number.isFinite(largestDimension) || largestDimension <= 0) {
-      throw new Error('The imported model has invalid bounds.');
-    }
+    if (!Number.isFinite(largestDimension) || largestDimension <= 0) throw new Error('The imported model has invalid bounds.');
 
     annotateMeshes(root);
     root.userData.labImportedSource = true;
