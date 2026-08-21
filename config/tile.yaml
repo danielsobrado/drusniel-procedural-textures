@@ -1,0 +1,7 @@
+previewResolution: 512
+worldSize: 2.5
+blendFraction: 0.16
+previewTiles: 3
+minPreviewTiles: 2
+maxPreviewTiles: 5
+fileSuffix: tileable
