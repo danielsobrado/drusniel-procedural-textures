@@ -1,15 +1,13 @@
 import * as THREE from 'three';
-import { TextureBaker, type BakedTextureSet } from './TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
+import { rememberTextureSetDisplacementExtent } from './SeamlessTexture';
+import { TextureBaker, type BakedTextureSet } from './TextureBaker';
 
 const MIN_TEXTURE_SIZE = 128;
 const MAX_TEXTURE_SIZE = 4096;
 
 export class TileMaterialBaker {
-  private renderer: THREE.WebGLRenderer | null = null;
-  private baker: TextureBaker | null = null;
-
   public constructor(private readonly compiler: MaterialCompiler) {}
 
   public async bake(
@@ -24,29 +22,7 @@ export class TileMaterialBaker {
       throw new Error('Tile world size must be greater than zero.');
     }
 
-    const { renderer, baker } = this.ensureBaker();
-    const resolution = this.effectiveResolution(renderer, requestedResolution);
-    const geometry = new THREE.PlaneGeometry(worldSize, worldSize, 1, 1);
-    const mesh = new THREE.Mesh(geometry);
-    mesh.name = 'Seamless tile sample';
-    try {
-      return await baker.bake(mesh, settings, resolution);
-    } finally {
-      geometry.dispose();
-    }
-  }
-
-  public dispose(): void {
-    this.renderer?.dispose();
-    this.renderer = null;
-    this.baker = null;
-  }
-
-  private ensureBaker(): { renderer: THREE.WebGLRenderer; baker: TextureBaker } {
-    if (this.renderer !== null && this.baker !== null) {
-      return { renderer: this.renderer, baker: this.baker };
-    }
-
+    const displacementExtent = this.compiler.displacementExtent;
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
       alpha: true,
@@ -54,10 +30,22 @@ export class TileMaterialBaker {
     });
     renderer.setPixelRatio(1);
     renderer.setSize(1, 1, false);
+
+    const resolution = this.effectiveResolution(renderer, requestedResolution);
+    const geometry = new THREE.PlaneGeometry(worldSize, worldSize, 1, 1);
+    const mesh = new THREE.Mesh(geometry);
+    mesh.name = 'Seamless tile sample';
     const baker = new TextureBaker(renderer, this.compiler);
-    this.renderer = renderer;
-    this.baker = baker;
-    return { renderer, baker };
+
+    try {
+      const textures = await baker.bake(mesh, settings, resolution);
+      rememberTextureSetDisplacementExtent(textures, displacementExtent);
+      return textures;
+    } finally {
+      geometry.dispose();
+      renderer.dispose();
+      renderer.forceContextLoss();
+    }
   }
 
   private effectiveResolution(renderer: THREE.WebGLRenderer, requested: number): number {

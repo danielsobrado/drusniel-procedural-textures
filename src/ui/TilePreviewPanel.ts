@@ -63,6 +63,7 @@ export class TilePreviewPanel {
   private channel: TileChannel = 'albedo';
   private tileCount: number = TILE_CONFIG.previewTiles;
   private showGrid = false;
+  private invalidatedDuringLoad = false;
 
   public constructor(
     private readonly root: HTMLElement,
@@ -151,6 +152,7 @@ export class TilePreviewPanel {
   }
 
   public setLoading(message: string): void {
+    this.invalidatedDuringLoad = false;
     this.root.setAttribute('aria-busy', 'true');
     this.status.textContent = message;
     this.refreshButton.disabled = true;
@@ -159,12 +161,18 @@ export class TilePreviewPanel {
   }
 
   public setMaps(textures: BakedTextureSet): void {
+    const preserveStale = this.invalidatedDuringLoad || (
+      this.textures === textures && this.root.dataset.stale === 'true'
+    );
     this.textures = textures;
+    this.invalidatedDuringLoad = false;
     this.root.setAttribute('aria-busy', 'false');
-    this.root.dataset.stale = 'false';
-    this.status.textContent = 'Seam-locked preview ready';
+    this.root.dataset.stale = preserveStale ? 'true' : 'false';
+    this.status.textContent = preserveStale
+      ? 'Material changed during generation · refresh preview'
+      : 'Seam-locked preview ready';
     const mismatch = measureEdgeMismatch(textures.albedo.canvas) * 100;
-    this.metrics.textContent = `${textures.resolution}² · edge mismatch ${mismatch.toFixed(3)}%`;
+    this.metrics.textContent = `${textures.resolution}² · seam mismatch ${mismatch.toFixed(3)}%`;
     this.empty.hidden = true;
     this.refreshButton.disabled = false;
     this.saveButton.disabled = false;
@@ -172,6 +180,12 @@ export class TilePreviewPanel {
   }
 
   public markStale(): void {
+    if (this.root.getAttribute('aria-busy') === 'true') {
+      this.invalidatedDuringLoad = true;
+      this.root.dataset.stale = 'true';
+      this.status.textContent = 'Material changed during generation · refresh when ready';
+      return;
+    }
     if (this.textures === null) return;
     this.root.setAttribute('aria-busy', 'false');
     this.root.dataset.stale = 'true';
@@ -181,6 +195,7 @@ export class TilePreviewPanel {
   }
 
   public setError(message: string): void {
+    this.invalidatedDuringLoad = false;
     this.root.setAttribute('aria-busy', 'false');
     this.status.textContent = 'Tile generation failed';
     this.empty.hidden = this.textures !== null;
