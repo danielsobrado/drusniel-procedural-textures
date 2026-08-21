@@ -1,13 +1,21 @@
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { clone as cloneSkeletonSafe } from 'three/addons/utils/SkeletonUtils.js';
+import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
 import {
   TextureBaker,
   type BakeMeshSnapshot,
-  type BakedPbrTextureSet
+  type BakedPbrTextureSet,
+  type BakedTextureSet
 } from './TextureBaker';
+import {
+  applyStaticDisplacement,
+  combinePbrTextureSets,
+  createSharedAtlasLayout,
+  remapGeometryUvToAtlas
+} from './TextureAtlas';
 
 interface ExportResources {
   materials: THREE.Material[];
@@ -18,6 +26,12 @@ interface ExportResources {
 interface ExportMeshSnapshot {
   assigned: boolean;
   bake: BakeMeshSnapshot | null;
+}
+
+interface BakedTarget {
+  readonly meshIndex: number;
+  readonly snapshot: BakeMeshSnapshot;
+  readonly maps: BakedTextureSet;
 }
 
 function collectMeshes(root: THREE.Object3D): THREE.Mesh[] {
@@ -31,9 +45,7 @@ function collectMeshes(root: THREE.Object3D): THREE.Mesh[] {
 function sourceForExport(root: THREE.Object3D): THREE.Object3D {
   if (root.userData.labPreviewWrapper !== true) return root;
   const source = root.children[0];
-  if (source === undefined) {
-    throw new Error('Imported preview wrapper does not contain its source model.');
-  }
+  if (source === undefined) throw new Error('Imported preview wrapper does not contain its source model.');
   return source;
 }
 
@@ -42,15 +54,11 @@ function synchronizeCloneUuids(source: THREE.Object3D, clone: THREE.Object3D): v
   const cloneObjects: THREE.Object3D[] = [];
   source.traverse((object) => sourceObjects.push(object));
   clone.traverse((object) => cloneObjects.push(object));
-  if (sourceObjects.length !== cloneObjects.length) {
-    throw new Error('Export clone does not match the current object hierarchy.');
-  }
+  if (sourceObjects.length !== cloneObjects.length) throw new Error('Export clone does not match the current object hierarchy.');
   for (let index = 0; index < sourceObjects.length; index += 1) {
     const sourceObject = sourceObjects[index];
     const cloneObject = cloneObjects[index];
-    if (sourceObject !== undefined && cloneObject !== undefined) {
-      cloneObject.uuid = sourceObject.uuid;
-    }
+    if (sourceObject !== undefined && cloneObject !== undefined) cloneObject.uuid = sourceObject.uuid;
   }
 }
 
@@ -87,24 +95,23 @@ function canvasTexture(
 function createBakedMaterial(
   maps: BakedPbrTextureSet,
   settings: Readonly<PhysicalSettings>,
-  index: number,
+  name: string,
   resources: ExportResources
 ): THREE.MeshPhysicalMaterial {
-  const prefix = `PTL export ${index + 1}`;
   const material = new THREE.MeshPhysicalMaterial({
-    name: prefix,
+    name,
     color: 0xffffff,
-    map: canvasTexture(maps.albedo.canvas, `${prefix} albedo`, THREE.SRGBColorSpace, resources),
+    map: canvasTexture(maps.albedo.canvas, `${name} albedo`, THREE.SRGBColorSpace, resources),
     roughness: 1,
-    roughnessMap: canvasTexture(maps.roughness.canvas, `${prefix} roughness`, THREE.NoColorSpace, resources),
+    roughnessMap: canvasTexture(maps.roughness.canvas, `${name} roughness`, THREE.NoColorSpace, resources),
     metalness: settings.metalness,
-    normalMap: canvasTexture(maps.normal.canvas, `${prefix} normal`, THREE.NoColorSpace, resources),
+    normalMap: canvasTexture(maps.normal.canvas, `${name} normal`, THREE.NoColorSpace, resources),
     clearcoat: 1,
-    clearcoatMap: canvasTexture(maps.clearcoat.canvas, `${prefix} clearcoat`, THREE.NoColorSpace, resources),
+    clearcoatMap: canvasTexture(maps.clearcoat.canvas, `${name} clearcoat`, THREE.NoColorSpace, resources),
     clearcoatRoughness: 1,
     clearcoatRoughnessMap: canvasTexture(
       maps.clearcoatRoughness.canvas,
-      `${prefix} clearcoat roughness`,
+      `${name} clearcoat roughness`,
       THREE.NoColorSpace,
       resources
     ),
@@ -127,18 +134,14 @@ function copyImageBitmap(image: ImageBitmap): HTMLCanvasElement {
   canvas.width = image.width;
   canvas.height = image.height;
   const context = canvas.getContext('2d');
-  if (context === null) {
-    throw new Error('Browser cannot snapshot an imported texture for GLB export.');
-  }
+  if (context === null) throw new Error('Browser cannot snapshot an imported texture for GLB export.');
   context.drawImage(image, 0, 0);
   return canvas;
 }
 
 function cloneTexture(texture: THREE.Texture, resources: ExportResources): THREE.Texture {
   const clone = texture.clone();
-  if (typeof ImageBitmap !== 'undefined' && texture.image instanceof ImageBitmap) {
-    clone.image = copyImageBitmap(texture.image);
-  }
+  if (typeof ImageBitmap !== 'undefined' && texture.image instanceof ImageBitmap) clone.image = copyImageBitmap(texture.image);
   clone.needsUpdate = true;
   resources.textures.push(clone);
   return clone;
@@ -175,10 +178,8 @@ function snapshotOriginalMaterials(
       return;
     }
     if (object instanceof THREE.Line || object instanceof THREE.Points) {
-      const materialOwner = object as THREE.Object3D & {
-        material: THREE.Material | THREE.Material[];
-      };
-      materialOwner.material = cloneMaterialSet(materialOwner.material, resources);
+      const owner = object as THREE.Object3D & { material: THREE.Material | THREE.Material[] };
+      owner.material = cloneMaterialSet(owner.material, resources);
     }
   });
 }
@@ -187,6 +188,11 @@ function disposeResources(resources: ExportResources): void {
   resources.materials.forEach((material) => material.dispose());
   resources.textures.forEach((texture) => texture.dispose());
   resources.geometries.forEach((geometry) => geometry.dispose());
+}
+
+function assignGeometry(target: THREE.Mesh, geometry: THREE.BufferGeometry, resources: ExportResources): void {
+  target.geometry = geometry;
+  resources.geometries.push(geometry);
 }
 
 export class GlbExporter {
@@ -208,20 +214,16 @@ export class GlbExporter {
 
     const physical = structuredClone(settings);
     const animations = sourceRoot.animations.map((clip) => clip.clone());
+    const displacementExtent = this.compiler.displacementExtent;
     const bakeMaterial = this.compiler.createBakeMaterial(physical);
     const meshSnapshots: ExportMeshSnapshot[] = [];
     try {
       for (const source of sourceMeshes) {
         const assigned = source.material === this.compiler.material;
-        meshSnapshots.push({
-          assigned,
-          bake: assigned ? this.baker.snapshotMesh(source) : null
-        });
+        meshSnapshots.push({ assigned, bake: assigned ? this.baker.snapshotMesh(source) : null });
       }
     } catch (error) {
-      for (const snapshot of meshSnapshots) {
-        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
-      }
+      for (const snapshot of meshSnapshots) if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
       bakeMaterial.dispose();
       throw error;
     }
@@ -230,41 +232,85 @@ export class GlbExporter {
     synchronizeCloneUuids(sourceRoot, exportRoot);
     const exportMeshes = collectMeshes(exportRoot);
     if (exportMeshes.length !== sourceMeshes.length) {
-      for (const snapshot of meshSnapshots) {
-        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
-      }
+      for (const snapshot of meshSnapshots) if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
       bakeMaterial.dispose();
       throw new Error('Export clone does not match the current mesh hierarchy.');
     }
 
     const resources: ExportResources = { materials: [], textures: [], geometries: [] };
     const assignedTargets = new Set<THREE.Mesh>();
+    const assignedIndices: number[] = [];
     for (let index = 0; index < exportMeshes.length; index += 1) {
       if (meshSnapshots[index]?.assigned === true && exportMeshes[index] !== undefined) {
         assignedTargets.add(exportMeshes[index] as THREE.Mesh);
+        assignedIndices.push(index);
       }
     }
     snapshotOriginalMaterials(exportRoot, assignedTargets, resources);
     cleanLabMetadata(exportRoot);
 
     try {
-      for (let index = 0; index < meshSnapshots.length; index += 1) {
-        const snapshot = meshSnapshots[index];
-        const target = exportMeshes[index];
-        if (snapshot === undefined || target === undefined || !snapshot.assigned || snapshot.bake === null) continue;
+      const useSharedAtlas = EXPORT_CONFIG.sharedAtlas && assignedIndices.length > 1;
+      const layout = useSharedAtlas
+        ? createSharedAtlasLayout(
+            assignedIndices.length,
+            bakeResolution,
+            maxTextureSize,
+            EXPORT_CONFIG.minAtlasTileSize
+          )
+        : null;
+      const targetResolution = layout?.tileSize ?? bakeResolution;
+      const bakedTargets: BakedTarget[] = [];
 
-        const maps = await this.baker.bakePbrSnapshot(
-          snapshot.bake,
-          physical,
-          bakeResolution,
-          bakeMaterial
-        );
-        if (snapshot.bake.generatedUvAtlas) {
-          const geometry = snapshot.bake.geometry.clone();
-          target.geometry = geometry;
-          resources.geometries.push(geometry);
+      for (const meshIndex of assignedIndices) {
+        const snapshot = meshSnapshots[meshIndex];
+        if (snapshot?.bake === null || snapshot?.bake === undefined) continue;
+        const maps = await this.baker.bakeSnapshot(snapshot.bake, physical, targetResolution, bakeMaterial);
+        bakedTargets.push({ meshIndex, snapshot: snapshot.bake, maps });
+      }
+
+      const sharedMaterial = layout === null
+        ? null
+        : createBakedMaterial(
+            combinePbrTextureSets(bakedTargets.map((target) => target.maps), layout),
+            physical,
+            'PTL export atlas',
+            resources
+          );
+
+      for (let slot = 0; slot < bakedTargets.length; slot += 1) {
+        const baked = bakedTargets[slot];
+        if (baked === undefined) continue;
+        const target = exportMeshes[baked.meshIndex];
+        if (target === undefined) continue;
+
+        let exportGeometry: THREE.BufferGeometry | null = null;
+        if (EXPORT_CONFIG.bakeStaticDisplacement && !baked.snapshot.dynamicGeometry && displacementExtent > 1e-8) {
+          exportGeometry = applyStaticDisplacement(
+            baked.snapshot.geometry,
+            baked.maps.height,
+            baked.snapshot.matrixWorld,
+            displacementExtent
+          );
+        } else if (baked.snapshot.generatedUvAtlas) {
+          exportGeometry = baked.snapshot.geometry.clone();
+        } else if (layout !== null) {
+          exportGeometry = target.geometry.clone();
         }
-        target.material = createBakedMaterial(maps, physical, index, resources);
+
+        if (layout !== null) {
+          const atlasGeometry = remapGeometryUvToAtlas(exportGeometry ?? target.geometry, slot, layout.grid);
+          exportGeometry?.dispose();
+          exportGeometry = atlasGeometry;
+        }
+        if (exportGeometry !== null) assignGeometry(target, exportGeometry, resources);
+
+        target.material = sharedMaterial ?? createBakedMaterial(
+          baked.maps,
+          physical,
+          `PTL export ${slot + 1}`,
+          resources
+        );
         target.customDepthMaterial = undefined;
         target.customDistanceMaterial = undefined;
       }
@@ -280,14 +326,10 @@ export class GlbExporter {
         maxTextureSize,
         animations
       });
-      if (!(result instanceof ArrayBuffer)) {
-        throw new Error('GLB exporter returned an unexpected non-binary result.');
-      }
+      if (!(result instanceof ArrayBuffer)) throw new Error('GLB exporter returned an unexpected non-binary result.');
       return new Blob([result], { type: 'model/gltf-binary' });
     } finally {
-      for (const snapshot of meshSnapshots) {
-        if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
-      }
+      for (const snapshot of meshSnapshots) if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
       bakeMaterial.dispose();
       disposeResources(resources);
     }
