@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MAX_LAYERS, RENDERER_CONFIG } from '../app/constants';
 import { BAKE_FRAGMENT_GLSL, BAKE_VERTEX_GLSL } from '../export/TextureBakeShader';
+import { BIOLOGICAL_SSS_LIGHT_GLSL } from './BiologicalScattering';
 import type {
   BlendMode,
   LayerChannel,
@@ -16,7 +17,6 @@ import {
   SHADOW_NORMAL_GLSL,
   SHADOW_VERTEX_DISPLACEMENT_GLSL,
   SHARED_GLSL,
-  SSS_LIGHT_GLSL,
   SURFACE_VERTEX_DISPLACEMENT_GLSL
 } from './ProceduralShader';
 
@@ -57,7 +57,6 @@ function effectiveGroupOpacity(
   let opacity = 1;
   let currentId = groupId;
   const visited = new Set<string>();
-
   while (currentId !== null) {
     if (visited.has(currentId)) return 0;
     visited.add(currentId);
@@ -66,7 +65,6 @@ function effectiveGroupOpacity(
     opacity *= group.opacity;
     currentId = group.parentId;
   }
-
   return opacity;
 }
 
@@ -99,7 +97,10 @@ export class MaterialCompiler {
     uLabMaskInvert: { value: new Array<number>(MAX_LAYERS).fill(0) },
     uLabMaskStrength: { value: new Array<number>(MAX_LAYERS).fill(1) },
     uLabHasDisplacement: { value: 0 },
-    uLabNormalStrength: { value: RENDERER_CONFIG.displacedNormalStrength }
+    uLabNormalStrength: { value: RENDERER_CONFIG.displacedNormalStrength },
+    uLabSssLightDirection: { value: new THREE.Vector3(...RENDERER_CONFIG.sssLightDirection).normalize() },
+    uLabSssBackscatterStrength: { value: RENDERER_CONFIG.sssBackscatterStrength },
+    uLabSssThicknessScale: { value: RENDERER_CONFIG.sssThicknessScale }
   };
 
   public constructor() {
@@ -112,7 +113,6 @@ export class MaterialCompiler {
       specularIntensity: 0.62,
       ior: 1.42
     });
-
     this.configureSurfaceShader();
     this.configureShadowShader(this.depthMaterial, 'depth');
     this.configureShadowShader(this.distanceMaterial, 'distance');
@@ -160,12 +160,8 @@ export class MaterialCompiler {
       this.uniforms.uLabColorB.value[index]?.set(active ? layer.colorB : '#000000');
 
       if (
-        active &&
-        layer.enabled &&
-        routesHeight(layer.channel) &&
-        Math.abs(layer.displacement) > 1e-8 &&
-        layer.opacity > 0 &&
-        groupOpacity > 0
+        active && layer.enabled && routesHeight(layer.channel) && Math.abs(layer.displacement) > 1e-8 &&
+        layer.opacity > 0 && groupOpacity > 0
       ) {
         hasDisplacement = true;
         this.displacementExtentValue += Math.abs(layer.displacement) * layer.opacity * groupOpacity * 0.5;
@@ -208,21 +204,14 @@ export class MaterialCompiler {
   private configureSurfaceShader(): void {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
-
       const varyings = 'varying vec3 vLabPosition;';
 
       shader.vertexShader = shader.vertexShader
-        .replace(
-          '#include <common>',
-          `#include <common>\n${SHARED_GLSL}\n${varyings}`
-        )
+        .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${varyings}`)
         .replace('#include <skinning_vertex>', SURFACE_VERTEX_DISPLACEMENT_GLSL);
 
       shader.fragmentShader = shader.fragmentShader
-        .replace(
-          '#include <common>',
-          `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\n${varyings}`
-        )
+        .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\n${varyings}`)
         .replace(
           '#include <color_fragment>',
           `#include <color_fragment>\nLabSurface labSurface = labEvaluateSurface(vLabPosition);\ndiffuseColor.rgb = labSurface.color;`
@@ -233,10 +222,10 @@ export class MaterialCompiler {
         )
         .replace('#include <normal_fragment_begin>', DISPLACED_NORMAL_GLSL)
         .replace('#include <lights_physical_fragment>', PHYSICAL_LAYER_GLSL)
-        .replace('#include <lights_fragment_end>', SSS_LIGHT_GLSL);
+        .replace('#include <lights_fragment_end>', BIOLOGICAL_SSS_LIGHT_GLSL);
     };
 
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v7';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v8';
   }
 
   private configureShadowShader(
