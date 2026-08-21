@@ -5,6 +5,11 @@ import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
 import {
+  disposeExportResources,
+  snapshotOriginalMaterials,
+  type ExportResources
+} from './ExportResourceSnapshot';
+import {
   TextureBaker,
   type BakeMeshSnapshot,
   type BakedPbrTextureSet,
@@ -16,12 +21,6 @@ import {
   createSharedAtlasLayout,
   remapGeometryUvToAtlas
 } from './TextureAtlas';
-
-interface ExportResources {
-  materials: THREE.Material[];
-  textures: THREE.Texture[];
-  geometries: THREE.BufferGeometry[];
-}
 
 interface ExportMeshSnapshot {
   assigned: boolean;
@@ -129,67 +128,6 @@ function createBakedMaterial(
   return material;
 }
 
-function copyImageBitmap(image: ImageBitmap): HTMLCanvasElement {
-  const canvas = document.createElement('canvas');
-  canvas.width = image.width;
-  canvas.height = image.height;
-  const context = canvas.getContext('2d');
-  if (context === null) throw new Error('Browser cannot snapshot an imported texture for GLB export.');
-  context.drawImage(image, 0, 0);
-  return canvas;
-}
-
-function cloneTexture(texture: THREE.Texture, resources: ExportResources): THREE.Texture {
-  const clone = texture.clone();
-  if (typeof ImageBitmap !== 'undefined' && texture.image instanceof ImageBitmap) clone.image = copyImageBitmap(texture.image);
-  clone.needsUpdate = true;
-  resources.textures.push(clone);
-  return clone;
-}
-
-function cloneMaterial(material: THREE.Material, resources: ExportResources): THREE.Material {
-  const clone = material.clone();
-  const sourceValues = material as unknown as Record<string, unknown>;
-  const cloneValues = clone as unknown as Record<string, unknown>;
-  for (const [key, value] of Object.entries(sourceValues)) {
-    if (value instanceof THREE.Texture) cloneValues[key] = cloneTexture(value, resources);
-  }
-  resources.materials.push(clone);
-  return clone;
-}
-
-function cloneMaterialSet(
-  material: THREE.Material | THREE.Material[],
-  resources: ExportResources
-): THREE.Material | THREE.Material[] {
-  return Array.isArray(material)
-    ? material.map((item) => cloneMaterial(item, resources))
-    : cloneMaterial(material, resources);
-}
-
-function snapshotOriginalMaterials(
-  root: THREE.Object3D,
-  assignedMeshes: ReadonlySet<THREE.Mesh>,
-  resources: ExportResources
-): void {
-  root.traverse((object) => {
-    if (object instanceof THREE.Mesh) {
-      if (!assignedMeshes.has(object)) object.material = cloneMaterialSet(object.material, resources);
-      return;
-    }
-    if (object instanceof THREE.Line || object instanceof THREE.Points) {
-      const owner = object as THREE.Object3D & { material: THREE.Material | THREE.Material[] };
-      owner.material = cloneMaterialSet(owner.material, resources);
-    }
-  });
-}
-
-function disposeResources(resources: ExportResources): void {
-  resources.materials.forEach((material) => material.dispose());
-  resources.textures.forEach((texture) => texture.dispose());
-  resources.geometries.forEach((geometry) => geometry.dispose());
-}
-
 function assignGeometry(target: THREE.Mesh, geometry: THREE.BufferGeometry, resources: ExportResources): void {
   target.geometry = geometry;
   resources.geometries.push(geometry);
@@ -250,8 +188,7 @@ export class GlbExporter {
     cleanLabMetadata(exportRoot);
 
     try {
-      const useSharedAtlas = EXPORT_CONFIG.sharedAtlas && assignedIndices.length > 1;
-      const layout = useSharedAtlas
+      const layout = EXPORT_CONFIG.sharedAtlas && assignedIndices.length > 1
         ? createSharedAtlasLayout(
             assignedIndices.length,
             bakeResolution,
@@ -315,8 +252,7 @@ export class GlbExporter {
         target.customDistanceMaterial = undefined;
       }
 
-      const exporter = new GLTFExporter();
-      const result = await exporter.parseAsync(exportRoot, {
+      const result = await new GLTFExporter().parseAsync(exportRoot, {
         binary: true,
         embedImages: true,
         onlyVisible: true,
@@ -331,7 +267,7 @@ export class GlbExporter {
     } finally {
       for (const snapshot of meshSnapshots) if (snapshot.bake !== null) this.baker.disposeSnapshot(snapshot.bake);
       bakeMaterial.dispose();
-      disposeResources(resources);
+      disposeExportResources(resources);
     }
   }
 }
