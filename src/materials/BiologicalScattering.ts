@@ -1,4 +1,8 @@
 export const BIOLOGICAL_SSS_LIGHT_GLSL = /* glsl */ `
+uniform vec3 uLabSssLightDirection;
+uniform float uLabSssBackscatterStrength;
+uniform float uLabSssThicknessScale;
+
 #include <lights_fragment_end>
 if (labSurface.sss > 0.0001) {
   vec3 labSssNormal = normalize(geometryNormal);
