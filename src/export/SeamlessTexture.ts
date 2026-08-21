@@ -8,6 +8,29 @@ export interface SeamlessTextureOptions {
 
 const CHANNEL_COUNT = 4;
 const NORMAL_Z = 1;
+const DISPLACEMENT_EXTENT = Symbol('seamless-displacement-extent');
+
+type TextureSetWithMetadata = BakedTextureSet & {
+  [DISPLACEMENT_EXTENT]?: number;
+};
+
+export function rememberTextureSetDisplacementExtent(
+  textures: BakedTextureSet,
+  displacementExtent: number
+): void {
+  if (!Number.isFinite(displacementExtent) || displacementExtent < 0) {
+    throw new Error('Displacement extent cannot be negative.');
+  }
+  (textures as TextureSetWithMetadata)[DISPLACEMENT_EXTENT] = displacementExtent;
+}
+
+function displacementExtentFor(
+  textures: BakedTextureSet,
+  fallback: number
+): number {
+  const remembered = (textures as TextureSetWithMetadata)[DISPLACEMENT_EXTENT];
+  return remembered ?? fallback;
+}
 
 function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -287,6 +310,7 @@ export async function makeTextureSetSeamless(
     throw new Error('Displacement extent cannot be negative.');
   }
 
+  const displacementExtent = displacementExtentFor(textures, options.displacementExtent);
   await seamTexture(textures.albedo, options.blendFraction);
   await seamTexture(textures.roughness, options.blendFraction);
   await seamTexture(textures.height, options.blendFraction);
@@ -297,7 +321,7 @@ export async function makeTextureSetSeamless(
     textures.normal,
     textures.height,
     options.worldSize,
-    options.displacementExtent
+    displacementExtent
   );
   textures.normal.blob = await canvasToPng(textures.normal.canvas);
   return textures;
