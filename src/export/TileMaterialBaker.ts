@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
+import { rememberTextureSetDisplacementExtent } from './SeamlessTexture';
 import { TextureBaker, type BakedTextureSet } from './TextureBaker';
 
 const MIN_TEXTURE_SIZE = 128;
@@ -21,6 +22,7 @@ export class TileMaterialBaker {
       throw new Error('Tile world size must be greater than zero.');
     }
 
+    const displacementExtent = this.compiler.displacementExtent;
     const renderer = new THREE.WebGLRenderer({
       antialias: false,
       alpha: true,
@@ -36,7 +38,9 @@ export class TileMaterialBaker {
     const baker = new TextureBaker(renderer, this.compiler);
 
     try {
-      return await baker.bake(mesh, settings, resolution);
+      const textures = await baker.bake(mesh, settings, resolution);
+      rememberTextureSetDisplacementExtent(textures, displacementExtent);
+      return textures;
     } finally {
       geometry.dispose();
       renderer.dispose();
