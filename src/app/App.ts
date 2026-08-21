@@ -21,6 +21,10 @@ import { LabRenderer } from '../engine/LabRenderer';
 import { describeImportedMeshes, ModelLoader } from '../engine/ModelLoader';
 import { disposeObjectResources } from '../engine/ObjectResources';
 import type { QualityTier } from '../engine/Quality';
+import { TILE_CONFIG } from '../config/tileConfig';
+import { makeTextureSetSeamless } from '../export/SeamlessTexture';
+import { TileMaterialBaker } from '../export/TileMaterialBaker';
+import type { BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
 import { MATERIAL_PRESETS } from '../materials/presets';
@@ -30,13 +34,15 @@ import { LayerStrip } from '../ui/LayerStrip';
 import { LibraryPanel } from '../ui/LibraryPanel';
 import { RadialMenu, type RadialCommand } from '../ui/RadialMenu';
 import { Shell } from '../ui/Shell';
+import { TilePreviewPanel } from '../ui/TilePreviewPanel';
+import { TileWorkspace } from '../ui/TileWorkspace';
 import { downloadBlob, downloadDataUrl, downloadText } from '../utils/download';
 
 const BYTES_PER_MIB = 1024 * 1024;
 const IMPORT_CACHE_ENTRY_LIMIT = HISTORY_LIMIT + 1;
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
 
-type ProductionOperation = 'bake' | 'export';
+type ProductionOperation = 'bake' | 'export' | 'tile';
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
   return target instanceof HTMLInputElement ||
@@ -98,11 +104,14 @@ export class App {
   private readonly state: AppState;
   private readonly compiler = new MaterialCompiler();
   private readonly renderer: LabRenderer;
+  private readonly tileBaker: TileMaterialBaker;
+  private readonly tileWorkspace: TileWorkspace;
   private readonly modelLoader = new ModelLoader();
   private readonly library: LibraryPanel;
   private readonly inspector: Inspector;
   private readonly layers: LayerStrip;
   private readonly radial: RadialMenu;
+  private readonly tilePreview: TilePreviewPanel;
   private readonly importedFiles = new ImportedFileCache(IMPORT_CACHE_ENTRY_LIMIT, MAX_MODEL_FILE_BYTES);
   private autosaveTimer: number | null = null;
   private autosaveFailureShown = false;
@@ -111,11 +120,15 @@ export class App {
   private projectImportSequence = 0;
   private environmentLoadSequence = 0;
   private productionOperation: ProductionOperation | null = null;
+  private tilePreviewMaps: BakedTextureSet | null = null;
+  private tilePreviewStale = true;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
+    this.tileWorkspace = new TileWorkspace(root);
     this.state = new AppState(loadInitialProject());
     this.renderer = new LabRenderer(this.shell.elements.viewport, this.compiler);
+    this.tileBaker = new TileMaterialBaker(this.compiler);
     this.renderer.setMeshSelectionCallback((id) => this.state.selectMesh(id));
     this.renderer.setPerformanceCallback((stats) => this.shell.setPerformanceStats(stats));
 
@@ -150,6 +163,11 @@ export class App {
       onReorder: (id, targetIndex) => this.runSafely(() => this.state.reorderLayer(id, targetIndex))
     });
 
+    this.tilePreview = new TilePreviewPanel(this.tileWorkspace.host, {
+      onClose: () => this.tileWorkspace.setActive(false),
+      onRefresh: () => { void this.refreshTilePreview(); },
+      onSave: () => { void this.saveSeamlessTextures(); }
+    });
     this.radial = new RadialMenu(this.shell.elements.radial, (command) => this.handleRadialCommand(command));
     this.state.subscribe((state, reason) => this.handleStateChange(state, reason));
     this.bindCommands();
@@ -195,6 +213,10 @@ export class App {
     if (reason === 'background' || reason === 'project') this.renderer.setBackground(state.background);
     if (reason === 'environment' || reason === 'project') {
       this.renderer.setEnvironment(state.environment, state.environmentAssetName);
+    }
+    if (reason === 'layers' || reason === 'groups' || reason === 'physical' || reason === 'project') {
+      this.tilePreviewStale = true;
+      this.tilePreview.markStale();
     }
 
     this.shell.setStatus(this.projectStatus(state));
@@ -253,6 +275,7 @@ export class App {
     this.shell.onCommand('import-model', () => this.shell.elements.modelInput.click());
     this.shell.onCommand('open-project', () => this.shell.elements.projectInput.click());
     this.shell.onCommand('save-project', () => this.runSafely(() => this.exportProject()));
+    this.shell.onCommand('tile-preview', () => { void this.openTilePreview(); });
     this.shell.onCommand('bake-textures', () => { void this.bakeTextures(); });
     this.shell.onCommand('export-glb', () => { void this.exportGlb(); });
     this.shell.onCommand('frame', () => this.renderer.frameSelection());
@@ -509,19 +532,84 @@ export class App {
     this.shell.toast('Project JSON saved.');
   }
 
+  private async openTilePreview(): Promise<void> {
+    this.tileWorkspace.setActive(true);
+    if (this.tilePreviewMaps !== null && !this.tilePreviewStale) {
+      this.tilePreview.setMaps(this.tilePreviewMaps);
+      return;
+    }
+    await this.refreshTilePreview();
+  }
+
+  private async refreshTilePreview(): Promise<void> {
+    if (!this.beginProductionOperation('tile')) return;
+    try {
+      const requested = TILE_CONFIG.previewResolution;
+      this.tilePreview.setLoading(`Baking seamless preview · ${requested}²…`);
+      this.shell.setStatus(`Baking seamless tile preview · ${requested}²…`);
+      const maps = await this.buildSeamlessTileSet(requested);
+      this.tilePreviewMaps = maps;
+      this.tilePreviewStale = false;
+      this.tilePreview.setMaps(maps);
+    } catch (error) {
+      console.error('Tile preview failed.', error);
+      const message = this.errorMessage(error);
+      this.tilePreview.setError(message);
+      this.shell.toast(message, 'error');
+    } finally {
+      this.productionOperation = null;
+      this.shell.setStatus(this.projectStatus(this.state.snapshot));
+    }
+  }
+
+  private async saveSeamlessTextures(): Promise<void> {
+    if (!this.beginProductionOperation('tile')) return;
+    try {
+      const quality = this.renderer.getQualityTierSettings();
+      this.shell.setStatus(`Baking seamless PBR maps · ${quality.bakeResolution}²…`);
+      const maps = await this.buildSeamlessTileSet(quality.bakeResolution);
+      const stem = `${EXPORT_CONFIG.textureFileStem}-${TILE_CONFIG.fileSuffix}`;
+      this.downloadTextureSet(maps, stem);
+      this.shell.toast(`Saved 6 seamless maps at ${maps.resolution}×${maps.resolution}.`);
+    } catch (error) {
+      console.error('Seamless texture export failed.', error);
+      this.shell.toast(this.errorMessage(error), 'error');
+    } finally {
+      this.productionOperation = null;
+      this.shell.setStatus(this.projectStatus(this.state.snapshot));
+    }
+  }
+
+  private async buildSeamlessTileSet(requestedResolution: number): Promise<BakedTextureSet> {
+    const tile = TILE_CONFIG;
+    const maps = await this.tileBaker.bake(
+      this.state.snapshot.physical,
+      requestedResolution,
+      tile.worldSize
+    );
+    return makeTextureSetSeamless(maps, {
+      blendFraction: tile.blendFraction,
+      worldSize: tile.worldSize,
+      displacementExtent: this.compiler.displacementExtent
+    });
+  }
+
+  private downloadTextureSet(maps: Readonly<BakedTextureSet>, stem: string): void {
+    downloadBlob(`${stem}-albedo.png`, maps.albedo.blob);
+    downloadBlob(`${stem}-roughness.png`, maps.roughness.blob);
+    downloadBlob(`${stem}-normal.png`, maps.normal.blob);
+    downloadBlob(`${stem}-height.png`, maps.height.blob);
+    downloadBlob(`${stem}-clearcoat.png`, maps.clearcoat.blob);
+    downloadBlob(`${stem}-clearcoat-roughness.png`, maps.clearcoatRoughness.blob);
+  }
+
   private async bakeTextures(): Promise<void> {
     if (!this.beginProductionOperation('bake')) return;
     try {
       const quality = this.renderer.getQualityTierSettings();
       this.shell.setStatus(`Baking PBR maps · ${quality.bakeResolution}²…`);
       const maps = await this.renderer.bakeCurrentMaterial(this.state.snapshot.physical);
-      const stem = EXPORT_CONFIG.textureFileStem;
-      downloadBlob(`${stem}-albedo.png`, maps.albedo.blob);
-      downloadBlob(`${stem}-roughness.png`, maps.roughness.blob);
-      downloadBlob(`${stem}-normal.png`, maps.normal.blob);
-      downloadBlob(`${stem}-height.png`, maps.height.blob);
-      downloadBlob(`${stem}-clearcoat.png`, maps.clearcoat.blob);
-      downloadBlob(`${stem}-clearcoat-roughness.png`, maps.clearcoatRoughness.blob);
+      this.downloadTextureSet(maps, EXPORT_CONFIG.textureFileStem);
       this.shell.toast(`Baked 6 maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Texture bake failed.', error);
@@ -550,7 +638,11 @@ export class App {
 
   private beginProductionOperation(operation: ProductionOperation): boolean {
     if (this.productionOperation !== null) {
-      const active = this.productionOperation === 'bake' ? 'Texture baking' : 'GLB export';
+      const active = this.productionOperation === 'bake'
+        ? 'Texture baking'
+        : this.productionOperation === 'export'
+          ? 'GLB export'
+          : 'Tile generation';
       this.shell.toast(`${active} is already running.`, 'error');
       return false;
     }
