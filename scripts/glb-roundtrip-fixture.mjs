@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import validator from 'gltf-validator';
 
 const GLB_MAGIC = 0x46546c67;
 const GLB_VERSION = 2;
@@ -97,19 +98,11 @@ export async function createRoundtripFixture(path) {
     meshes: [
       {
         name: 'FixtureLabGeometry',
-        primitives: [{
-          attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 },
-          indices: 3,
-          material: 0
-        }]
+        primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 0 }]
       },
       {
         name: 'FixtureOriginalGeometry',
-        primitives: [{
-          attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 },
-          indices: 3,
-          material: 1
-        }]
+        primitives: [{ attributes: { POSITION: 0, NORMAL: 1, TEXCOORD_0: 2 }, indices: 3, material: 1 }]
       }
     ],
     materials: [
@@ -160,6 +153,22 @@ export async function createRoundtripFixture(path) {
   await writeFile(path, glbBuffer(json, binary));
 }
 
+async function assertKhronosValidation(data, path) {
+  const report = await validator.validateBytes(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), {
+    uri: path,
+    format: 'glb',
+    maxIssues: 0,
+    writeTimestamp: false
+  });
+  if ((report?.issues?.numErrors ?? 0) > 0) {
+    const messages = (report.issues.messages ?? [])
+      .filter((issue) => issue.severity === 0)
+      .map((issue) => `${issue.code}: ${issue.message}`)
+      .join('\n');
+    throw new Error(`Khronos glTF Validator reported ${report.issues.numErrors} error(s).\n${messages}`);
+  }
+}
+
 export async function readGlbJson(path) {
   const data = await readFile(path);
   if (data.length < 20 || data.readUInt32LE(0) !== GLB_MAGIC || data.readUInt32LE(4) !== GLB_VERSION) {
@@ -168,6 +177,7 @@ export async function readGlbJson(path) {
   if (data.readUInt32LE(8) !== data.length) {
     throw new Error('Exported fixture GLB length header does not match the file size.');
   }
+  await assertKhronosValidation(data, path);
   const jsonLength = data.readUInt32LE(12);
   const jsonType = data.readUInt32LE(16);
   if (jsonType !== JSON_CHUNK_TYPE || 20 + jsonLength > data.length) {
@@ -181,9 +191,7 @@ function assertArrayClose(actual, expected, label) {
     throw new Error(`${label} is missing or has the wrong size.`);
   }
   for (let index = 0; index < expected.length; index += 1) {
-    if (Math.abs(actual[index] - expected[index]) > 1e-5) {
-      throw new Error(`${label} changed during export.`);
-    }
+    if (Math.abs(actual[index] - expected[index]) > 1e-5) throw new Error(`${label} changed during export.`);
   }
 }
 
@@ -205,9 +213,7 @@ function materialForNode(json, node) {
 function assertTextureReference(json, textureInfo, label) {
   const texture = json.textures?.[textureInfo?.index];
   const image = json.images?.[texture?.source];
-  if (texture === undefined || image === undefined) {
-    throw new Error(`${label} does not reference an embedded image.`);
-  }
+  if (texture === undefined || image === undefined) throw new Error(`${label} does not reference an embedded image.`);
   if (image.bufferView === undefined && typeof image.uri !== 'string') {
     throw new Error(`${label} image has no embedded bufferView or URI.`);
   }
@@ -222,9 +228,7 @@ export function assertRoundtripExport(json) {
   assertArrayClose(root.scale, ROOT_SCALE, 'Fixture root scale');
 
   const original = materialForNode(json, requireNamedNode(json, ORIGINAL_MESH_NAME));
-  if (original.name !== ORIGINAL_MATERIAL_NAME) {
-    throw new Error('Original mesh material name was not preserved.');
-  }
+  if (original.name !== ORIGINAL_MATERIAL_NAME) throw new Error('Original mesh material name was not preserved.');
   const originalPbr = original.pbrMetallicRoughness;
   if (Math.abs((originalPbr?.roughnessFactor ?? -1) - ORIGINAL_ROUGHNESS) > 1e-6) {
     throw new Error('Original mesh roughness was not preserved.');
