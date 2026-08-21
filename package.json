@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test:browser": "node scripts/browser-smoke.mjs"
+    "test": "npm run test:unit && npm run test:browser",
+    "test:unit": "vitest run",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:cross-browser": "node scripts/cross-browser-smoke.mjs"
   },
   "dependencies": {
     "three": "0.185.1",
@@ -15,7 +18,10 @@
   },
   "devDependencies": {
     "@types/three": "0.185.4",
+    "gltf-validator": "2.0.0-dev.3.10",
+    "playwright": "1.62.1",
     "typescript": "7.0.2",
-    "vite": "8.2.1"
+    "vite": "8.2.1",
+    "vitest": "4.1.11"
   }
 }
