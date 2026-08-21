@@ -10,6 +10,7 @@
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
+    "test:production-export": "node scripts/production-export-smoke.mjs",
     "test:cross-browser": "node scripts/cross-browser-smoke.mjs"
   },
   "dependencies": {
