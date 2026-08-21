@@ -6,7 +6,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -15,15 +15,33 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Resolve dependency lock
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit dependency lock
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if ! git diff --quiet -- package-lock.json || [ -n "$(git ls-files --others --exclude-standard package-lock.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "build: lock npm dependencies"
+            git push
+          fi
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm run test:unit
       - name: Type-check and build
         run: npm run build
-      - name: Browser/WebGL smoke
+      - name: Browser/WebGL production smoke
         run: npm run test:browser
+      - name: Install cross-browser runtimes
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Cross-browser and mobile smoke
+        run: npm run test:cross-browser
