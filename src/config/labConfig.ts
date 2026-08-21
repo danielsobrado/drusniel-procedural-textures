@@ -34,10 +34,7 @@ type LayerControlKey =
   | 'displacement'
   | 'maskStrength';
 
-type PhysicalControlKey = Exclude<
-  keyof PhysicalSettings,
-  'sheenColor' | 'attenuationColor'
->;
+type PhysicalControlKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
 
 interface ControlsConfig {
   layer: Record<LayerControlKey, NumericControlRange>;
@@ -65,6 +62,9 @@ interface RendererConfig {
   maxDistance: number;
   toneMappingExposure: number;
   displacedNormalStrength: number;
+  sssLightDirection: [number, number, number];
+  sssBackscatterStrength: number;
+  sssThicknessScale: number;
 }
 
 interface ExportConfig {
@@ -72,6 +72,10 @@ interface ExportConfig {
   thumbnailSize: number;
   textureFileStem: string;
   glbFileName: string;
+  automaticUvPacking: boolean;
+  sharedAtlas: boolean;
+  bakeStaticDisplacement: boolean;
+  minAtlasTileSize: number;
 }
 
 interface PerformanceConfig {
@@ -119,25 +123,14 @@ interface LabConfig {
   renderer: RendererConfig;
 }
 
-const OBJECT_IDS: readonly ObjectPreset[] = [
-  'sphere', 'icosphere', 'cube', 'rounded-cube', 'torus', 'plane'
-];
+const OBJECT_IDS: readonly ObjectPreset[] = ['sphere', 'icosphere', 'cube', 'rounded-cube', 'torus', 'plane'];
 const LAYER_KIND_IDS: readonly LayerKind[] = [
-  'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient',
-  'vessels', 'wet-film', 'sss'
+  'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient', 'vessels', 'wet-film', 'sss'
 ];
-const CHANNEL_IDS: readonly LayerChannel[] = [
-  'surface', 'color', 'roughness', 'height', 'clearcoat', 'sss'
-];
-const ENVIRONMENT_IDS: readonly EnvironmentPreset[] = [
-  'studio', 'warm', 'cool', 'night', 'custom'
-];
-const BLEND_MODE_IDS: readonly BlendMode[] = [
-  'normal', 'multiply', 'add', 'screen', 'overlay'
-];
-const FIXED_QUALITY_TIER_IDS: readonly FixedQualityTier[] = [
-  'mobile', 'balanced', 'high', 'ultra'
-];
+const CHANNEL_IDS: readonly LayerChannel[] = ['surface', 'color', 'roughness', 'height', 'clearcoat', 'sss'];
+const ENVIRONMENT_IDS: readonly EnvironmentPreset[] = ['studio', 'warm', 'cool', 'night', 'custom'];
+const BLEND_MODE_IDS: readonly BlendMode[] = ['normal', 'multiply', 'add', 'screen', 'overlay'];
+const FIXED_QUALITY_TIER_IDS: readonly FixedQualityTier[] = ['mobile', 'balanced', 'high', 'ultra'];
 const LAYER_CONTROL_KEYS: readonly LayerControlKey[] = [
   'opacity', 'scale', 'strength', 'seed', 'roughness', 'displacement', 'maskStrength'
 ];
@@ -167,18 +160,19 @@ function asStringArray(value: unknown, name: string, maxItems = 16): string[] {
     throw new Error(`Configuration value ${name} must be an array with at most ${maxItems} entries.`);
   }
   const values = value.map((item, index) => asString(item, `${name}[${index}]`));
-  if (new Set(values).size !== values.length) {
-    throw new Error(`Configuration value ${name} contains duplicate entries.`);
-  }
+  if (new Set(values).size !== values.length) throw new Error(`Configuration value ${name} contains duplicates.`);
   return values;
 }
 
 function asColor(value: unknown, name: string): string {
   const color = asString(value, name, 7);
-  if (!HEX_COLOR.test(color)) {
-    throw new Error(`Invalid configuration color: ${name}.`);
-  }
+  if (!HEX_COLOR.test(color)) throw new Error(`Invalid configuration color: ${name}.`);
   return color.toLowerCase();
+}
+
+function asBoolean(value: unknown, name: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`Configuration value ${name} must be a boolean.`);
+  return value;
 }
 
 function asNumber(value: unknown, name: string, min: number, max: number): number {
@@ -190,17 +184,13 @@ function asNumber(value: unknown, name: string, min: number, max: number): numbe
 
 function asInteger(value: unknown, name: string, min: number, max: number): number {
   const parsed = asNumber(value, name, min, max);
-  if (!Number.isInteger(parsed)) {
-    throw new Error(`Configuration value ${name} must be an integer.`);
-  }
+  if (!Number.isInteger(parsed)) throw new Error(`Configuration value ${name} must be an integer.`);
   return parsed;
 }
 
 function asPowerOfTwo(value: unknown, name: string, min: number, max: number): number {
   const parsed = asInteger(value, name, min, max);
-  if ((parsed & (parsed - 1)) !== 0) {
-    throw new Error(`Configuration value ${name} must be a power of two.`);
-  }
+  if ((parsed & (parsed - 1)) !== 0) throw new Error(`Configuration value ${name} must be a power of two.`);
   return parsed;
 }
 
@@ -213,28 +203,30 @@ function asFilename(value: unknown, name: string, extension?: string): string {
 }
 
 function asFixedQualityTier(value: unknown, name: string): FixedQualityTier {
-  if (FIXED_QUALITY_TIER_IDS.includes(value as FixedQualityTier)) {
-    return value as FixedQualityTier;
-  }
+  if (FIXED_QUALITY_TIER_IDS.includes(value as FixedQualityTier)) return value as FixedQualityTier;
   throw new Error(`Invalid configuration fixed quality tier: ${name}.`);
 }
 
 function asQualityTier(value: unknown, name: string): QualityTier {
-  if (value === 'auto') return 'auto';
-  return asFixedQualityTier(value, name);
+  return value === 'auto' ? 'auto' : asFixedQualityTier(value, name);
+}
+
+function parseVector3(value: unknown, name: string, min: number, max: number): [number, number, number] {
+  if (!Array.isArray(value) || value.length !== 3) throw new Error(`${name} must contain exactly three numbers.`);
+  return [
+    asNumber(value[0], `${name}[0]`, min, max),
+    asNumber(value[1], `${name}[1]`, min, max),
+    asNumber(value[2], `${name}[2]`, min, max)
+  ];
 }
 
 function parseControlRange(value: unknown, name: string): NumericControlRange {
   const range = asRecord(value, name);
-  const min = asNumber(range.min, `${name}.min`, -1000000, 1000000);
-  const max = asNumber(range.max, `${name}.max`, -1000000, 1000000);
-  if (max <= min) {
-    throw new Error(`Configuration range ${name} must have max greater than min.`);
-  }
-  const step = asNumber(range.step, `${name}.step`, 0.000000001, 1000000);
-  if (step > max - min) {
-    throw new Error(`Configuration range ${name}.step cannot exceed its span.`);
-  }
+  const min = asNumber(range.min, `${name}.min`, -1_000_000, 1_000_000);
+  const max = asNumber(range.max, `${name}.max`, -1_000_000, 1_000_000);
+  if (max <= min) throw new Error(`Configuration range ${name} must have max greater than min.`);
+  const step = asNumber(range.step, `${name}.step`, 1e-9, 1_000_000);
+  if (step > max - min) throw new Error(`Configuration range ${name}.step cannot exceed its span.`);
   return { min, max, step };
 }
 
@@ -246,14 +238,10 @@ function parseControlGroup<T extends string>(
   const group = asRecord(value, name);
   const supported = new Set<string>(keys);
   for (const key of Object.keys(group)) {
-    if (!supported.has(key)) {
-      throw new Error(`Unsupported configuration control: ${name}.${key}.`);
-    }
+    if (!supported.has(key)) throw new Error(`Unsupported configuration control: ${name}.${key}.`);
   }
   const result = {} as Record<T, NumericControlRange>;
-  for (const key of keys) {
-    result[key] = parseControlRange(group[key], `${name}.${key}`);
-  }
+  for (const key of keys) result[key] = parseControlRange(group[key], `${name}.${key}`);
   return result;
 }
 
@@ -266,35 +254,22 @@ function parseControls(value: unknown): ControlsConfig {
   };
 }
 
-function assertExactCatalog<T extends string>(
-  values: readonly T[],
-  expected: readonly T[],
-  name: string
-): void {
+function assertExactCatalog<T extends string>(values: readonly T[], expected: readonly T[], name: string): void {
   const unique = new Set(values);
   if (unique.size !== values.length || values.length !== expected.length) {
     throw new Error(`Configuration catalog ${name} must contain each supported id exactly once.`);
   }
-  for (const id of expected) {
-    if (!unique.has(id)) throw new Error(`Configuration catalog ${name} is missing ${id}.`);
-  }
+  for (const id of expected) if (!unique.has(id)) throw new Error(`Configuration catalog ${name} is missing ${id}.`);
 }
 
-function parseCatalog<T extends string>(
-  value: unknown,
-  expected: readonly T[],
-  name: string
-): CatalogItem<T>[] {
+function parseCatalog<T extends string>(value: unknown, expected: readonly T[], name: string): CatalogItem<T>[] {
   if (!Array.isArray(value)) throw new Error(`Configuration ${name} must be an array.`);
   const supported = new Set<string>(expected);
   const items = value.map((item, index) => {
     const record = asRecord(item, `${name}[${index}]`);
     const id = asString(record.id, `${name}[${index}].id`) as T;
     if (!supported.has(id)) throw new Error(`Unsupported ${name} id in configuration: ${id}.`);
-    return {
-      id,
-      label: asString(record.label, `${name}[${index}].label`, 64)
-    };
+    return { id, label: asString(record.label, `${name}[${index}].label`, 64) };
   });
   assertExactCatalog(items.map((item) => item.id), expected, name);
   return items;
@@ -317,16 +292,10 @@ function parseObjects(value: unknown): ObjectCatalogItem[] {
   return objects;
 }
 
-function parsePhysical(
-  value: unknown,
-  ranges: ControlsConfig['physical']
-): PhysicalSettings {
+function parsePhysical(value: unknown, ranges: ControlsConfig['physical']): PhysicalSettings {
   const physical = asRecord(value, 'defaults.physical');
   const number = (key: PhysicalControlKey): number => asNumber(
-    physical[key],
-    `defaults.physical.${key}`,
-    ranges[key].min,
-    ranges[key].max
+    physical[key], `defaults.physical.${key}`, ranges[key].min, ranges[key].max
   );
   return {
     roughness: number('roughness'),
@@ -353,43 +322,36 @@ function parseUi(value: unknown): UiConfig {
     radialClickMoveTolerancePx: asNumber(ui.radialClickMoveTolerancePx, 'ui.radialClickMoveTolerancePx', 1, 100),
     radialRadiusPx: asNumber(ui.radialRadiusPx, 'ui.radialRadiusPx', 40, 300),
     radialEdgePaddingPx: asNumber(ui.radialEdgePaddingPx, 'ui.radialEdgePaddingPx', 20, 200),
-    toastInfoMs: asInteger(ui.toastInfoMs, 'ui.toastInfoMs', 250, 30000),
-    toastErrorMs: asInteger(ui.toastErrorMs, 'ui.toastErrorMs', 250, 30000)
+    toastInfoMs: asInteger(ui.toastInfoMs, 'ui.toastInfoMs', 250, 30_000),
+    toastErrorMs: asInteger(ui.toastErrorMs, 'ui.toastErrorMs', 250, 30_000)
   };
 }
 
 function parseRenderer(value: unknown): RendererConfig {
   const renderer = asRecord(value, 'renderer');
-  const position = renderer.cameraPosition;
-  if (!Array.isArray(position) || position.length !== 3) {
-    throw new Error('renderer.cameraPosition must contain exactly three numbers.');
-  }
   const cameraNear = asNumber(renderer.cameraNear, 'renderer.cameraNear', 0.0001, 1000);
-  const cameraFar = asNumber(renderer.cameraFar, 'renderer.cameraFar', 0.001, 10000000);
+  const cameraFar = asNumber(renderer.cameraFar, 'renderer.cameraFar', 0.001, 10_000_000);
   const minDistance = asNumber(renderer.minDistance, 'renderer.minDistance', 0.01, 1000);
-  const maxDistance = asNumber(renderer.maxDistance, 'renderer.maxDistance', 0.02, 10000);
+  const maxDistance = asNumber(renderer.maxDistance, 'renderer.maxDistance', 0.02, 10_000);
   if (cameraFar <= cameraNear || maxDistance <= minDistance) {
     throw new Error('Renderer far/max values must be greater than their near/min values.');
   }
+  const lightDirection = parseVector3(renderer.sssLightDirection, 'renderer.sssLightDirection', -1, 1);
+  const directionLength = Math.hypot(...lightDirection);
+  if (directionLength < 0.001) throw new Error('renderer.sssLightDirection must not be zero length.');
   return {
     maxPixelRatio: asNumber(renderer.maxPixelRatio, 'renderer.maxPixelRatio', 0.5, 4),
     cameraFov: asNumber(renderer.cameraFov, 'renderer.cameraFov', 1, 179),
     cameraNear,
     cameraFar,
-    cameraPosition: [
-      asNumber(position[0], 'renderer.cameraPosition[0]', -10000, 10000),
-      asNumber(position[1], 'renderer.cameraPosition[1]', -10000, 10000),
-      asNumber(position[2], 'renderer.cameraPosition[2]', -10000, 10000)
-    ],
+    cameraPosition: parseVector3(renderer.cameraPosition, 'renderer.cameraPosition', -10_000, 10_000),
     minDistance,
     maxDistance,
     toneMappingExposure: asNumber(renderer.toneMappingExposure, 'renderer.toneMappingExposure', 0.01, 10),
-    displacedNormalStrength: asNumber(
-      renderer.displacedNormalStrength,
-      'renderer.displacedNormalStrength',
-      0,
-      1
-    )
+    displacedNormalStrength: asNumber(renderer.displacedNormalStrength, 'renderer.displacedNormalStrength', 0, 1),
+    sssLightDirection: lightDirection.map((value) => value / directionLength) as [number, number, number],
+    sssBackscatterStrength: asNumber(renderer.sssBackscatterStrength, 'renderer.sssBackscatterStrength', 0, 2),
+    sssThicknessScale: asNumber(renderer.sssThicknessScale, 'renderer.sssThicknessScale', 0.1, 5)
   };
 }
 
@@ -399,7 +361,11 @@ function parseExport(value: unknown): ExportConfig {
     texturePaddingPx: asInteger(config.texturePaddingPx, 'export.texturePaddingPx', 0, 64),
     thumbnailSize: asInteger(config.thumbnailSize, 'export.thumbnailSize', 64, 512),
     textureFileStem: asFilename(config.textureFileStem, 'export.textureFileStem'),
-    glbFileName: asFilename(config.glbFileName, 'export.glbFileName', '.glb')
+    glbFileName: asFilename(config.glbFileName, 'export.glbFileName', '.glb'),
+    automaticUvPacking: asBoolean(config.automaticUvPacking, 'export.automaticUvPacking'),
+    sharedAtlas: asBoolean(config.sharedAtlas, 'export.sharedAtlas'),
+    bakeStaticDisplacement: asBoolean(config.bakeStaticDisplacement, 'export.bakeStaticDisplacement'),
+    minAtlasTileSize: asPowerOfTwo(config.minAtlasTileSize, 'export.minAtlasTileSize', 64, 1024)
   };
 }
 
@@ -407,9 +373,7 @@ function parsePerformance(value: unknown): PerformanceConfig {
   const performance = asRecord(value, 'performance');
   const tiers = asRecord(performance.tiers, 'performance.tiers');
   const supported = new Set<string>(FIXED_QUALITY_TIER_IDS);
-  for (const key of Object.keys(tiers)) {
-    if (!supported.has(key)) throw new Error(`Unsupported performance tier: ${key}.`);
-  }
+  for (const key of Object.keys(tiers)) if (!supported.has(key)) throw new Error(`Unsupported performance tier: ${key}.`);
 
   const parsedTiers = {} as Record<FixedQualityTier, QualityTierSettings>;
   for (const id of FIXED_QUALITY_TIER_IDS) {
@@ -427,12 +391,11 @@ function parsePerformance(value: unknown): PerformanceConfig {
       )
     };
   }
-
   return {
     defaultTier: asQualityTier(performance.defaultTier, 'performance.defaultTier'),
     autoMobileTier: asFixedQualityTier(performance.autoMobileTier, 'performance.autoMobileTier'),
     autoDesktopTier: asFixedQualityTier(performance.autoDesktopTier, 'performance.autoDesktopTier'),
-    sampleIntervalMs: asInteger(performance.sampleIntervalMs, 'performance.sampleIntervalMs', 250, 10000),
+    sampleIntervalMs: asInteger(performance.sampleIntervalMs, 'performance.sampleIntervalMs', 250, 10_000),
     tiers: parsedTiers
   };
 }
@@ -450,18 +413,14 @@ function parseConfig(value: unknown): LabConfig {
 
   const defaultObject = asString(defaults.object, 'defaults.object') as ObjectPreset;
   const defaultEnvironment = asString(defaults.environment, 'defaults.environment') as EnvironmentPreset;
-  if (!objects.some((item) => item.id === defaultObject)) {
-    throw new Error(`Unsupported default object in configuration: ${defaultObject}.`);
-  }
+  if (!objects.some((item) => item.id === defaultObject)) throw new Error(`Unsupported default object: ${defaultObject}.`);
   if (!environments.some((item) => item.id === defaultEnvironment)) {
-    throw new Error(`Unsupported default environment in configuration: ${defaultEnvironment}.`);
+    throw new Error(`Unsupported default environment: ${defaultEnvironment}.`);
   }
 
   const storageKey = asString(app.storageKey, 'app.storageKey');
   const legacyStorageKeys = asStringArray(app.legacyStorageKeys ?? [], 'app.legacyStorageKeys');
-  if (legacyStorageKeys.includes(storageKey)) {
-    throw new Error('app.legacyStorageKeys cannot contain app.storageKey.');
-  }
+  if (legacyStorageKeys.includes(storageKey)) throw new Error('app.legacyStorageKeys cannot contain app.storageKey.');
 
   return {
     app: {
@@ -471,21 +430,16 @@ function parseConfig(value: unknown): LabConfig {
       maxLayers: asInteger(app.maxLayers, 'app.maxLayers', 1, 32),
       maxGroups: asInteger(app.maxGroups, 'app.maxGroups', 0, 32),
       maxGroupDepth: asInteger(app.maxGroupDepth, 'app.maxGroupDepth', 1, 16),
-      maxImportedMeshes: asInteger(app.maxImportedMeshes, 'app.maxImportedMeshes', 1, 100000),
+      maxImportedMeshes: asInteger(app.maxImportedMeshes, 'app.maxImportedMeshes', 1, 100_000),
       maxLayerNameLength: asInteger(app.maxLayerNameLength, 'app.maxLayerNameLength', 1, 1024),
       maxGroupNameLength: asInteger(app.maxGroupNameLength, 'app.maxGroupNameLength', 1, 1024),
-      maxImportedAssetNameLength: asInteger(
-        app.maxImportedAssetNameLength,
-        'app.maxImportedAssetNameLength',
-        1,
-        4096
-      ),
+      maxImportedAssetNameLength: asInteger(app.maxImportedAssetNameLength, 'app.maxImportedAssetNameLength', 1, 4096),
       maxMeshLabelLength: asInteger(app.maxMeshLabelLength, 'app.maxMeshLabelLength', 1, 4096),
       historyLimit: asInteger(app.historyLimit, 'app.historyLimit', 1, 1000),
       historyCoalesceMs: asInteger(app.historyCoalesceMs, 'app.historyCoalesceMs', 0, 5000),
-      autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60000),
-      maxModelFileBytes: asInteger(app.maxModelFileBytes, 'app.maxModelFileBytes', 1048576, 2147483648),
-      maxProjectFileBytes: asInteger(app.maxProjectFileBytes, 'app.maxProjectFileBytes', 1024, 67108864)
+      autosaveDelayMs: asInteger(app.autosaveDelayMs, 'app.autosaveDelayMs', 0, 60_000),
+      maxModelFileBytes: asInteger(app.maxModelFileBytes, 'app.maxModelFileBytes', 1_048_576, 2_147_483_648),
+      maxProjectFileBytes: asInteger(app.maxProjectFileBytes, 'app.maxProjectFileBytes', 1024, 67_108_864)
     },
     ui: parseUi(root.ui),
     controls,
