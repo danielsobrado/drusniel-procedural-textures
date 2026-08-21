@@ -154,6 +154,10 @@ export:
   thumbnailSize: 144
   textureFileStem: procedural-texture
   glbFileName: procedural-texture-material.glb
+  automaticUvPacking: true
+  sharedAtlas: true
+  bakeStaticDisplacement: true
+  minAtlasTileSize: 128
 
 performance:
   defaultTier: auto
@@ -196,3 +200,6 @@ renderer:
   maxDistance: 12.0
   toneMappingExposure: 1.0
   displacedNormalStrength: 0.72
+  sssLightDirection: [-0.52, 0.66, 0.54]
+  sssBackscatterStrength: 0.68
+  sssThicknessScale: 1.15
