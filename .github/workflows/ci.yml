@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Unit tests
+        run: npm run test:unit
+      - name: Type-check and build
+        run: npm run build
+      - name: Install browser runtimes
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Browser/WebGL production smoke
+        run: |
+          CHROME_BIN="$(node -e 'import("playwright").then(({ chromium }) => console.log(chromium.executablePath()))')" npm run test:browser
+      - name: Static UV atlas and displacement export smoke
+        run: npm run test:production-export
+      - name: Cross-browser and mobile smoke
+        run: npm run test:cross-browser

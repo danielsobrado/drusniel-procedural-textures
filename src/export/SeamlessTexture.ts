@@ -1,0 +1,462 @@
+import type { BakedTexture, BakedTextureSet } from './TextureBaker';
+
+export interface SeamlessTextureOptions {
+  blendFraction: number;
+  worldSize: number;
+  displacementExtent: number;
+}
+
+const CHANNEL_COUNT = 4;
+const NORMAL_Z = 1;
+const INNER_EDGE_OFFSET = 1;
+const DISPLACEMENT_EXTENT = Symbol('seamless-displacement-extent');
+
+type TextureSetWithMetadata = BakedTextureSet & {
+  [DISPLACEMENT_EXTENT]?: number;
+};
+
+export function rememberTextureSetDisplacementExtent(
+  textures: BakedTextureSet,
+  displacementExtent: number
+): void {
+  if (!Number.isFinite(displacementExtent) || displacementExtent < 0) {
+    throw new Error('Displacement extent cannot be negative.');
+  }
+  (textures as TextureSetWithMetadata)[DISPLACEMENT_EXTENT] = displacementExtent;
+}
+
+function displacementExtentFor(
+  textures: BakedTextureSet,
+  fallback: number
+): number {
+  const remembered = (textures as TextureSetWithMetadata)[DISPLACEMENT_EXTENT];
+  return remembered ?? fallback;
+}
+
+function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
+  const context = canvas.getContext('2d', { willReadFrequently: true });
+  if (context === null) {
+    throw new Error('Browser does not provide the 2D canvas required for seamless texture export.');
+  }
+  return context;
+}
+
+function smootherStep(value: number): number {
+  const t = Math.min(Math.max(value, 0), 1);
+  return t * t * t * (t * (t * 6 - 15) + 10);
+}
+
+function blendPair(
+  source: Uint8ClampedArray,
+  target: Uint8ClampedArray,
+  firstOffset: number,
+  secondOffset: number,
+  keep: number
+): void {
+  const mix = 1 - keep;
+  for (let channel = 0; channel < CHANNEL_COUNT; channel += 1) {
+    const first = source[firstOffset + channel]!;
+    const second = source[secondOffset + channel]!;
+    target[firstOffset + channel] = Math.round(first * keep + second * mix);
+    target[secondOffset + channel] = Math.round(second * keep + first * mix);
+  }
+}
+
+function blendHorizontalEdges(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  blendPixels: number
+): void {
+  const source = new Uint8ClampedArray(pixels);
+  const denominator = Math.max(blendPixels - 1, 1);
+  for (let y = 0; y < height; y += 1) {
+    for (let distance = 0; distance < blendPixels; distance += 1) {
+      const leftX = distance;
+      const rightX = width - 1 - distance;
+      if (leftX > rightX) break;
+      const keep = 0.5 + smootherStep(distance / denominator) * 0.5;
+      blendPair(
+        source,
+        pixels,
+        (y * width + leftX) * CHANNEL_COUNT,
+        (y * width + rightX) * CHANNEL_COUNT,
+        keep
+      );
+    }
+  }
+}
+
+function blendVerticalEdges(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  blendPixels: number
+): void {
+  const source = new Uint8ClampedArray(pixels);
+  const denominator = Math.max(blendPixels - 1, 1);
+  for (let x = 0; x < width; x += 1) {
+    for (let distance = 0; distance < blendPixels; distance += 1) {
+      const topY = distance;
+      const bottomY = height - 1 - distance;
+      if (topY > bottomY) break;
+      const keep = 0.5 + smootherStep(distance / denominator) * 0.5;
+      blendPair(
+        source,
+        pixels,
+        (topY * width + x) * CHANNEL_COUNT,
+        (bottomY * width + x) * CHANNEL_COUNT,
+        keep
+      );
+    }
+  }
+}
+
+function averagePair(
+  pixels: Uint8ClampedArray,
+  firstOffset: number,
+  secondOffset: number
+): void {
+  for (let channel = 0; channel < CHANNEL_COUNT; channel += 1) {
+    const average = Math.round((pixels[firstOffset + channel]! + pixels[secondOffset + channel]!) * 0.5);
+    pixels[firstOffset + channel] = average;
+    pixels[secondOffset + channel] = average;
+  }
+}
+
+function lockOuterEdges(pixels: Uint8ClampedArray, width: number, height: number): void {
+  for (let y = 0; y < height; y += 1) {
+    averagePair(
+      pixels,
+      (y * width) * CHANNEL_COUNT,
+      (y * width + width - 1) * CHANNEL_COUNT
+    );
+  }
+  for (let x = 0; x < width; x += 1) {
+    averagePair(
+      pixels,
+      x * CHANNEL_COUNT,
+      ((height - 1) * width + x) * CHANNEL_COUNT
+    );
+  }
+}
+
+function symmetricDelta(edge: number, firstInner: number, secondInner: number): number {
+  const requested = (firstInner - secondInner) * 0.5;
+  const maximum = Math.min(edge, 255 - edge);
+  return Math.min(Math.max(requested, -maximum), maximum);
+}
+
+function lockHorizontalSlopes(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+): void {
+  if (width < 3) return;
+
+  for (let y = INNER_EDGE_OFFSET; y < height - INNER_EDGE_OFFSET; y += 1) {
+    const leftEdge = (y * width) * CHANNEL_COUNT;
+    const leftInner = (y * width + INNER_EDGE_OFFSET) * CHANNEL_COUNT;
+    const rightInner = (y * width + width - 1 - INNER_EDGE_OFFSET) * CHANNEL_COUNT;
+
+    for (let channel = 0; channel < CHANNEL_COUNT; channel += 1) {
+      const edge = pixels[leftEdge + channel]!;
+      const delta = symmetricDelta(
+        edge,
+        pixels[leftInner + channel]!,
+        pixels[rightInner + channel]!
+      );
+      pixels[leftInner + channel] = Math.round(edge + delta);
+      pixels[rightInner + channel] = Math.round(edge - delta);
+    }
+  }
+}
+
+function lockVerticalSlopes(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+): void {
+  if (height < 3) return;
+
+  for (let x = INNER_EDGE_OFFSET; x < width - INNER_EDGE_OFFSET; x += 1) {
+    const topEdge = x * CHANNEL_COUNT;
+    const topInner = (INNER_EDGE_OFFSET * width + x) * CHANNEL_COUNT;
+    const bottomInner = ((height - 1 - INNER_EDGE_OFFSET) * width + x) * CHANNEL_COUNT;
+
+    for (let channel = 0; channel < CHANNEL_COUNT; channel += 1) {
+      const edge = pixels[topEdge + channel]!;
+      const delta = symmetricDelta(
+        edge,
+        pixels[topInner + channel]!,
+        pixels[bottomInner + channel]!
+      );
+      pixels[topInner + channel] = Math.round(edge + delta);
+      pixels[bottomInner + channel] = Math.round(edge - delta);
+    }
+  }
+}
+
+export function stabilizePixelSeamSlopes(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+): void {
+  if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+    throw new Error('Seam stabilization requires positive integer texture dimensions.');
+  }
+  if (pixels.length !== width * height * CHANNEL_COUNT) {
+    throw new Error('Pixel data does not match the supplied texture dimensions.');
+  }
+
+  lockOuterEdges(pixels, width, height);
+  lockHorizontalSlopes(pixels, width, height);
+  lockVerticalSlopes(pixels, width, height);
+  lockOuterEdges(pixels, width, height);
+}
+
+function normalizeNormalPixels(pixels: Uint8ClampedArray): void {
+  for (let offset = 0; offset < pixels.length; offset += CHANNEL_COUNT) {
+    let x = pixels[offset]! / 127.5 - 1;
+    let y = pixels[offset + 1]! / 127.5 - 1;
+    let z = pixels[offset + 2]! / 127.5 - 1;
+    const length = Math.hypot(x, y, z);
+    if (length <= 1e-8) {
+      x = 0;
+      y = 0;
+      z = 1;
+    } else {
+      x /= length;
+      y /= length;
+      z /= length;
+    }
+    pixels[offset] = Math.round((x * 0.5 + 0.5) * 255);
+    pixels[offset + 1] = Math.round((y * 0.5 + 0.5) * 255);
+    pixels[offset + 2] = Math.round((z * 0.5 + 0.5) * 255);
+    pixels[offset + 3] = 255;
+  }
+}
+
+function periodicCoordinate(value: number, size: number): number {
+  if (size <= 1) return 0;
+  const period = size - 1;
+  const wrapped = value % period;
+  return wrapped < 0 ? wrapped + period : wrapped;
+}
+
+function heightAt(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+  displacementExtent: number
+): number {
+  const wrappedX = periodicCoordinate(x, width);
+  const wrappedY = periodicCoordinate(y, height);
+  const value = pixels[(wrappedY * width + wrappedX) * CHANNEL_COUNT]! / 255;
+  return (value - 0.5) * displacementExtent * 2;
+}
+
+export function rebuildNormalPixelsFromHeight(
+  heightPixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  worldSize: number,
+  displacementExtent: number
+): Uint8ClampedArray<ArrayBuffer> {
+  if (!Number.isInteger(width) || width < 2 || !Number.isInteger(height) || height < 2) {
+    throw new Error('Normal reconstruction requires texture dimensions of at least 2×2 pixels.');
+  }
+  if (heightPixels.length !== width * height * CHANNEL_COUNT) {
+    throw new Error('Height pixel data does not match the supplied texture dimensions.');
+  }
+  if (!Number.isFinite(worldSize) || worldSize <= 0) {
+    throw new Error('Tile world size must be greater than zero.');
+  }
+  if (!Number.isFinite(displacementExtent) || displacementExtent < 0) {
+    throw new Error('Displacement extent cannot be negative.');
+  }
+
+  const output = new Uint8ClampedArray(new ArrayBuffer(heightPixels.length));
+  const pixelWorldX = worldSize / Math.max(width - 1, 1);
+  const pixelWorldY = worldSize / Math.max(height - 1, 1);
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const slopeX = (
+        heightAt(heightPixels, width, height, x + 1, y, displacementExtent) -
+        heightAt(heightPixels, width, height, x - 1, y, displacementExtent)
+      ) / (2 * pixelWorldX);
+      const slopeCanvasY = (
+        heightAt(heightPixels, width, height, x, y + 1, displacementExtent) -
+        heightAt(heightPixels, width, height, x, y - 1, displacementExtent)
+      ) / (2 * pixelWorldY);
+
+      let normalX = -slopeX;
+      let normalY = slopeCanvasY;
+      let normalZ = NORMAL_Z;
+      const length = Math.hypot(normalX, normalY, normalZ);
+      normalX /= length;
+      normalY /= length;
+      normalZ /= length;
+
+      const offset = (y * width + x) * CHANNEL_COUNT;
+      output[offset] = Math.round((normalX * 0.5 + 0.5) * 255);
+      output[offset + 1] = Math.round((normalY * 0.5 + 0.5) * 255);
+      output[offset + 2] = Math.round((normalZ * 0.5 + 0.5) * 255);
+      output[offset + 3] = 255;
+    }
+  }
+
+  normalizeNormalPixels(output);
+  stabilizePixelSeamSlopes(output, width, height);
+  return output;
+}
+
+function rebuildNormalFromHeight(
+  normal: BakedTexture,
+  height: BakedTexture,
+  worldSize: number,
+  displacementExtent: number
+): void {
+  const width = height.canvas.width;
+  const canvasHeight = height.canvas.height;
+  if (normal.canvas.width !== width || normal.canvas.height !== canvasHeight) {
+    throw new Error('Normal and height texture dimensions do not match.');
+  }
+
+  const heightPixels = canvasContext(height.canvas).getImageData(0, 0, width, canvasHeight).data;
+  const output = new ImageData(
+    rebuildNormalPixelsFromHeight(
+      heightPixels,
+      width,
+      canvasHeight,
+      worldSize,
+      displacementExtent
+    ),
+    width,
+    canvasHeight
+  );
+  canvasContext(normal.canvas).putImageData(output, 0, 0);
+}
+
+function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob === null) {
+        reject(new Error('Browser failed to encode the seamless PNG texture.'));
+        return;
+      }
+      resolve(blob);
+    }, 'image/png');
+  });
+}
+
+async function seamTexture(texture: BakedTexture, blendFraction: number): Promise<void> {
+  const width = texture.canvas.width;
+  const height = texture.canvas.height;
+  const context = canvasContext(texture.canvas);
+  const image = context.getImageData(0, 0, width, height);
+  const maxBlend = Math.max(2, Math.floor(Math.min(width, height) * 0.5));
+  const blendPixels = Math.min(
+    maxBlend,
+    Math.max(2, Math.round(Math.min(width, height) * blendFraction))
+  );
+
+  blendHorizontalEdges(image.data, width, height, blendPixels);
+  blendVerticalEdges(image.data, width, height, blendPixels);
+  stabilizePixelSeamSlopes(image.data, width, height);
+  context.putImageData(image, 0, 0);
+  texture.blob = await canvasToPng(texture.canvas);
+}
+
+export async function makeTextureSetSeamless(
+  textures: BakedTextureSet,
+  options: Readonly<SeamlessTextureOptions>
+): Promise<BakedTextureSet> {
+  if (!Number.isFinite(options.blendFraction) || options.blendFraction <= 0 || options.blendFraction >= 0.5) {
+    throw new Error('Seam blend fraction must be greater than 0 and less than 0.5.');
+  }
+  if (!Number.isFinite(options.worldSize) || options.worldSize <= 0) {
+    throw new Error('Tile world size must be greater than zero.');
+  }
+  if (!Number.isFinite(options.displacementExtent) || options.displacementExtent < 0) {
+    throw new Error('Displacement extent cannot be negative.');
+  }
+
+  const displacementExtent = displacementExtentFor(textures, options.displacementExtent);
+  await seamTexture(textures.albedo, options.blendFraction);
+  await seamTexture(textures.roughness, options.blendFraction);
+  await seamTexture(textures.height, options.blendFraction);
+  await seamTexture(textures.clearcoat, options.blendFraction);
+  await seamTexture(textures.clearcoatRoughness, options.blendFraction);
+
+  rebuildNormalFromHeight(
+    textures.normal,
+    textures.height,
+    options.worldSize,
+    displacementExtent
+  );
+  textures.normal.blob = await canvasToPng(textures.normal.canvas);
+  return textures;
+}
+
+export function measurePixelSeamMismatch(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number
+): number {
+  if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+    throw new Error('Seam measurement requires positive integer texture dimensions.');
+  }
+  if (pixels.length !== width * height * CHANNEL_COUNT) {
+    throw new Error('Pixel data does not match the supplied texture dimensions.');
+  }
+
+  let difference = 0;
+  let samples = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    const left = (y * width) * CHANNEL_COUNT;
+    const right = (y * width + width - 1) * CHANNEL_COUNT;
+    const leftInner = (y * width + Math.min(1, width - 1)) * CHANNEL_COUNT;
+    const rightInner = (y * width + Math.max(width - 2, 0)) * CHANNEL_COUNT;
+    for (let channel = 0; channel < 3; channel += 1) {
+      difference += Math.abs(pixels[left + channel]! - pixels[right + channel]!);
+      samples += 1;
+      if (width > 2) {
+        const leftSlope = pixels[leftInner + channel]! - pixels[left + channel]!;
+        const rightSlope = pixels[right + channel]! - pixels[rightInner + channel]!;
+        difference += Math.abs(leftSlope - rightSlope);
+        samples += 1;
+      }
+    }
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    const top = x * CHANNEL_COUNT;
+    const bottom = ((height - 1) * width + x) * CHANNEL_COUNT;
+    const topInner = (Math.min(1, height - 1) * width + x) * CHANNEL_COUNT;
+    const bottomInner = (Math.max(height - 2, 0) * width + x) * CHANNEL_COUNT;
+    for (let channel = 0; channel < 3; channel += 1) {
+      difference += Math.abs(pixels[top + channel]! - pixels[bottom + channel]!);
+      samples += 1;
+      if (height > 2) {
+        const topSlope = pixels[topInner + channel]! - pixels[top + channel]!;
+        const bottomSlope = pixels[bottom + channel]! - pixels[bottomInner + channel]!;
+        difference += Math.abs(topSlope - bottomSlope);
+        samples += 1;
+      }
+    }
+  }
+
+  return samples === 0 ? 0 : difference / (samples * 255);
+}
+
+export function measureEdgeMismatch(canvas: HTMLCanvasElement): number {
+  const width = canvas.width;
+  const height = canvas.height;
+  const pixels = canvasContext(canvas).getImageData(0, 0, width, height).data;
+  return measurePixelSeamMismatch(pixels, width, height);
+}

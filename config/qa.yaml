@@ -1,0 +1,212 @@
+suiteVersion: 1.5.0
+outputDir: qa
+server:
+  host: 127.0.0.1
+  port: 4192
+timeouts:
+  startMs: 30000
+  uiMs: 60000
+  viewportSettleMs: 500
+  tileSettleMs: 120
+viewport:
+  width: 1440
+  height: 960
+tile:
+  previewCount: 3
+  channels:
+    - albedo
+    - roughness
+    - normal
+    - height
+    - clearcoat
+    - clearcoatRoughness
+naturalPresets:
+  - id: forest-moss-carpet
+    name: Forest Moss Carpet
+    category: moss
+    fileStem: forest-moss-carpet
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dense woodland moss with cushion breakup, fibers, fresh tips and restrained moisture.
+  - id: mossy-stone
+    name: Mossy Stone
+    category: moss
+    fileStem: mossy-stone
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Weathered stone with irregular moss colonies, damp response and fibrous colony edges.
+  - id: cushion-moss
+    name: Cushion Moss
+    category: moss
+    fileStem: cushion-moss
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Rounded moss cushions over dark peat with mottled leaves and brighter new growth.
+  - id: crustose-lichen
+    name: Crustose Lichen
+    category: moss
+    fileStem: crustose-lichen
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Pale crust-forming lichen spreading over cool weathered rock with powdery mineral edges.
+  - id: bog-moss
+    name: Bog Moss
+    category: moss
+    fileStem: bog-moss
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Waterlogged sphagnum-style moss with dark peat gaps, soft hummocks and restrained wet highlights.
+  - id: sheet-moss
+    name: Sheet Moss
+    category: moss
+    fileStem: sheet-moss
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Low woodland moss forming dense overlapping mats with fine fibers, fresh tips and a restrained damp sheen.
+  - id: reindeer-lichen
+    name: Reindeer Lichen
+    category: moss
+    fileStem: reindeer-lichen
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dry pale lichen with branching coral-like ridges, compact colonies and cool mineral shadowing.
+  - id: forest-loam
+    name: Forest Loam
+    category: terrain
+    fileStem: forest-loam
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dark organic soil with humus variation, clods, leaf litter and damp pockets.
+  - id: red-clay-ground
+    name: Red Clay Ground
+    category: terrain
+    fileStem: red-clay-ground
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Compacted iron-rich clay with broad moisture variation, erosion and embedded grit.
+  - id: alpine-scree
+    name: Alpine Scree
+    category: terrain
+    fileStem: alpine-scree
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Cold fractured mountain ground with stone breakup, weathering, mineral seams and pale grit.
+  - id: coastal-sand
+    name: Coastal Sand
+    category: terrain
+    fileStem: coastal-sand
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Warm beach sand with wind ripples, compact damp patches and scattered pale shell grit.
+  - id: volcanic-soil
+    name: Volcanic Soil
+    category: terrain
+    fileStem: volcanic-soil
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dark basaltic earth with porous clasts, ash variation, mineral flecks and shallow cooling cracks.
+  - id: riverbank-mud
+    name: Riverbank Mud
+    category: terrain
+    fileStem: riverbank-mud
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Saturated dark riverbank soil with shallow ruts, compact clods, fine grit and patchy wet reflections.
+  - id: limestone-gravel
+    name: Limestone Gravel
+    category: terrain
+    fileStem: limestone-gravel
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Pale angular limestone fragments over dusty fines with chalk variation, fractures and small mineral grit.
+  - id: lush-turf
+    name: Lush Turf
+    category: grass
+    fileStem: lush-turf
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dense green turf with broad growth variation, fibers, clumps and fresh highlights.
+  - id: wild-meadow-grass
+    name: Wild Meadow Grass
+    category: grass
+    fileStem: wild-meadow-grass
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Natural meadow cover mixing green growth, coarse fibers, straw and mixed clumps.
+  - id: dry-savanna-grass
+    name: Dry Savanna Grass
+    category: grass
+    fileStem: dry-savanna-grass
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Sun-dried grassland with dusty undergrowth, dry stems, sparse clumps and seed heads.
+  - id: coastal-dune-grass
+    name: Coastal Dune Grass
+    category: grass
+    fileStem: coastal-dune-grass
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Salt-tolerant dune cover with sandy gaps, wind-combed fibers and sun-bleached tips.
+  - id: forest-understory-grass
+    name: Forest Understory Grass
+    category: grass
+    fileStem: forest-understory-grass
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Dark shade grass with damp soil undertones, soft fibers and scattered pale new growth.
+  - id: wetland-sedge
+    name: Wetland Sedge
+    category: grass
+    fileStem: wetland-sedge
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Coarse wetland sedge with dark saturated ground, fibrous blades, dense clumps and subdued wet highlights.
+  - id: frosted-grass
+    name: Frosted Grass
+    category: grass
+    fileStem: frosted-grass
+    previewObjectId: plane
+    previewObjectName: Plane
+    notes: Cold grass cover with muted green blades, pale frost crystals, shadowed clumps and fine frozen breakup.
+  - id: lobular-adipose
+    name: Lobular Adipose
+    category: biological
+    fileStem: lobular-adipose
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Pale pink adipose with large lobules, connective septa, fine vessels, subsurface warmth and a moist membrane.
+  - id: vascular-adipose
+    name: Vascular Adipose
+    category: biological
+    fileStem: vascular-adipose
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Deep red perfused fat with swollen lobules, blood-rich pockets, branching vessels and strong wet highlights.
+  - id: yellow-adipose
+    name: Yellow Adipose
+    category: biological
+    fileStem: yellow-adipose
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Warm yellow adipose with buttery lobules, creamy septa, golden subsurface depth and a smooth moist film.
+  - id: fibrotic-fascia
+    name: Fibrotic Fascia
+    category: biological
+    fileStem: fibrotic-fascia
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Dense pale connective tissue with collagen bundles, crossing scar fibers, sparse vessels and restrained moisture.
+  - id: granulation-tissue
+    name: Granulation Tissue
+    category: biological
+    fileStem: granulation-tissue
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Moist healing tissue with granular nodules, dense capillary growth, fibrin strands and blood-rich subsurface response.
+  - id: necrotic-adipose
+    name: Necrotic Adipose
+    category: biological
+    fileStem: necrotic-adipose
+    previewObjectId: sphere
+    previewObjectName: Sphere
+    notes: Damaged adipose with collapsed lobules, grey-yellow mottling, darker breakdown pockets and subdued oily highlights.

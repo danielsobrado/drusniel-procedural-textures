@@ -1,0 +1,28 @@
+sampling:
+  jitter: 0.42
+
+warp:
+  scale: 0.20
+  strength: 0.24
+
+interior:
+  low: 0.08
+  high: 0.66
+
+boundary:
+  compression: 0.025
+
+breakup:
+  scale: 1.05
+  strength: 0.025
+
+asymmetry:
+  scale: 0.28
+  strength: 0.06
+
+displacement:
+  gain: 0.42
+
+output:
+  floor: 0.42
+  gain: 0.18

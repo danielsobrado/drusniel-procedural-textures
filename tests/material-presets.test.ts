@@ -1,0 +1,144 @@
+import { describe, expect, it } from 'vitest';
+import { AppState } from '../src/app/AppState';
+import { CONTROL_RANGES, DEFAULT_PHYSICAL, MAX_LAYERS } from '../src/app/constants';
+import { MATERIAL_PRESETS } from '../src/materials/presets';
+
+const NEW_BIOLOGICAL_IDS = [
+  'lobular-adipose',
+  'vascular-adipose',
+  'yellow-adipose',
+  'fibrotic-fascia',
+  'granulation-tissue',
+  'necrotic-adipose'
+] as const;
+
+const EXPECTED_CATEGORY_IDS = {
+  biological: ['adipose-v8', ...NEW_BIOLOGICAL_IDS],
+  moss: [
+    'forest-moss-carpet',
+    'mossy-stone',
+    'cushion-moss',
+    'crustose-lichen',
+    'bog-moss',
+    'sheet-moss',
+    'reindeer-lichen'
+  ],
+  terrain: [
+    'forest-loam',
+    'red-clay-ground',
+    'alpine-scree',
+    'coastal-sand',
+    'volcanic-soil',
+    'riverbank-mud',
+    'limestone-gravel'
+  ],
+  grass: [
+    'lush-turf',
+    'wild-meadow-grass',
+    'dry-savanna-grass',
+    'coastal-dune-grass',
+    'forest-understory-grass',
+    'wetland-sedge',
+    'frosted-grass'
+  ]
+} as const;
+const MAX_BASELINE_ROUGHNESS = 0.95;
+
+function expectInRange(value: number, min: number, max: number, label: string): void {
+  expect(value, `${label} minimum`).toBeGreaterThanOrEqual(min);
+  expect(value, `${label} maximum`).toBeLessThanOrEqual(max);
+}
+
+describe('material preset catalog', () => {
+  it.each(Object.entries(EXPECTED_CATEGORY_IDS))('includes the %s presets', (tag, ids) => {
+    const taggedIds = MATERIAL_PRESETS
+      .filter((preset) => preset.tags.includes(tag))
+      .map((preset) => preset.id);
+
+    for (const id of ids) expect(taggedIds).toContain(id);
+  });
+
+  it('keeps preset and layer ids globally unique', () => {
+    const presetIds = MATERIAL_PRESETS.map((preset) => preset.id);
+    const layerIds = MATERIAL_PRESETS.flatMap((preset) => preset.layers.map((layer) => layer.id));
+
+    expect(new Set(presetIds).size).toBe(presetIds.length);
+    expect(new Set(layerIds).size).toBe(layerIds.length);
+  });
+
+  it('keeps every preset within the renderer layer budget', () => {
+    for (const preset of MATERIAL_PRESETS) {
+      expect(preset.layers.length).toBeGreaterThan(0);
+      expect(preset.layers.length).toBeLessThanOrEqual(MAX_LAYERS);
+    }
+  });
+
+  it('keeps every layer control inside configured UI ranges', () => {
+    const ranges = CONTROL_RANGES.layer;
+
+    for (const preset of MATERIAL_PRESETS) {
+      for (const layer of preset.layers) {
+        const label = `${preset.id}/${layer.id}`;
+        expectInRange(layer.opacity, ranges.opacity.min, ranges.opacity.max, `${label} opacity`);
+        expectInRange(layer.scale, ranges.scale.min, ranges.scale.max, `${label} scale`);
+        expectInRange(layer.strength, ranges.strength.min, ranges.strength.max, `${label} strength`);
+        expectInRange(layer.seed, ranges.seed.min, ranges.seed.max, `${label} seed`);
+        expectInRange(layer.roughness, ranges.roughness.min, ranges.roughness.max, `${label} roughness`);
+        expectInRange(
+          layer.displacement,
+          ranges.displacement.min,
+          ranges.displacement.max,
+          `${label} displacement`
+        );
+        expectInRange(
+          layer.maskStrength,
+          ranges.maskStrength.min,
+          ranges.maskStrength.max,
+          `${label} mask strength`
+        );
+      }
+    }
+  });
+
+  it('keeps layer masks local to their preset', () => {
+    for (const preset of MATERIAL_PRESETS) {
+      const layerIds = new Set(preset.layers.map((layer) => layer.id));
+      for (const layer of preset.layers) {
+        if (layer.maskSourceLayerId !== null) {
+          expect(layerIds.has(layer.maskSourceLayerId)).toBe(true);
+        }
+      }
+    }
+  });
+
+  it('applies every preset through runtime normalization', () => {
+    const state = new AppState();
+
+    for (const preset of MATERIAL_PRESETS) {
+      expect(() => state.applyPreset(preset), preset.id).not.toThrow();
+      expect(state.snapshot.layers).toHaveLength(preset.layers.length);
+      expect(state.snapshot.groups).toHaveLength(preset.groups?.length ?? 0);
+    }
+  });
+
+  it('keeps roughness headroom for procedural variation', () => {
+    for (const preset of MATERIAL_PRESETS) {
+      const physicalRoughness = preset.physical?.roughness ?? DEFAULT_PHYSICAL.roughness;
+      const baseRoughness = preset.layers.find((layer) => layer.kind === 'base')?.roughness ?? 0;
+
+      expect(physicalRoughness + baseRoughness).toBeLessThan(MAX_BASELINE_ROUGHNESS);
+    }
+  });
+
+  it('keeps new biological presets multi-scale and physically layered', () => {
+    for (const id of NEW_BIOLOGICAL_IDS) {
+      const preset = MATERIAL_PRESETS.find((item) => item.id === id);
+      expect(preset, id).toBeDefined();
+
+      const kinds = new Set(preset?.layers.map((layer) => layer.kind));
+      expect(kinds.has('fbm') || kinds.has('cellular') || kinds.has('ridges'), `${id} structural detail`).toBe(true);
+      expect(kinds.has('sss'), `${id} subsurface layer`).toBe(true);
+      expect(kinds.has('wet-film'), `${id} wet-film layer`).toBe(true);
+    }
+  });
+});

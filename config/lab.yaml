@@ -1,0 +1,208 @@
+app:
+  name: Procedural Texture Lab
+  storageKey: procedural-texture-lab.project.v2
+  legacyStorageKeys:
+    - procedural-texture-lab.project.v1
+  maxLayers: 12
+  maxGroups: 8
+  maxGroupDepth: 4
+  maxImportedMeshes: 2048
+  maxLayerNameLength: 120
+  maxGroupNameLength: 120
+  maxImportedAssetNameLength: 255
+  maxMeshLabelLength: 160
+  historyLimit: 80
+  historyCoalesceMs: 350
+  autosaveDelayMs: 250
+  maxModelFileBytes: 134217728
+  maxProjectFileBytes: 2097152
+
+ui:
+  longPressDelayMs: 520
+  longPressMoveTolerancePx: 12
+  radialClickMoveTolerancePx: 6
+  radialRadiusPx: 116
+  radialEdgePaddingPx: 58
+  toastInfoMs: 2600
+  toastErrorMs: 4200
+  idleWorkTimeoutMs: 1000
+
+controls:
+  layer:
+    opacity: { min: 0.0, max: 1.0, step: 0.01 }
+    scale: { min: 0.1, max: 20.0, step: 0.1 }
+    strength: { min: 0.0, max: 2.5, step: 0.01 }
+    seed: { min: 0.0, max: 100.0, step: 1.0 }
+    roughness: { min: -0.5, max: 0.5, step: 0.01 }
+    displacement: { min: -0.18, max: 0.18, step: 0.001 }
+    maskStrength: { min: 0.0, max: 1.0, step: 0.01 }
+  group:
+    opacity: { min: 0.0, max: 1.0, step: 0.01 }
+  physical:
+    roughness: { min: 0.02, max: 1.0, step: 0.01 }
+    metalness: { min: 0.0, max: 1.0, step: 0.01 }
+    clearcoat: { min: 0.0, max: 1.0, step: 0.01 }
+    clearcoatRoughness: { min: 0.0, max: 1.0, step: 0.01 }
+    specularIntensity: { min: 0.0, max: 1.0, step: 0.01 }
+    ior: { min: 1.0, max: 2.33, step: 0.01 }
+    sheen: { min: 0.0, max: 1.0, step: 0.01 }
+    sheenRoughness: { min: 0.0, max: 1.0, step: 0.01 }
+    transmission: { min: 0.0, max: 1.0, step: 0.01 }
+    thickness: { min: 0.0, max: 3.0, step: 0.01 }
+    attenuationDistance: { min: 0.05, max: 10.0, step: 0.05 }
+
+defaults:
+  background: '#111318'
+  object: sphere
+  environment: studio
+  physical:
+    roughness: 0.34
+    metalness: 0.0
+    clearcoat: 0.34
+    clearcoatRoughness: 0.18
+    specularIntensity: 0.62
+    ior: 1.42
+    sheen: 0.0
+    sheenRoughness: 0.7
+    sheenColor: '#ffffff'
+    transmission: 0.0
+    thickness: 0.0
+    attenuationDistance: 2.0
+    attenuationColor: '#ffffff'
+
+objects:
+  - id: sphere
+    label: Sphere
+    glyph: '●'
+  - id: icosphere
+    label: Icosphere
+    glyph: '⬢'
+  - id: cube
+    label: Cube
+    glyph: '■'
+  - id: rounded-cube
+    label: Rounded
+    glyph: '▣'
+  - id: torus
+    label: Torus
+    glyph: '◉'
+  - id: plane
+    label: Plane
+    glyph: '▱'
+
+layerKinds:
+  - id: base
+    label: Base color
+  - id: fbm
+    label: FBM noise
+  - id: cellular
+    label: Cellular
+  - id: ridges
+    label: Ridges
+  - id: spots
+    label: Spots
+  - id: veins
+    label: Veins
+  - id: gradient
+    label: Gradient
+  - id: vessels
+    label: Branching vessels
+  - id: wet-film
+    label: Wet film
+  - id: sss
+    label: Subsurface tissue
+
+channels:
+  - id: surface
+    label: Surface
+  - id: color
+    label: Color only
+  - id: roughness
+    label: Roughness only
+  - id: height
+    label: Height only
+  - id: clearcoat
+    label: Clearcoat / wetness
+  - id: sss
+    label: Subsurface scattering
+
+environments:
+  - id: studio
+    label: Neutral studio
+  - id: warm
+    label: Warm studio
+  - id: cool
+    label: Cool studio
+  - id: night
+    label: Night studio
+  - id: custom
+    label: Custom HDR
+
+blendModes:
+  - id: normal
+    label: Normal
+  - id: multiply
+    label: Multiply
+  - id: add
+    label: Add
+  - id: screen
+    label: Screen
+  - id: overlay
+    label: Overlay
+
+export:
+  texturePaddingPx: 8
+  thumbnailSize: 144
+  textureFileStem: procedural-texture
+  glbFileName: procedural-texture-material.glb
+  automaticUvPacking: true
+  sharedAtlas: true
+  bakeStaticDisplacement: true
+  minAtlasTileSize: 128
+
+performance:
+  defaultTier: auto
+  autoMobileTier: mobile
+  autoDesktopTier: high
+  sampleIntervalMs: 750
+  tiers:
+    mobile:
+      label: Mobile
+      maxPixelRatio: 1.0
+      shadowMapSize: 512
+      bakeResolution: 512
+      maxExportTextureSize: 1024
+    balanced:
+      label: Balanced
+      maxPixelRatio: 1.25
+      shadowMapSize: 1024
+      bakeResolution: 1024
+      maxExportTextureSize: 1024
+    high:
+      label: High
+      maxPixelRatio: 1.75
+      shadowMapSize: 1024
+      bakeResolution: 2048
+      maxExportTextureSize: 2048
+    ultra:
+      label: Ultra
+      maxPixelRatio: 2.0
+      shadowMapSize: 2048
+      bakeResolution: 2048
+      maxExportTextureSize: 2048
+
+renderer:
+  maxPixelRatio: 2.0
+  cameraFov: 34
+  cameraNear: 0.05
+  cameraFar: 100.0
+  cameraPosition: [0.0, 0.35, 3.6]
+  minDistance: 1.3
+  maxDistance: 12.0
+  toneMappingExposure: 1.0
+  shadowBias: -0.00005
+  shadowNormalBias: 0.02
+  displacedNormalStrength: 0.72
+  sssLightDirection: [-0.52, 0.66, 0.54]
+  sssBackscatterStrength: 0.68
+  sssThicknessScale: 1.15

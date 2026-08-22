@@ -1,0 +1,121 @@
+.preview-library-section {
+  padding-top: 9px;
+  padding-bottom: 10px;
+}
+
+.compact-object-grid {
+  position: relative;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+  overflow: visible;
+}
+
+.compact-object-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 1;
+  padding: 0;
+  border-radius: 9px;
+}
+
+.compact-object-tile .object-glyph {
+  font-size: 14px;
+}
+
+.compact-object-tile::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  left: 50%;
+  padding: 4px 6px;
+  border: 1px solid rgba(229, 236, 255, 0.14);
+  border-radius: 6px;
+  background: rgba(8, 11, 16, 0.96);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34);
+  color: #dce2ec;
+  font-size: 7px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition: opacity 100ms ease, transform 100ms ease;
+}
+
+.compact-object-tile:hover::after,
+.compact-object-tile:focus-visible::after {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.preset-file-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid rgba(235, 241, 255, 0.07);
+}
+
+.preset-file-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid rgba(229, 236, 255, 0.1);
+  border-radius: 8px;
+  background-image: var(--glass-control);
+  background-color: rgba(18, 23, 32, 0.46);
+  box-shadow: var(--glass-edge);
+  color: #b7c0ce;
+  font-size: 8px;
+  font-weight: 650;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.preset-file-button:hover {
+  border-color: rgba(211, 220, 255, 0.29);
+  background-color: rgba(28, 35, 47, 0.58);
+  color: #eef2fa;
+}
+
+.preset-file-button > span:first-child {
+  color: #c6ceff;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.preset-file-status {
+  min-height: 0;
+  margin-top: 6px;
+  color: var(--subtle);
+  font-size: 7px;
+  line-height: 1.35;
+}
+
+.preset-file-status:empty {
+  display: none;
+}
+
+.preset-file-status[data-kind="error"] {
+  color: #ff8e99;
+}
+
+@media (max-width: 760px) {
+  .compact-object-grid {
+    gap: 4px;
+  }
+
+  .preset-file-button {
+    padding: 0 6px;
+  }
+}

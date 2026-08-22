@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.vite/
+artifacts/
+.DS_Store
+*.log
+.history/
