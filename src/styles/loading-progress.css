@@ -1,0 +1,71 @@
+.viewport::after {
+  width: min(280px, calc(100% - 48px));
+  min-width: 156px;
+  box-sizing: border-box;
+  padding: 11px 14px 21px;
+  background-image:
+    linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(181, 190, 255, 0.2) 18%,
+      rgba(206, 214, 255, 0.96) 50%,
+      rgba(181, 190, 255, 0.2) 82%,
+      transparent 100%
+    ),
+    linear-gradient(90deg, rgba(141, 157, 255, 0.12), rgba(141, 157, 255, 0.32)),
+    linear-gradient(148deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.025) 34%, transparent 70%),
+    radial-gradient(ellipse at 16% -10%, rgba(196, 207, 255, 0.13), transparent 45%),
+    linear-gradient(112deg, rgba(12, 16, 24, 0.92), rgba(9, 12, 18, 0.94));
+  background-position:
+    -45% calc(100% - 8px),
+    14px calc(100% - 8px),
+    0 0,
+    0 0,
+    0 0;
+  background-size:
+    42% 3px,
+    calc(100% - 28px) 3px,
+    auto,
+    auto,
+    auto;
+  background-repeat: no-repeat;
+  -webkit-backdrop-filter: blur(14px) saturate(135%);
+  backdrop-filter: blur(14px) saturate(135%);
+  will-change: background-position;
+}
+
+.viewport.is-loading::after {
+  animation: viewport-loading-progress 1.15s ease-in-out infinite;
+}
+
+@keyframes viewport-loading-progress {
+  from {
+    background-position:
+      -45% calc(100% - 8px),
+      14px calc(100% - 8px),
+      0 0,
+      0 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      145% calc(100% - 8px),
+      14px calc(100% - 8px),
+      0 0,
+      0 0,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .viewport.is-loading::after {
+    animation: none;
+    background-position:
+      29% calc(100% - 8px),
+      14px calc(100% - 8px),
+      0 0,
+      0 0,
+      0 0;
+  }
+}

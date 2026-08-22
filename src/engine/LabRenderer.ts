@@ -35,6 +35,7 @@ import type {
 } from './Quality';
 
 type MeshMaterial = THREE.Material | THREE.Material[];
+type MaterialCompileStage = 'queued' | 'compiling' | 'retaining';
 
 interface OriginalMeshState {
   material: MeshMaterial;
@@ -49,6 +50,18 @@ interface MaterialCompileFailure {
   materialVersion: number;
   sceneRevision: number;
   error: Error;
+}
+
+interface MaterialProgramVariant {
+  key: string;
+  sheen: boolean;
+  transmission: boolean;
+}
+
+interface MaterialCompileRequest {
+  materialVersion: number;
+  sceneRevision: number;
+  variant: MaterialProgramVariant;
 }
 
 function materialSet(material: MeshMaterial): Set<THREE.Material> {
@@ -76,6 +89,16 @@ function idleTurn(): Promise<void> {
 function normalizeError(error: unknown, fallback: string): Error {
   if (error instanceof Error) return error;
   return new Error(fallback, { cause: error });
+}
+
+function materialProgramVariant(material: THREE.MeshPhysicalMaterial): MaterialProgramVariant {
+  const sheen = material.sheen > 0;
+  const transmission = material.transmission > 0;
+  return {
+    key: `${sheen ? 'sheen' : 'no-sheen'}:${transmission ? 'transmission' : 'opaque'}`,
+    sheen,
+    transmission
+  };
 }
 
 export class LabRenderer {
@@ -106,6 +129,7 @@ export class LabRenderer {
   private readonly selectionBox = new THREE.Box3();
   private readonly selectionHelper = new THREE.Box3Helper(this.selectionBox, 0x8d9dff);
   private readonly interactionAbort = new AbortController();
+  private readonly materialProgramKeepers = new Map<string, MaterialCompiler>();
 
   private currentRoot: THREE.Object3D | null = null;
   private readonly meshById = new Map<string, THREE.Mesh>();
@@ -120,6 +144,7 @@ export class LabRenderer {
   private currentEnvironmentName: string | null = null;
   private materialCompilePromise: Promise<void> | null = null;
   private materialCompileFailure: MaterialCompileFailure | null = null;
+  private materialCompileStage: MaterialCompileStage | null = null;
   private environmentWarmupFrame: number | null = null;
   private environmentWarmupActive = false;
   private compiledMaterialVersion = -1;
@@ -262,7 +287,7 @@ export class LabRenderer {
         mesh.frustumCulled = original.frustumCulled;
       }
     }
-    if (changed) this.sceneRevision += 1;
+    if (changed) this.invalidateScenePrograms();
   }
 
   public setSelectedMesh(id: string | null): void {
@@ -282,7 +307,7 @@ export class LabRenderer {
     this.environments.cancelPending();
     const hadEnvironment = this.scene.environment !== null;
     const profile = this.environments.apply(this.scene, preset, customName);
-    if (hadEnvironment !== (this.scene.environment !== null)) this.sceneRevision += 1;
+    if (hadEnvironment !== (this.scene.environment !== null)) this.invalidateScenePrograms();
     this.applyLightProfile(profile);
   }
 
@@ -397,8 +422,10 @@ export class LabRenderer {
     this.key.shadow.mapPass = null;
     this.presetThumbnailRenderer?.dispose();
     this.presetThumbnailRenderer = null;
+    this.clearMaterialProgramKeepers();
     this.compiler.dispose();
     this.renderer.dispose();
+    this.materialCompileStage = null;
     this.container.classList.remove('is-loading');
     this.container.removeAttribute('data-loading-label');
     this.container.removeAttribute('aria-busy');
@@ -490,7 +517,7 @@ export class LabRenderer {
     this.selectedMeshId = null;
     this.selectionHelper.visible = false;
     this.scene.add(root);
-    this.sceneRevision += 1;
+    this.invalidateScenePrograms();
     this.frameSelection();
   }
 
@@ -581,6 +608,16 @@ export class LabRenderer {
     }
   }
 
+  private invalidateScenePrograms(): void {
+    this.sceneRevision += 1;
+    this.clearMaterialProgramKeepers();
+  }
+
+  private clearMaterialProgramKeepers(): void {
+    for (const keeper of this.materialProgramKeepers.values()) keeper.dispose();
+    this.materialProgramKeepers.clear();
+  }
+
   private materialNeedsCompilation(): boolean {
     return this.currentRoot !== null && (
       this.compiler.material.version !== this.compiledMaterialVersion ||
@@ -600,6 +637,11 @@ export class LabRenderer {
     return failure;
   }
 
+  private isCompileRequestCurrent(request: Readonly<MaterialCompileRequest>): boolean {
+    return request.materialVersion === this.compiler.material.version &&
+      request.sceneRevision === this.sceneRevision;
+  }
+
   private startMaterialCompilation(): void {
     if (
       this.disposed ||
@@ -608,23 +650,30 @@ export class LabRenderer {
       this.currentMaterialCompileFailure() !== null
     ) return;
 
-    const materialVersion = this.compiler.material.version;
-    const sceneRevision = this.sceneRevision;
+    const request: MaterialCompileRequest = {
+      materialVersion: this.compiler.material.version,
+      sceneRevision: this.sceneRevision,
+      variant: materialProgramVariant(this.compiler.material)
+    };
     this.profiler.reset();
+    this.materialCompileStage = 'queued';
+
     let compilation: Promise<void>;
-    compilation = this.renderer.compileAsync(this.scene, this.camera)
-      .then(() => {
-        this.compiledMaterialVersion = materialVersion;
-        this.compiledSceneRevision = sceneRevision;
-        this.materialCompileFailure = null;
-      })
+    compilation = this.compileMaterial(request)
       .catch((error: unknown) => {
         const compileError = normalizeError(error, 'Asynchronous material compilation failed.');
-        this.materialCompileFailure = { materialVersion, sceneRevision, error: compileError };
+        this.materialCompileFailure = {
+          materialVersion: request.materialVersion,
+          sceneRevision: request.sceneRevision,
+          error: compileError
+        };
         console.error('Asynchronous material compilation failed.', compileError);
       })
       .finally(() => {
-        if (this.materialCompilePromise === compilation) this.materialCompilePromise = null;
+        if (this.materialCompilePromise === compilation) {
+          this.materialCompilePromise = null;
+          this.materialCompileStage = null;
+        }
         this.profiler.reset();
         if (
           !this.disposed &&
@@ -635,6 +684,67 @@ export class LabRenderer {
       });
     this.materialCompilePromise = compilation;
     this.updateBusyIndicator();
+  }
+
+  private async compileMaterial(request: Readonly<MaterialCompileRequest>): Promise<void> {
+    await nextPaint();
+    await idleTurn();
+    if (this.disposed || !this.isCompileRequestCurrent(request)) return;
+
+    this.materialCompileStage = 'compiling';
+    this.updateBusyIndicator();
+    await nextPaint();
+    if (this.disposed || !this.isCompileRequestCurrent(request)) return;
+
+    await this.renderer.compileAsync(this.scene, this.camera);
+    if (this.disposed) return;
+
+    this.compiledMaterialVersion = request.materialVersion;
+    this.compiledSceneRevision = request.sceneRevision;
+    this.materialCompileFailure = null;
+    if (!this.isCompileRequestCurrent(request)) return;
+
+    this.materialCompileStage = 'retaining';
+    this.updateBusyIndicator();
+    try {
+      await this.retainMaterialProgram(request);
+    } catch (error) {
+      console.warn('Material shader cache retention failed.', error);
+    }
+  }
+
+  private async retainMaterialProgram(request: Readonly<MaterialCompileRequest>): Promise<void> {
+    if (
+      this.disposed ||
+      request.sceneRevision !== this.sceneRevision ||
+      this.materialProgramKeepers.has(request.variant.key)
+    ) return;
+
+    const target = this.currentRoot instanceof THREE.Mesh && this.currentRoot.material === this.compiler.material
+      ? this.currentRoot
+      : [...this.meshById.values()].find((mesh) => mesh.material === this.compiler.material) ?? null;
+    if (target === null) return;
+
+    const keeper = new MaterialCompiler();
+    keeper.material.sheen = request.variant.sheen ? 1 : 0;
+    keeper.material.transmission = request.variant.transmission ? 1 : 0;
+    const originalMaterial = target.material;
+    let retained = false;
+
+    try {
+      target.material = keeper.material;
+      await this.renderer.compileAsync(this.scene, this.camera);
+      if (
+        this.disposed ||
+        request.sceneRevision !== this.sceneRevision ||
+        this.materialProgramKeepers.has(request.variant.key)
+      ) return;
+      this.materialProgramKeepers.set(request.variant.key, keeper);
+      retained = true;
+    } finally {
+      target.material = originalMaterial;
+      if (!retained) keeper.dispose();
+    }
   }
 
   private async ensureMaterialReady(): Promise<void> {
@@ -654,11 +764,19 @@ export class LabRenderer {
   }
 
   private updateBusyIndicator(): void {
-    const label = this.materialCompilePromise !== null
-      ? 'Preparing material…'
-      : this.environmentWarmupActive
-        ? 'Preparing studio lighting…'
-        : null;
+    let label: string | null = null;
+    if (this.materialCompilePromise !== null) {
+      if (this.materialCompileStage === 'queued') {
+        label = 'Preparing material · waiting for browser…';
+      } else if (this.materialCompileStage === 'retaining') {
+        label = 'Preparing material · caching shader…';
+      } else {
+        label = 'Preparing material · compiling GPU shaders…';
+      }
+    } else if (this.environmentWarmupActive) {
+      label = 'Preparing studio lighting…';
+    }
+
     this.container.classList.toggle('is-loading', label !== null);
     if (label === null) {
       this.container.removeAttribute('data-loading-label');
