@@ -391,6 +391,9 @@ export async function makeTextureSetSeamless(
   await seamTexture(textures.height, options.blendFraction);
   await seamTexture(textures.clearcoat, options.blendFraction);
   await seamTexture(textures.clearcoatRoughness, options.blendFraction);
+  await seamTexture(textures.metallic, options.blendFraction);
+  await seamTexture(textures.ao, options.blendFraction);
+  await seamTexture(textures.emissive, options.blendFraction);
 
   rebuildNormalFromHeight(
     textures.normal,

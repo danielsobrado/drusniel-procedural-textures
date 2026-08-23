@@ -8,7 +8,10 @@ export type LayerKind =
   | 'gradient'
   | 'vessels'
   | 'wet-film'
-  | 'sss';
+  | 'sss'
+  | 'reaction-diffusion'
+  | 'erosion'
+  | 'sdf';
 
 export type BlendMode =
   | 'normal'
@@ -23,7 +26,10 @@ export type LayerChannel =
   | 'roughness'
   | 'height'
   | 'clearcoat'
-  | 'sss';
+  | 'sss'
+  | 'metallic'
+  | 'ao'
+  | 'emissive';
 
 export type EnvironmentPreset =
   | 'studio'
@@ -57,8 +63,28 @@ export interface MaterialLayer {
   displacement: number;
   groupId: string | null;
   maskSourceLayerId: string | null;
+  structureSourceLayerId: string | null;
   maskInvert: boolean;
   maskStrength: number;
+}
+
+export interface SynthesisSettings {
+  age: number;
+  weathering: number;
+  gravity: number;
+  macro: number;
+  meso: number;
+  micro: number;
+  variation: number;
+  stochasticTiling: number;
+}
+
+export interface GenomeLocks {
+  color: boolean;
+  structure: boolean;
+  roughness: boolean;
+  scale: boolean;
+  damage: boolean;
 }
 
 export interface MaterialGroup {
@@ -103,6 +129,9 @@ export interface ProjectState {
   background: string;
   wireframe: boolean;
   physical: PhysicalSettings;
+  synthesis: SynthesisSettings;
+  genomeLocks: GenomeLocks;
+  graphMode: boolean;
   groups: MaterialGroup[];
   layers: MaterialLayer[];
 }
@@ -113,6 +142,7 @@ export interface MaterialPreset {
   description: string;
   tags: string[];
   physical?: Partial<PhysicalSettings>;
+  synthesis?: Partial<SynthesisSettings>;
   groups?: MaterialGroup[];
   layers: MaterialLayer[];
 }

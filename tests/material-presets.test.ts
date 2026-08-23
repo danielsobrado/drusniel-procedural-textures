@@ -14,6 +14,7 @@ const NEW_BIOLOGICAL_IDS = [
 
 const EXPECTED_CATEGORY_IDS = {
   biological: ['adipose-v8', ...NEW_BIOLOGICAL_IDS],
+  ice: ['glacial-cell-ice'],
   moss: [
     'forest-moss-carpet',
     'mossy-stone',

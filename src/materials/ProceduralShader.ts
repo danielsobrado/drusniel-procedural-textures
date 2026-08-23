@@ -31,8 +31,17 @@ uniform float uLabGroupOpacity[LAB_MAX_LAYERS];
 uniform int uLabMaskIndex[LAB_MAX_LAYERS];
 uniform float uLabMaskInvert[LAB_MAX_LAYERS];
 uniform float uLabMaskStrength[LAB_MAX_LAYERS];
+uniform int uLabStructureIndex[LAB_MAX_LAYERS];
 uniform float uLabHasDisplacement;
 uniform float uLabNormalStrength;
+uniform float uLabAge;
+uniform float uLabWeathering;
+uniform float uLabGravity;
+uniform float uLabMacro;
+uniform float uLabMeso;
+uniform float uLabMicro;
+uniform float uLabVariation;
+uniform float uLabStochasticTiling;
 
 float labHash31(vec3 p) {
   p = fract(p * 0.1031);
@@ -232,7 +241,10 @@ float labBranchingVessels(vec3 p) {
 
 float labLayerField(int kind, vec3 position, float scale, float seed) {
   vec3 seedOffset = vec3(seed * 0.71, seed * 1.17, seed * 1.91);
-  vec3 p = position * max(scale, 0.001) + seedOffset;
+  vec3 tile = floor(position * 0.5);
+  vec3 tileWarp = (labHash33(tile + seedOffset) - 0.5) * uLabStochasticTiling;
+  vec3 domain = position + tileWarp;
+  vec3 p = domain * max(scale, 0.001) + seedOffset;
 
   if (kind == 0) return 0.5;
   if (kind == 1) return labFbm(p);
@@ -249,8 +261,43 @@ float labLayerField(int kind, vec3 position, float scale, float seed) {
     float wet = labFbm3(p * 0.7 + vec3(4.0, 12.0, 7.0));
     return smoothstep(0.30, 0.72, wet);
   }
-  float tissue = labFbm3(p * 0.55 + vec3(13.0, 3.0, 21.0));
-  return smoothstep(0.18, 0.82, tissue);
+  if (kind == 9) {
+    float tissue = labFbm3(p * 0.55 + vec3(13.0, 3.0, 21.0));
+    return smoothstep(0.18, 0.82, tissue);
+  }
+  if (kind == 10) {
+    vec3 q = p + (labFbm3(p * 0.21) - 0.5) * 2.1;
+    float activator = sin(q.x * 1.7 + sin(q.y * 1.3)) * cos(q.z * 1.1 - q.y * 0.7);
+    float inhibitor = labFbm3(q * 0.38 + 19.0);
+    return smoothstep(-0.28, 0.38, activator * 0.62 + inhibitor - 0.5);
+  }
+  if (kind == 11) {
+    float terrain = labFbm3(p * 0.31);
+    float talus = 1.0 - abs(labFbm3(p * 0.82 + 7.0) * 2.0 - 1.0);
+    float sediment = smoothstep(0.18, 0.72, terrain - talus * 0.31 + domain.y * uLabGravity * 0.08);
+    return mix(terrain, sediment, 0.72);
+  }
+  vec3 cell = fract(p) - 0.5;
+  float sphere = length(cell) - 0.31;
+  float box = length(max(abs(cell) - vec3(0.25), 0.0)) - 0.055;
+  float sdf = mix(sphere, box, labHash31(floor(p)));
+  return 1.0 - smoothstep(-0.06, 0.18, sdf);
+}
+
+float labFieldForLayer(int layerIndex, vec3 position) {
+  int fieldIndex = layerIndex;
+  for (int depth = 0; depth < LAB_MAX_LAYERS; depth++) {
+    int sourceIndex = uLabStructureIndex[fieldIndex];
+    if (sourceIndex < 0 || sourceIndex >= uLabCount) break;
+    fieldIndex = sourceIndex;
+  }
+  float mesoField = labLayerField(
+    uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0
+  );
+  vec3 seedOffset = vec3(uLabSeed[fieldIndex] * 0.71, uLabSeed[fieldIndex] * 1.17, uLabSeed[fieldIndex] * 1.91);
+  float macroField = labNoise3(position * uLabScale[fieldIndex] * max(uLabMacro, 0.1) * 0.24 + seedOffset);
+  float microField = labNoise3(position * uLabScale[fieldIndex] * max(uLabMicro, 0.1) * 4.7 + seedOffset + 41.0);
+  return clamp(mix(mesoField, macroField, 0.24 + uLabVariation * 0.22) + (microField - 0.5) * 0.16, 0.0, 1.0);
 }
 
 float labShapeField(float field, float strength) {
@@ -278,12 +325,7 @@ float labDisplacementGainForKind(int kind) {
 float labMaskForLayer(int layerIndex, vec3 position) {
   int maskIndex = uLabMaskIndex[layerIndex];
   if (maskIndex < 0 || maskIndex >= uLabCount) return 1.0;
-  float field = labLayerField(
-    uLabLayerKind[maskIndex],
-    position,
-    uLabScale[maskIndex],
-    uLabSeed[maskIndex]
-  );
+  float field = labFieldForLayer(maskIndex, position);
   float shaped = labShapeField(field, uLabStrength[maskIndex]);
   if (uLabMaskInvert[layerIndex] > 0.5) shaped = 1.0 - shaped;
   return mix(1.0, shaped, clamp(uLabMaskStrength[layerIndex], 0.0, 1.0));
@@ -315,7 +357,7 @@ float labEvaluateDisplacement(vec3 position) {
     float opacityBase = labEffectiveOpacity(i, position);
     if (opacityBase <= 0.000001) continue;
     int kind = uLabLayerKind[i];
-    float field = labLayerField(kind, position, uLabScale[i], uLabSeed[i]);
+    float field = labFieldForLayer(i, position);
     float shaped = labShapeField(field, uLabStrength[i]);
     float coverage = labLayerCoverage(kind, shaped);
     displacement +=
@@ -342,6 +384,9 @@ struct LabSurface {
   float clearcoatRoughness;
   float sss;
   vec3 sssColor;
+  float metallic;
+  float ao;
+  vec3 emissive;
   float displacement;
 };
 
@@ -369,6 +414,9 @@ LabSurface labEvaluateSurface(vec3 position) {
   surface.clearcoatRoughness = 0.18;
   surface.sss = 0.0;
   surface.sssColor = vec3(0.0);
+  surface.metallic = 0.0;
+  surface.ao = 1.0;
+  surface.emissive = vec3(0.0);
   surface.displacement = 0.0;
 
   for (int i = 0; i < LAB_MAX_LAYERS; i++) {
@@ -380,7 +428,7 @@ LabSurface labEvaluateSurface(vec3 position) {
 
     int kind = uLabLayerKind[i];
     int channel = uLabChannel[i];
-    float field = labLayerField(kind, position, uLabScale[i], uLabSeed[i]);
+    float field = labFieldForLayer(i, position);
     float shaped = labShapeField(field, uLabStrength[i]);
     float coverage = labLayerCoverage(kind, shaped);
     float opacity = clamp(opacityBase * coverage, 0.0, 1.0);
@@ -420,7 +468,16 @@ LabSurface labEvaluateSurface(vec3 position) {
       surface.sssColor += layerColor * scatter;
       surface.sss += scatter;
     }
+    if (channel == 6) surface.metallic = mix(surface.metallic, shaped, opacity);
+    if (channel == 7) surface.ao *= mix(1.0, mix(0.35, 1.0, shaped), opacity);
+    if (channel == 8) surface.emissive += layerColor * shaped * opacity;
   }
+
+  float ageMask = clamp(uLabAge * uLabWeathering, 0.0, 1.0);
+  float gravityStain = smoothstep(0.25, 0.82, labFbm3(position * 0.43 + vec3(0.0, uLabGravity * 7.0, 0.0)));
+  surface.color *= mix(1.0, 0.62 + gravityStain * 0.18, ageMask);
+  surface.roughness += ageMask * mix(0.03, 0.18, gravityStain);
+  surface.ao *= 1.0 - ageMask * (1.0 - gravityStain) * 0.22;
 
   if (surface.sss > 0.0001) surface.sssColor /= surface.sss;
   surface.sss = clamp(surface.sss, 0.0, 1.0);

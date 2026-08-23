@@ -11,7 +11,7 @@ describe('nonblocking renderer warmup', () => {
   it('does not generate the studio PMREM synchronously in the environment constructor', () => {
     const constructorBody = environmentSource.match(/public constructor\([^]*?\n  }/)?.[0] ?? '';
     expect(constructorBody).not.toContain('fromScene');
-    expect(environmentSource).toContain('public prepareStudio(): void');
+    expect(environmentSource).toContain('public async prepareStudio(): Promise<void>');
   });
 
   it('uses asynchronous shader compilation without treating failures as compiled programs', () => {

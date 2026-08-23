@@ -85,7 +85,10 @@ export function combinePbrTextureSets(
     roughness: atlasTexture(sets, layout, (set) => set.roughness),
     normal: atlasTexture(sets, layout, (set) => set.normal),
     clearcoat: atlasTexture(sets, layout, (set) => set.clearcoat),
-    clearcoatRoughness: atlasTexture(sets, layout, (set) => set.clearcoatRoughness)
+    clearcoatRoughness: atlasTexture(sets, layout, (set) => set.clearcoatRoughness),
+    metallic: atlasTexture(sets, layout, (set) => set.metallic),
+    ao: atlasTexture(sets, layout, (set) => set.ao),
+    emissive: atlasTexture(sets, layout, (set) => set.emissive)
   };
 }
 
@@ -166,8 +169,7 @@ export function applyStaticDisplacement(
   const worldLinear = new THREE.Matrix3().setFromMatrix4(matrixWorld);
   const inverseWorldLinear = worldLinear.clone().invert();
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrixWorld);
-  const determinant = worldLinear.determinant();
-  if (Math.abs(determinant) < 1e-10) {
+  if (Math.abs(worldLinear.determinant()) < 1e-10) {
     geometry.dispose();
     throw new Error('Cannot bake displacement into geometry with a singular world transform.');
   }
@@ -180,7 +182,6 @@ export function applyStaticDisplacement(
     if (Math.abs(authoredHeight) <= 1e-8) continue;
     localNormal.fromBufferAttribute(normal, index);
     worldNormal.copy(localNormal).applyMatrix3(normalMatrix).normalize();
-    if (determinant < 0) worldNormal.negate();
     localOffset.copy(worldNormal).multiplyScalar(authoredHeight).applyMatrix3(inverseWorldLinear);
     position.setXYZ(
       index,
@@ -192,6 +193,7 @@ export function applyStaticDisplacement(
 
   position.needsUpdate = true;
   geometry.computeVertexNormals();
+  geometry.deleteAttribute('tangent');
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
   return geometry;

@@ -71,6 +71,7 @@ export class Shell {
             <button class="compact-button" data-command="import-model">Import mesh</button>
             <button class="compact-button" data-command="open-project">Open</button>
             <button class="compact-button" data-command="save-project">Save</button>
+            <button class="compact-button" data-command="export-material" title="Export a portable runtime material recipe">Export PTL</button>
             <span class="toolbar-divider phase3-divider" aria-hidden="true"></span>
             <button class="compact-button phase3-command" data-command="bake-textures" title="Bake PBR texture maps">Bake maps</button>
             <button class="compact-button phase3-command" data-command="export-glb" title="Bake material and export binary glTF">Export GLB</button>

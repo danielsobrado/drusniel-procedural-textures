@@ -161,6 +161,9 @@ export function assertProductionExport(json) {
   if (pbr?.baseColorTexture === undefined || pbr?.metallicRoughnessTexture === undefined || material.normalTexture === undefined) {
     throw new Error('Shared atlas is missing required baked PBR texture bindings.');
   }
+  if (material.occlusionTexture === undefined || material.emissiveTexture === undefined) {
+    throw new Error('Shared atlas is missing baked AO or emissive texture bindings.');
+  }
   const clearcoat = material.extensions?.KHR_materials_clearcoat;
   if (clearcoat?.clearcoatTexture === undefined || clearcoat.clearcoatRoughnessTexture === undefined) {
     throw new Error('Shared atlas is missing baked clearcoat texture bindings.');

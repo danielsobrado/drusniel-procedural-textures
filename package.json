@@ -1,20 +1,29 @@
 {
   "name": "procedural-texture-lab",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./runtime": {
+      "types": "./dist-runtime/types/runtime/index.d.ts",
+      "import": "./dist-runtime/index.js"
+    }
+  },
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && npm run build:runtime",
+    "build:runtime": "tsc --noEmit && vite build --config vite.runtime.config.ts && tsc -p tsconfig.runtime.json",
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
     "test:production-export": "node scripts/production-export-smoke.mjs",
     "test:cross-browser": "node scripts/cross-browser-smoke.mjs",
+    "test:runtime-package": "npm run build:runtime && node scripts/runtime-consumer-smoke.mjs",
     "test:visual": "npm run build && node scripts/visual-suite.mjs",
     "test:qa": "npm run test:unit && npm run build && node scripts/capture-qa.mjs",
     "qa:capture": "npm run test:unit && npm run build && node scripts/capture-qa.mjs",
+    "ci": "npm run test:unit && npm run build && node scripts/runtime-consumer-smoke.mjs",
     "deploy": "node scripts/publish-gh-pages.mjs",
     "publish:gh": "node scripts/publish-gh-pages.mjs"
   },

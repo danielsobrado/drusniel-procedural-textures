@@ -1,5 +1,18 @@
-import type * as THREE from 'three';
 import type { FixedQualityTier, PerformanceStats, QualityTier } from './Quality';
+
+interface RendererStatsSource {
+  info: {
+    render: {
+      calls: number;
+      drawCalls?: number;
+      triangles: number;
+    };
+    memory: {
+      geometries: number;
+      textures: number;
+    };
+  };
+}
 
 export class PerformanceProfiler {
   private windowStart = performance.now();
@@ -17,7 +30,7 @@ export class PerformanceProfiler {
   }
 
   public sample(
-    renderer: THREE.WebGLRenderer,
+    renderer: RendererStatsSource,
     requestedTier: QualityTier,
     activeTier: FixedQualityTier
   ): PerformanceStats | null {
@@ -28,14 +41,12 @@ export class PerformanceProfiler {
     this.frameTimeTotal += frameTime;
 
     const elapsed = now - this.windowStart;
-    if (elapsed < this.sampleIntervalMs) {
-      return null;
-    }
+    if (elapsed < this.sampleIntervalMs) return null;
 
     const stats: PerformanceStats = {
       fps: elapsed > 0 ? this.frameCount * 1000 / elapsed : 0,
       frameMs: this.frameCount > 0 ? this.frameTimeTotal / this.frameCount : 0,
-      drawCalls: renderer.info.render.calls,
+      drawCalls: renderer.info.render.drawCalls ?? renderer.info.render.calls,
       triangles: renderer.info.render.triangles,
       geometries: renderer.info.memory.geometries,
       textures: renderer.info.memory.textures,

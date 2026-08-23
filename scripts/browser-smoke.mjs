@@ -25,10 +25,13 @@ const EXPECTED_MAP_SUFFIXES = [
   '-normal.png',
   '-height.png',
   '-clearcoat.png',
-  '-clearcoat-roughness.png'
+  '-clearcoat-roughness.png',
+  '-metallic.png',
+  '-ao.png',
+  '-emissive.png'
 ];
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
-const FATAL_CONSOLE_PATTERN = /shader error|validate_status false|error:\s*0:|webglprogram.*error|uncaught|unhandled/i;
+const FATAL_CONSOLE_PATTERN = /shader error|validate_status false|error:\s*0:|webglprogram.*error|webgpu.*(?:error|validation)|uncaught|unhandled/i;
 const CHROME_CANDIDATES = [
   process.env.CHROME_BIN,
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -249,18 +252,28 @@ async function waitForApp(client) {
   })()`), START_TIMEOUT_MS, 'application canvas');
 }
 
-async function assertWebGl(client) {
+async function assertRendererBackend(client) {
   const renderer = await evaluate(client, `(() => {
     const canvas = document.querySelector('canvas.lab-canvas');
     if (!(canvas instanceof HTMLCanvasElement)) return null;
+    if ('gpu' in navigator) {
+      const gpu = canvas.getContext('webgpu');
+      if (gpu !== null) return { backend: 'WebGPU', renderer: 'WebGPU canvas context' };
+    }
     const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
     if (gl === null) return null;
-    return gl.getParameter(gl.RENDERER);
+    return { backend: 'WebGL', renderer: String(gl.getParameter(gl.RENDERER) ?? '') };
   })()`);
-  if (typeof renderer !== 'string' || renderer.length === 0) {
-    throw new Error('WebGL context was not available in the browser smoke suite.');
+  if (
+    renderer === null ||
+    typeof renderer.backend !== 'string' ||
+    renderer.backend.length === 0 ||
+    typeof renderer.renderer !== 'string' ||
+    renderer.renderer.length === 0
+  ) {
+    throw new Error('Neither WebGPU nor WebGL context was available in the browser smoke suite.');
   }
-  console.log(`WebGL renderer: ${renderer}`);
+  console.log(`${renderer.backend} renderer: ${renderer.renderer}`);
 }
 
 async function exerciseBake(client) {
@@ -277,7 +290,7 @@ async function exerciseBake(client) {
 
   await waitFor(async () => evaluate(client, `(() => {
     const toast = document.querySelector('[data-role="toast"]');
-    return typeof toast?.textContent === 'string' && toast.textContent.startsWith('Baked 6 maps at ');
+    return typeof toast?.textContent === 'string' && toast.textContent.startsWith('Baked 9 maps at ');
   })()`), BAKE_TIMEOUT_MS, 'GPU texture bake');
 }
 
@@ -454,17 +467,17 @@ async function main() {
     await client.command('Page.navigate', { url: pageUrl });
 
     await waitForApp(client);
-    await assertWebGl(client);
+    await assertRendererBackend(client);
     await exerciseBake(client);
     await verifyBakedMaps(downloadDir, config.bakeResolution);
     await exerciseGlbRoundtrip(client, fixturePath, downloadDir, config.glbFileName);
     await delay(500);
 
     if (failures.length > 0) {
-      throw new Error(`Browser/WebGL smoke failures:\n${[...new Set(failures)].join('\n')}`);
+      throw new Error(`Browser renderer smoke failures:\n${[...new Set(failures)].join('\n')}`);
     }
     console.log(
-      `Browser/WebGL smoke suite passed with six aligned ${config.bakeResolution}x${config.bakeResolution} maps and a reloadable GLB.`
+      `Browser renderer smoke suite passed with nine aligned ${config.bakeResolution}x${config.bakeResolution} maps and a reloadable GLB.`
     );
   } finally {
     client?.close();

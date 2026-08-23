@@ -94,6 +94,16 @@ async function main() {
     await page.reload({ waitUntil: 'domcontentloaded' });
     await waitForViewportReady(page);
 
+    console.log('0. Testing V0.2 synthesis graph and WebGPU fallback selection...');
+    await (await required(page.locator('[data-preset="weathered-geological-strata"]'), 'V0.2 geological preset')).click();
+    await waitForViewportReady(page);
+    await (await required(page.locator('[data-synthesis-action="graphMode"]'), 'advanced graph toggle')).check();
+    const graphNodes = await page.locator('.material-graph .graph-node').count();
+    if (graphNodes < 2) throw new Error('Advanced material graph did not render its compiled nodes.');
+    const backend = await page.locator('[data-role="viewport"]').getAttribute('data-compute-backend');
+    if (backend !== 'webgpu' && backend !== 'webgl-fallback') throw new Error(`Unexpected compute backend: ${backend}`);
+    await saveScreenshot(page, outputDir, 'v02-geological-graph.png');
+
     console.log('1. Testing Storm Marble on Rounded...');
     await (await required(page.locator('[data-preset="storm-marble"]'), 'Storm Marble preset')).click();
     await (await required(page.locator('[data-object="rounded-cube"]'), 'Rounded preview object')).click();

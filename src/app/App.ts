@@ -26,9 +26,9 @@ import { makeTextureSetSeamless } from '../export/SeamlessTexture';
 import { TileMaterialBaker } from '../export/TileMaterialBaker';
 import type { BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
 import { MATERIAL_PRESETS } from '../materials/presets';
 import type { EnvironmentPreset, LayerKind, ProjectState } from '../materials/types';
+import { serializeMaterialRecipe } from '../runtime/MaterialRecipe';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
 import { LibraryPanel } from '../ui/LibraryPanel';
@@ -164,6 +164,10 @@ export class App {
       onBackground: (color) => this.runSafely(() => this.state.setBackground(color)),
       onWireframe: (enabled) => this.runSafely(() => this.state.setWireframe(enabled)),
       onPhysical: (patch) => this.runSafely(() => this.state.setPhysical(patch)),
+      onSynthesis: (patch) => this.runSafely(() => this.state.setSynthesis(patch)),
+      onGenomeLock: (key, enabled) => this.runSafely(() => this.state.setGenomeLock(key, enabled)),
+      onMutate: (variant) => this.runSafely(() => this.state.mutateMaterialVariant(variant)),
+      onGraphMode: (enabled) => this.state.setGraphMode(enabled),
       onEnvironment: (environment) => this.selectEnvironment(environment),
       onEnvironmentImport: () => this.shell.elements.environmentInput.click(),
       onMeshSelect: (id) => this.state.selectMesh(id),
@@ -191,6 +195,7 @@ export class App {
     this.bindViewportGestures();
     this.bindKeyboard();
     this.syncAll(this.state.snapshot);
+    void this.initializeCompute();
     this.schedulePresetThumbnails();
   }
 
@@ -199,17 +204,17 @@ export class App {
       this.environmentLoadSequence += 1;
     }
 
-    if (reason === 'layers' || reason === 'groups' || reason === 'project') {
+    if (reason === 'layers' || reason === 'groups' || reason === 'synthesis' || reason === 'project') {
       this.syncMaterial(state);
     } else if (reason === 'wireframe') {
-      this.compiler.sync(state.layers, state.groups, state.wireframe);
+      this.compiler.sync(state.layers, state.groups, state.wireframe, state.synthesis);
     } else if (reason === 'physical') {
-      applyPhysicalSettings(this.compiler.material, state.physical);
+      this.compiler.applyPhysical(state.physical);
     }
 
     if (
       reason === 'layers' || reason === 'groups' || reason === 'selection' ||
-      reason === 'mesh' || reason === 'environment' || reason === 'project'
+      reason === 'mesh' || reason === 'environment' || reason === 'synthesis' || reason === 'project'
     ) {
       this.layers.render(state);
       this.inspector.render(state);
@@ -229,7 +234,7 @@ export class App {
     if (reason === 'environment' || reason === 'project') {
       this.renderer.setEnvironment(state.environment, state.environmentAssetName);
     }
-    if (reason === 'layers' || reason === 'groups' || reason === 'physical' || reason === 'project') {
+    if (reason === 'layers' || reason === 'groups' || reason === 'physical' || reason === 'synthesis' || reason === 'project') {
       this.tilePreviewRevision += 1;
       this.tilePreviewStale = true;
       this.tilePreview.markStale();
@@ -254,8 +259,8 @@ export class App {
   }
 
   private syncMaterial(state: Readonly<ProjectState>): void {
-    this.compiler.sync(state.layers, state.groups, state.wireframe);
-    applyPhysicalSettings(this.compiler.material, state.physical);
+    this.compiler.sync(state.layers, state.groups, state.wireframe, state.synthesis);
+    this.compiler.applyPhysical(state.physical);
   }
 
   private syncObject(state: Readonly<ProjectState>): void {
@@ -291,6 +296,7 @@ export class App {
     this.shell.onCommand('import-model', () => this.shell.elements.modelInput.click());
     this.shell.onCommand('open-project', () => this.shell.elements.projectInput.click());
     this.shell.onCommand('save-project', () => this.runSafely(() => this.exportProject()));
+    this.shell.onCommand('export-material', () => this.runSafely(() => this.exportMaterialRecipe()));
     this.shell.onCommand('tile-preview', () => { void this.openTilePreview(); });
     this.shell.onCommand('bake-textures', () => { void this.bakeTextures(); });
     this.shell.onCommand('export-glb', () => { void this.exportGlb(); });
@@ -551,6 +557,20 @@ export class App {
     this.shell.toast('Project JSON saved.');
   }
 
+  private async initializeCompute(): Promise<void> {
+    const status = await this.compiler.initializeCompute();
+    this.shell.elements.viewport.dataset.computeBackend = status.backend;
+    this.shell.setStatus(this.projectStatus(this.state.snapshot));
+  }
+
+  private exportMaterialRecipe(): void {
+    downloadText(
+      'procedural-material.ptl.json',
+      serializeMaterialRecipe(this.state.snapshot)
+    );
+    this.shell.toast('Portable PTL material recipe exported.');
+  }
+
   private async saveSnapshot(): Promise<void> {
     try {
       const dataUrl = await this.renderer.capturePng();
@@ -603,7 +623,7 @@ export class App {
       const maps = await this.buildSeamlessTileSet(quality.bakeResolution);
       const stem = `${EXPORT_CONFIG.textureFileStem}-${TILE_CONFIG.fileSuffix}`;
       this.downloadTextureSet(maps, stem);
-      this.shell.toast(`Saved 6 seamless maps at ${maps.resolution}×${maps.resolution}.`);
+      this.shell.toast(`Saved 9 seamless maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Seamless texture export failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
@@ -636,6 +656,9 @@ export class App {
     downloadBlob(`${stem}-height.png`, maps.height.blob);
     downloadBlob(`${stem}-clearcoat.png`, maps.clearcoat.blob);
     downloadBlob(`${stem}-clearcoat-roughness.png`, maps.clearcoatRoughness.blob);
+    downloadBlob(`${stem}-metallic.png`, maps.metallic.blob);
+    downloadBlob(`${stem}-ao.png`, maps.ao.blob);
+    downloadBlob(`${stem}-emissive.png`, maps.emissive.blob);
   }
 
   private async bakeTextures(): Promise<void> {
@@ -645,7 +668,7 @@ export class App {
       this.shell.setStatus(`Baking PBR maps · ${quality.bakeResolution}²…`);
       const maps = await this.renderer.bakeCurrentMaterial(this.state.snapshot.physical);
       this.downloadTextureSet(maps, EXPORT_CONFIG.textureFileStem);
-      this.shell.toast(`Baked 6 maps at ${maps.resolution}×${maps.resolution}.`);
+      this.shell.toast(`Baked 9 maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Texture bake failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
@@ -720,7 +743,7 @@ export class App {
   }
 
   private projectStatus(state: Readonly<ProjectState>): string {
-    return `${state.layers.length} layers · ${state.groups.length} groups · Physical`;
+    return `${state.layers.length} layers · ${state.groups.length} groups · ${this.compiler.computeStatus.label}`;
   }
 
   private scheduleAutosave(state: Readonly<ProjectState>): void {

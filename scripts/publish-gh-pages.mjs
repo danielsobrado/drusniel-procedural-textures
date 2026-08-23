@@ -32,10 +32,8 @@ async function main() {
 
   const commit = git(root, 'git rev-parse --short HEAD');
   const remoteUrl = git(root, 'git config --get remote.origin.url');
-  console.log(`\nValidating Procedural Texture Lab from ${branch} (${commit})...\n`);
-  execSync('npm run test:unit', { cwd: root, stdio: 'inherit' });
-  console.log(`\nBuilding Procedural Texture Lab from ${branch} (${commit})...\n`);
-  execSync('npm run build', { cwd: root, stdio: 'inherit' });
+  console.log(`\nValidating and building Procedural Texture Lab from ${branch} (${commit})...\n`);
+  execSync('npm run ci', { cwd: root, stdio: 'inherit' });
   await writeFile(join(distDir, '.nojekyll'), '', 'utf8');
 
   const commitMessage = `Deploy ${commit} [${new Date().toISOString()}]`;

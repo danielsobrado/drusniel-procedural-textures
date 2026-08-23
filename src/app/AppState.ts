@@ -3,6 +3,7 @@ import {
   DEFAULT_ENVIRONMENT,
   DEFAULT_OBJECT,
   DEFAULT_PHYSICAL,
+  DEFAULT_SYNTHESIS,
   HISTORY_COALESCE_MS,
   HISTORY_LIMIT,
   LAYER_KINDS,
@@ -19,6 +20,7 @@ import {
   normalizeMaterialLayer,
   normalizeObjectPreset,
   normalizePhysicalSettings,
+  normalizeSynthesisSettings,
   normalizeProject
 } from './ProjectFile';
 import type {
@@ -26,12 +28,15 @@ import type {
   ImportedMeshTarget,
   MaterialGroup,
   MaterialLayer,
+  GenomeLocks,
   MaterialPreset,
   ObjectPreset,
   PhysicalSettings,
-  ProjectState
+  ProjectState,
+  SynthesisSettings
 } from '../materials/types';
 import { createId } from '../utils/ids';
+import { mutateGenome } from '../materials/MaterialGenome';
 
 export type StateChangeReason =
   | 'project'
@@ -43,7 +48,8 @@ export type StateChangeReason =
   | 'environment'
   | 'background'
   | 'wireframe'
-  | 'physical';
+  | 'physical'
+  | 'synthesis';
 
 export type StateListener = (
   state: Readonly<ProjectState>,
@@ -117,7 +123,10 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     gradient: 'Gradient',
     vessels: 'Branching vessels',
     'wet-film': 'Wet film',
-    sss: 'Subsurface tissue'
+    sss: 'Subsurface tissue',
+    'reaction-diffusion': 'Reaction diffusion',
+    erosion: 'Thermal erosion',
+    sdf: 'SDF structure'
   };
 
   const colors: Record<MaterialLayer['kind'], [string, string]> = {
@@ -130,7 +139,10 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     gradient: ['#20252b', '#a6b3c0'],
     vessels: ['#742a33', '#c26062'],
     'wet-film': ['#8f9aa4', '#f8fbff'],
-    sss: ['#e99b4a', '#bd3e48']
+    sss: ['#e99b4a', '#bd3e48'],
+    'reaction-diffusion': ['#142d31', '#d6a85d'],
+    erosion: ['#28231d', '#9b8462'],
+    sdf: ['#1c2737', '#b9d7ef']
   };
 
   return {
@@ -150,6 +162,7 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     displacement: kind === 'base' || kind === 'wet-film' || kind === 'sss' ? 0 : 0.025,
     groupId: null,
     maskSourceLayerId: null,
+    structureSourceLayerId: null,
     maskInvert: false,
     maskStrength: 1
   };
@@ -176,6 +189,9 @@ export function createDefaultProject(): ProjectState {
     background: DEFAULT_BACKGROUND,
     wireframe: false,
     physical: { ...DEFAULT_PHYSICAL },
+    synthesis: { ...DEFAULT_SYNTHESIS },
+    genomeLocks: { color: false, structure: false, roughness: false, scale: false, damage: false },
+    graphMode: false,
     groups: [],
     layers: [base, noise]
   };
@@ -203,7 +219,10 @@ function clonePreset(preset: MaterialPreset): Pick<ProjectState, 'groups' | 'lay
     groupId: layer.groupId === null ? null : groupIdMap.get(layer.groupId) ?? null,
     maskSourceLayerId: layer.maskSourceLayerId === null
       ? null
-      : layerIdMap.get(layer.maskSourceLayerId) ?? null
+      : layerIdMap.get(layer.maskSourceLayerId) ?? null,
+    structureSourceLayerId: layer.structureSourceLayerId === null
+      ? null
+      : layerIdMap.get(layer.structureSourceLayerId) ?? null
   }));
 
   return { groups, layers };
@@ -275,6 +294,7 @@ export class AppState {
       if (layer.maskSourceLayerId === id) {
         layer.maskSourceLayerId = null;
       }
+      if (layer.structureSourceLayerId === id) layer.structureSourceLayerId = null;
     }
     if (this.project.selectedLayerId === id) {
       this.project.selectedLayerId = this.project.layers[Math.min(index, this.project.layers.length - 1)]?.id ?? null;
@@ -401,7 +421,8 @@ export class AppState {
       groups: cloned.groups.slice(0, MAX_GROUPS),
       layers: cloned.layers.slice(0, MAX_LAYERS),
       selectedLayerId: cloned.layers.at(-1)?.id ?? null,
-      physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) }
+      physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
+      synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) }
     });
     this.commit();
     this.project = next;
@@ -520,6 +541,54 @@ export class AppState {
     this.commit(patchKey('physical', patch));
     this.project.physical = next;
     this.emit('physical');
+  }
+
+  public setSynthesis(patch: Partial<SynthesisSettings>): void {
+    const next = normalizeSynthesisSettings({ ...this.project.synthesis, ...patch });
+    if (!patchChanges(this.project.synthesis, next)) return;
+    this.commit(patchKey('synthesis', patch));
+    this.project.synthesis = next;
+    this.emit('synthesis');
+  }
+
+  public setGenomeLock(key: keyof GenomeLocks, enabled: boolean): void {
+    if (this.project.genomeLocks[key] === enabled) return;
+    this.commit();
+    this.project.genomeLocks[key] = enabled;
+    this.emit('synthesis');
+  }
+
+  public setGraphMode(enabled: boolean): void {
+    if (this.project.graphMode === enabled) return;
+    this.commit();
+    this.project.graphMode = enabled;
+    this.emit('synthesis');
+  }
+
+  public mutateMaterial(seed = Math.floor(Math.random() * 0x7fffffff)): void {
+    const genome = mutateGenome(
+      this.project.layers,
+      this.project.synthesis,
+      this.project.genomeLocks,
+      seed
+    );
+    const next = normalizeProject({ ...this.project, layers: genome.layers, synthesis: genome.synthesis });
+    this.commit();
+    this.project = next;
+    this.emit('synthesis');
+  }
+
+  public mutateMaterialVariant(variant: number): void {
+    if (!Number.isInteger(variant) || variant < 0 || variant > 5) {
+      throw new Error('Material evolution variant must be between 0 and 5.');
+    }
+    const fingerprint = JSON.stringify({ layers: this.project.layers, synthesis: this.project.synthesis });
+    let seed = 2166136261;
+    for (let index = 0; index < fingerprint.length; index += 1) {
+      seed ^= fingerprint.charCodeAt(index);
+      seed = Math.imul(seed, 16777619);
+    }
+    this.mutateMaterial((seed + Math.imul(variant + 1, 0x9e3779b1)) >>> 0);
   }
 
   public toggleWireframe(): void {

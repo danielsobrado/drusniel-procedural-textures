@@ -3,6 +3,7 @@ import {
   CONTROL_RANGES,
   DEFAULT_ENVIRONMENT,
   DEFAULT_PHYSICAL,
+  DEFAULT_SYNTHESIS,
   ENVIRONMENTS,
   LAYER_CHANNELS,
   LAYER_KINDS,
@@ -24,10 +25,13 @@ import type {
   LayerKind,
   MaterialGroup,
   MaterialLayer,
+  GenomeLocks,
   ObjectPreset,
   PhysicalSettings,
-  ProjectState
+  ProjectState,
+  SynthesisSettings
 } from '../materials/types';
+import { compileMaterialGraph, materialGraphHasCycle } from '../materials/MaterialGraph';
 
 export { MAX_GROUP_NAME_LENGTH, MAX_IMPORTED_MESHES, MAX_LAYER_NAME_LENGTH } from './constants';
 
@@ -178,6 +182,10 @@ export function normalizeMaterialLayer(value: unknown, index: number): MaterialL
     ),
     groupId: asNullableId(layer.groupId, `Layer ${index + 1} group id`),
     maskSourceLayerId: asNullableId(layer.maskSourceLayerId, `Layer ${index + 1} mask source id`),
+    structureSourceLayerId: asNullableId(
+      layer.structureSourceLayerId,
+      `Layer ${index + 1} structure source id`
+    ),
     maskInvert: layer.maskInvert === undefined
       ? false
       : asBoolean(layer.maskInvert, `Layer ${index + 1} mask invert`),
@@ -224,6 +232,36 @@ export function normalizePhysicalSettings(value: unknown): PhysicalSettings {
     thickness: number('thickness', 'Physical thickness'),
     attenuationDistance: number('attenuationDistance', 'Physical attenuation distance'),
     attenuationColor: asColor(merged.attenuationColor, 'Physical attenuation color')
+  };
+}
+
+export function normalizeSynthesisSettings(value: unknown): SynthesisSettings {
+  const input = value === undefined ? {} : asRecord(value, 'Material synthesis settings');
+  const merged = { ...DEFAULT_SYNTHESIS, ...input };
+  return {
+    age: asControlNumber(merged.age, 'Synthesis age', CONTROL_RANGES.synthesis.age),
+    weathering: asControlNumber(merged.weathering, 'Synthesis weathering', CONTROL_RANGES.synthesis.weathering),
+    gravity: asControlNumber(merged.gravity, 'Synthesis gravity', CONTROL_RANGES.synthesis.gravity),
+    macro: asControlNumber(merged.macro, 'Synthesis macro scale', CONTROL_RANGES.synthesis.macro),
+    meso: asControlNumber(merged.meso, 'Synthesis meso scale', CONTROL_RANGES.synthesis.meso),
+    micro: asControlNumber(merged.micro, 'Synthesis micro scale', CONTROL_RANGES.synthesis.micro),
+    variation: asControlNumber(merged.variation, 'Synthesis variation', CONTROL_RANGES.synthesis.variation),
+    stochasticTiling: asControlNumber(
+      merged.stochasticTiling,
+      'Synthesis stochastic tiling',
+      CONTROL_RANGES.synthesis.stochasticTiling
+    )
+  };
+}
+
+function normalizeGenomeLocks(value: unknown): GenomeLocks {
+  const input = value === undefined ? {} : asRecord(value, 'Material genome locks');
+  return {
+    color: input.color === undefined ? false : asBoolean(input.color, 'Genome color lock'),
+    structure: input.structure === undefined ? false : asBoolean(input.structure, 'Genome structure lock'),
+    roughness: input.roughness === undefined ? false : asBoolean(input.roughness, 'Genome roughness lock'),
+    scale: input.scale === undefined ? false : asBoolean(input.scale, 'Genome scale lock'),
+    damage: input.damage === undefined ? false : asBoolean(input.damage, 'Genome damage lock')
   };
 }
 
@@ -318,6 +356,17 @@ export function normalizeProject(value: unknown): ProjectState {
         throw new Error(`Layer ${layer.name} references a missing mask source.`);
       }
     }
+    if (layer.structureSourceLayerId !== null) {
+      if (layer.structureSourceLayerId === layer.id) {
+        throw new Error(`Layer ${layer.name} cannot use itself as a structure source.`);
+      }
+      if (!layerIds.has(layer.structureSourceLayerId)) {
+        throw new Error(`Layer ${layer.name} references a missing structure source.`);
+      }
+    }
+  }
+  if (materialGraphHasCycle(compileMaterialGraph(layers))) {
+    throw new Error('Project contains a cyclic material graph.');
   }
 
   const requestedSelection = project.selectedLayerId;
@@ -367,6 +416,9 @@ export function normalizeProject(value: unknown): ProjectState {
     background: normalizeBackgroundColor(project.background),
     wireframe: asBoolean(project.wireframe, 'Wireframe'),
     physical: normalizePhysicalSettings(project.physical),
+    synthesis: normalizeSynthesisSettings(project.synthesis),
+    genomeLocks: normalizeGenomeLocks(project.genomeLocks),
+    graphMode: project.graphMode === undefined ? false : asBoolean(project.graphMode, 'Graph mode'),
     groups,
     layers
   };

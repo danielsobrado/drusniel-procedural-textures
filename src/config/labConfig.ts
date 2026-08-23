@@ -7,25 +7,26 @@ import type {
   LayerChannel,
   LayerKind,
   ObjectPreset,
-  PhysicalSettings
+  PhysicalSettings,
+  SynthesisSettings
 } from '../materials/types';
 
-interface CatalogItem<T extends string> {
+export interface CatalogItem<T extends string> {
   id: T;
   label: string;
 }
 
-interface ObjectCatalogItem extends CatalogItem<ObjectPreset> {
+export interface ObjectCatalogItem extends CatalogItem<ObjectPreset> {
   glyph: string;
 }
 
-interface NumericControlRange {
+export interface NumericControlRange {
   min: number;
   max: number;
   step: number;
 }
 
-type LayerControlKey =
+export type LayerControlKey =
   | 'opacity'
   | 'scale'
   | 'strength'
@@ -34,15 +35,17 @@ type LayerControlKey =
   | 'displacement'
   | 'maskStrength';
 
-type PhysicalControlKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
+export type PhysicalControlKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
+export type SynthesisControlKey = keyof SynthesisSettings;
 
-interface ControlsConfig {
+export interface ControlsConfig {
   layer: Record<LayerControlKey, NumericControlRange>;
   group: { opacity: NumericControlRange };
   physical: Record<PhysicalControlKey, NumericControlRange>;
+  synthesis: Record<SynthesisControlKey, NumericControlRange>;
 }
 
-interface UiConfig {
+export interface UiConfig {
   longPressDelayMs: number;
   longPressMoveTolerancePx: number;
   radialClickMoveTolerancePx: number;
@@ -53,7 +56,7 @@ interface UiConfig {
   idleWorkTimeoutMs: number;
 }
 
-interface RendererConfig {
+export interface RendererConfig {
   maxPixelRatio: number;
   cameraFov: number;
   cameraNear: number;
@@ -70,7 +73,7 @@ interface RendererConfig {
   sssThicknessScale: number;
 }
 
-interface ExportConfig {
+export interface ExportConfig {
   texturePaddingPx: number;
   thumbnailSize: number;
   textureFileStem: string;
@@ -81,7 +84,7 @@ interface ExportConfig {
   minAtlasTileSize: number;
 }
 
-interface PerformanceConfig {
+export interface PerformanceConfig {
   defaultTier: QualityTier;
   autoMobileTier: FixedQualityTier;
   autoDesktopTier: FixedQualityTier;
@@ -89,7 +92,7 @@ interface PerformanceConfig {
   tiers: Record<FixedQualityTier, QualityTierSettings>;
 }
 
-interface LabConfig {
+export interface LabConfig {
   app: {
     name: string;
     storageKey: string;
@@ -115,6 +118,7 @@ interface LabConfig {
     object: ObjectPreset;
     environment: EnvironmentPreset;
     physical: PhysicalSettings;
+    synthesis: SynthesisSettings;
   };
   objects: ObjectCatalogItem[];
   layerKinds: CatalogItem<LayerKind>[];
@@ -128,9 +132,12 @@ interface LabConfig {
 
 const OBJECT_IDS: readonly ObjectPreset[] = ['sphere', 'icosphere', 'cube', 'rounded-cube', 'torus', 'plane'];
 const LAYER_KIND_IDS: readonly LayerKind[] = [
-  'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient', 'vessels', 'wet-film', 'sss'
+  'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient', 'vessels', 'wet-film', 'sss',
+  'reaction-diffusion', 'erosion', 'sdf'
 ];
-const CHANNEL_IDS: readonly LayerChannel[] = ['surface', 'color', 'roughness', 'height', 'clearcoat', 'sss'];
+const CHANNEL_IDS: readonly LayerChannel[] = [
+  'surface', 'color', 'roughness', 'height', 'clearcoat', 'sss', 'metallic', 'ao', 'emissive'
+];
 const ENVIRONMENT_IDS: readonly EnvironmentPreset[] = ['studio', 'warm', 'cool', 'night', 'custom'];
 const BLEND_MODE_IDS: readonly BlendMode[] = ['normal', 'multiply', 'add', 'screen', 'overlay'];
 const FIXED_QUALITY_TIER_IDS: readonly FixedQualityTier[] = ['mobile', 'balanced', 'high', 'ultra'];
@@ -140,6 +147,9 @@ const LAYER_CONTROL_KEYS: readonly LayerControlKey[] = [
 const PHYSICAL_CONTROL_KEYS: readonly PhysicalControlKey[] = [
   'roughness', 'metalness', 'clearcoat', 'clearcoatRoughness', 'specularIntensity',
   'ior', 'sheen', 'sheenRoughness', 'transmission', 'thickness', 'attenuationDistance'
+];
+const SYNTHESIS_CONTROL_KEYS: readonly SynthesisControlKey[] = [
+  'age', 'weathering', 'gravity', 'macro', 'meso', 'micro', 'variation', 'stochasticTiling'
 ];
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SAFE_FILENAME = /^[a-z0-9][a-z0-9._-]*$/i;
@@ -253,7 +263,8 @@ function parseControls(value: unknown): ControlsConfig {
   return {
     layer: parseControlGroup(controls.layer, LAYER_CONTROL_KEYS, 'controls.layer'),
     group: parseControlGroup(controls.group, ['opacity'] as const, 'controls.group'),
-    physical: parseControlGroup(controls.physical, PHYSICAL_CONTROL_KEYS, 'controls.physical')
+    physical: parseControlGroup(controls.physical, PHYSICAL_CONTROL_KEYS, 'controls.physical'),
+    synthesis: parseControlGroup(controls.synthesis, SYNTHESIS_CONTROL_KEYS, 'controls.synthesis')
   };
 }
 
@@ -315,6 +326,15 @@ function parsePhysical(value: unknown, ranges: ControlsConfig['physical']): Phys
     attenuationDistance: number('attenuationDistance'),
     attenuationColor: asColor(physical.attenuationColor, 'defaults.physical.attenuationColor')
   };
+}
+
+function parseSynthesis(value: unknown, ranges: ControlsConfig['synthesis']): SynthesisSettings {
+  const synthesis = asRecord(value, 'defaults.synthesis');
+  const result = {} as SynthesisSettings;
+  for (const key of SYNTHESIS_CONTROL_KEYS) {
+    result[key] = asNumber(synthesis[key], `defaults.synthesis.${key}`, ranges[key].min, ranges[key].max);
+  }
+  return result;
 }
 
 function parseUi(value: unknown): UiConfig {
@@ -453,7 +473,8 @@ function parseConfig(value: unknown): LabConfig {
       background: asColor(defaults.background, 'defaults.background'),
       object: defaultObject,
       environment: defaultEnvironment,
-      physical: parsePhysical(defaults.physical, controls.physical)
+      physical: parsePhysical(defaults.physical, controls.physical),
+      synthesis: parseSynthesis(defaults.synthesis, controls.synthesis)
     },
     objects,
     layerKinds,

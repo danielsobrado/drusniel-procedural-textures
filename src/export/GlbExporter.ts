@@ -112,7 +112,19 @@ function createBakedMaterial(
       resources,
       mipmaps
     ),
-    metalness: settings.metalness,
+    metalness: 1,
+    metalnessMap: canvasTexture(
+      maps.metallic.canvas,
+      `${name} metallic`,
+      THREE.NoColorSpace,
+      resources,
+      mipmaps
+    ),
+    aoMap: canvasTexture(maps.ao.canvas, `${name} ambient occlusion`, THREE.NoColorSpace, resources, mipmaps),
+    aoMapIntensity: 1,
+    emissive: 0xffffff,
+    emissiveMap: canvasTexture(maps.emissive.canvas, `${name} emissive`, THREE.SRGBColorSpace, resources, mipmaps),
+    emissiveIntensity: 1,
     normalMap: canvasTexture(maps.normal.canvas, `${name} normal`, THREE.NoColorSpace, resources, mipmaps),
     clearcoat: 1,
     clearcoatMap: canvasTexture(
@@ -166,6 +178,7 @@ export class GlbExporter {
     const sourceMeshes = collectMeshes(sourceRoot);
     if (sourceMeshes.length === 0) throw new Error('There is no mesh geometry to export.');
 
+    await this.compiler.ensureSimulationReady();
     const physical = structuredClone(settings);
     const animations = sourceRoot.animations.map((clip) => clip.clone());
     const displacementExtent = this.compiler.displacementExtent;
@@ -173,7 +186,7 @@ export class GlbExporter {
     const meshSnapshots: ExportMeshSnapshot[] = [];
     try {
       for (const source of sourceMeshes) {
-        const assigned = source.material === this.compiler.material;
+        const assigned = this.compiler.isProceduralMaterial(source.material);
         meshSnapshots.push({ assigned, bake: assigned ? this.baker.snapshotMesh(source) : null });
       }
     } catch (error) {

@@ -669,6 +669,80 @@ summary:focus-visible {
   color: var(--subtle);
 }
 
+.synthesis-actions {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0 6px;
+}
+
+.population-label {
+  color: var(--muted);
+  font-size: 7px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.mutation-population {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.mutation-population button {
+  min-width: 0;
+  padding-inline: 0;
+}
+
+.graph-toggle {
+  min-height: 26px;
+}
+
+.genome-locks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.genome-locks label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 7px;
+}
+
+.material-graph {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: rgba(4, 7, 12, 0.25);
+}
+
+.graph-node {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-left: 2px solid #7687e8;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.graph-node-output { border-left-color: #78d5a1; }
+.graph-node-structure { border-left-color: #d8ad67; }
+.graph-node strong { overflow: hidden; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.graph-node small, .graph-summary { color: var(--subtle); font-size: 6px; text-transform: uppercase; }
+.graph-summary { grid-column: 1 / -1; padding-top: 3px; }
+
 .compact-field {
   margin-top: 7px;
 }

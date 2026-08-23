@@ -49,9 +49,12 @@ describe('bake UV validation', () => {
       0, 0, 1.2, 0, 0, 1,
       0, 0, 1.2, 0, 0, 1
     ]);
+    source.setAttribute('tangent', new THREE.Float32BufferAttribute(new Array(24).fill(0), 4));
     const first = createTriangleAtlas(source);
     const second = createTriangleAtlas(source);
     expect(Array.from(first.getAttribute('uv').array)).toEqual(Array.from(second.getAttribute('uv').array));
+    expect(first.getAttribute('tangent')).toBeUndefined();
+    expect(second.getAttribute('tangent')).toBeUndefined();
     expect(() => validateBakeUv(first, 'atlas')).not.toThrow();
     source.dispose();
     first.dispose();

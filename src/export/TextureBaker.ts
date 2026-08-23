@@ -10,7 +10,10 @@ export type BakeChannel =
   | 'normal'
   | 'height'
   | 'clearcoat'
-  | 'clearcoat-roughness';
+  | 'clearcoat-roughness'
+  | 'metallic'
+  | 'ao'
+  | 'emissive';
 
 export interface BakedTexture {
   canvas: HTMLCanvasElement;
@@ -24,6 +27,9 @@ export interface BakedPbrTextureSet {
   normal: BakedTexture;
   clearcoat: BakedTexture;
   clearcoatRoughness: BakedTexture;
+  metallic: BakedTexture;
+  ao: BakedTexture;
+  emissive: BakedTexture;
 }
 
 export interface BakedTextureSet extends BakedPbrTextureSet {
@@ -50,7 +56,10 @@ const CHANNEL_MODE: Record<BakeChannel, number> = {
   normal: 2,
   height: 3,
   clearcoat: 4,
-  'clearcoat-roughness': 5
+  'clearcoat-roughness': 5,
+  metallic: 6,
+  ao: 7,
+  emissive: 8
 };
 
 function hasMorphTargets(mesh: THREE.Mesh): boolean {
@@ -203,6 +212,7 @@ export class TextureBaker {
     settings: Readonly<PhysicalSettings>,
     resolution: number
   ): Promise<BakedTextureSet> {
+    await this.compiler.ensureSimulationReady();
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
@@ -218,6 +228,7 @@ export class TextureBaker {
     settings: Readonly<PhysicalSettings>,
     resolution: number
   ): Promise<BakedPbrTextureSet> {
+    await this.compiler.ensureSimulationReady();
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
@@ -267,6 +278,7 @@ export class TextureBaker {
     const context = this.createContext(snapshot, material, resolution);
     const uniforms = material.uniforms;
     if (uniforms.uBakeBaseRoughness !== undefined) uniforms.uBakeBaseRoughness.value = settings.roughness;
+    if (uniforms.uBakeBaseMetalness !== undefined) uniforms.uBakeBaseMetalness.value = settings.metalness;
     if (uniforms.uBakeBaseClearcoat !== undefined) uniforms.uBakeBaseClearcoat.value = settings.clearcoat;
     if (uniforms.uBakeBaseClearcoatRoughness !== undefined) {
       uniforms.uBakeBaseClearcoatRoughness.value = settings.clearcoatRoughness;
@@ -279,7 +291,10 @@ export class TextureBaker {
       const normal = await this.renderChannel(context, material, 'normal', resolution);
       const clearcoat = await this.renderChannel(context, material, 'clearcoat', resolution);
       const clearcoatRoughness = await this.renderChannel(context, material, 'clearcoat-roughness', resolution);
-      return { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness };
+      const metallic = await this.renderChannel(context, material, 'metallic', resolution);
+      const ao = await this.renderChannel(context, material, 'ao', resolution);
+      const emissive = await this.renderChannel(context, material, 'emissive', resolution);
+      return { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness, metallic, ao, emissive };
     } finally {
       this.disposeContext(context);
     }

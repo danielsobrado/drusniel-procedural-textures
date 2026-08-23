@@ -68,4 +68,15 @@ describe('app state history', () => {
     expect(state.redo()).toBe(true);
     expect(state.snapshot.layers).toHaveLength(before + 1);
   });
+
+  it('undoes and redoes persisted graph mode changes', () => {
+    const state = new AppState(createDefaultProject());
+    expect(state.snapshot.graphMode).toBe(false);
+    state.setGraphMode(true);
+    expect(state.snapshot.graphMode).toBe(true);
+    expect(state.undo()).toBe(true);
+    expect(state.snapshot.graphMode).toBe(false);
+    expect(state.redo()).toBe(true);
+    expect(state.snapshot.graphMode).toBe(true);
+  });
 });

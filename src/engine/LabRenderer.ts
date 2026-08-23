@@ -1,5 +1,6 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { WebGLRenderer } from 'three';
 import {
   DEFAULT_BACKGROUND,
   DEFAULT_ENVIRONMENT,
@@ -78,6 +79,14 @@ function normalizeError(error: unknown, fallback: string): Error {
   return new Error(fallback, { cause: error });
 }
 
+function requireHtmlCanvas(renderer: THREE.WebGPURenderer): HTMLCanvasElement {
+  const canvas = renderer.domElement;
+  if (!(canvas instanceof HTMLCanvasElement)) {
+    throw new Error('Procedural Texture Lab requires an HTML canvas renderer target.');
+  }
+  return canvas;
+}
+
 export class LabRenderer {
   public readonly canvas: HTMLCanvasElement;
 
@@ -89,7 +98,9 @@ export class LabRenderer {
     RENDERER_CONFIG.cameraNear,
     RENDERER_CONFIG.cameraFar
   );
-  private readonly renderer: THREE.WebGLRenderer;
+  private readonly renderer: THREE.WebGPURenderer;
+  private readonly bakeRenderer: WebGLRenderer;
+  private readonly rendererReady: Promise<void>;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly compiler: MaterialCompiler;
@@ -120,6 +131,7 @@ export class LabRenderer {
   private currentEnvironmentName: string | null = null;
   private materialCompilePromise: Promise<void> | null = null;
   private materialCompileFailure: MaterialCompileFailure | null = null;
+  private rendererInitializationError: Error | null = null;
   private environmentWarmupFrame: number | null = null;
   private environmentWarmupActive = false;
   private compiledMaterialVersion = -1;
@@ -131,12 +143,17 @@ export class LabRenderer {
   public constructor(container: HTMLElement, compiler: MaterialCompiler) {
     this.container = container;
     this.compiler = compiler;
-    this.renderer = new THREE.WebGLRenderer({
+    this.renderer = new THREE.WebGPURenderer({
       antialias: true,
       alpha: false,
       powerPreference: 'high-performance'
     });
-    this.canvas = this.renderer.domElement;
+    this.bakeRenderer = new WebGLRenderer({
+      antialias: false,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
+    this.canvas = requireHtmlCanvas(this.renderer);
     this.canvas.className = 'lab-canvas';
     container.append(this.canvas);
 
@@ -145,10 +162,13 @@ export class LabRenderer {
     this.renderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
+    this.bakeRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.bakeRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.bakeRenderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
     this.scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 
     this.environments = new EnvironmentLibrary(this.renderer);
-    this.baker = new TextureBaker(this.renderer, this.compiler);
+    this.baker = new TextureBaker(this.bakeRenderer, this.compiler);
     this.glbExporter = new GlbExporter(this.baker, this.compiler);
     this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls = new OrbitControls(this.camera, this.canvas);
@@ -168,8 +188,8 @@ export class LabRenderer {
     this.resizeObserver = new ResizeObserver(() => this.resize());
     this.resizeObserver.observe(container);
     this.resize();
+    this.rendererReady = this.initializeRenderer();
     this.scheduleEnvironmentWarmup();
-    this.start();
   }
 
   public setMeshSelectionCallback(callback: (id: string | null) => void): void {
@@ -208,7 +228,7 @@ export class LabRenderer {
   }
 
   public setPrimitive(preset: ObjectPreset): void {
-    const mesh = createProceduralMesh(preset, this.compiler.material);
+    const mesh = createProceduralMesh(preset, this.compiler.renderMaterial);
     this.applyProceduralMeshSettings(mesh);
     this.replaceRoot(mesh, new Map(), new Map());
   }
@@ -247,8 +267,8 @@ export class LabRenderer {
     for (const [id, mesh] of this.meshById) {
       const assigned = assignments[id] ?? true;
       if (assigned) {
-        changed ||= mesh.material !== this.compiler.material;
-        mesh.material = this.compiler.material;
+        changed ||= mesh.material !== this.compiler.renderMaterial;
+        mesh.material = this.compiler.renderMaterial;
         this.applyProceduralMeshSettings(mesh);
       } else {
         const original = this.originalMeshStates.get(id);
@@ -361,7 +381,7 @@ export class LabRenderer {
   }
 
   public generatePresetThumbnails(presets: readonly MaterialPreset[]): ReadonlyMap<string, string> {
-    const renderer = new PresetThumbnailRenderer(this.renderer, DEFAULT_PHYSICAL);
+    const renderer = new PresetThumbnailRenderer(this.bakeRenderer, DEFAULT_PHYSICAL);
     const thumbnails = new Map<string, string>();
     try {
       for (const preset of presets) thumbnails.set(preset.id, renderer.render(preset));
@@ -372,8 +392,7 @@ export class LabRenderer {
   }
 
   public async generatePresetThumbnail(preset: MaterialPreset): Promise<string> {
-    await this.ensureMaterialReady();
-    this.presetThumbnailRenderer ??= new PresetThumbnailRenderer(this.renderer, DEFAULT_PHYSICAL);
+    this.presetThumbnailRenderer ??= new PresetThumbnailRenderer(this.bakeRenderer, DEFAULT_PHYSICAL);
     return this.presetThumbnailRenderer.renderAsync(preset);
   }
 
@@ -399,6 +418,7 @@ export class LabRenderer {
     this.presetThumbnailRenderer = null;
     this.compiler.dispose();
     this.renderer.dispose();
+    this.bakeRenderer.dispose();
     this.container.classList.remove('is-loading');
     this.container.removeAttribute('data-loading-label');
     this.container.removeAttribute('aria-busy');
@@ -408,20 +428,24 @@ export class LabRenderer {
     if (this.selectedMeshId !== null) {
       const selected = this.meshById.get(this.selectedMeshId);
       if (selected !== undefined) {
-        if (selected.material !== this.compiler.material) {
+        if (!this.compiler.isProceduralMaterial(selected.material)) {
           throw new Error('The selected mesh is using its original material. Apply the lab material before baking it.');
         }
         return selected;
       }
     }
 
-    if (this.currentRoot instanceof THREE.Mesh && this.currentRoot.material === this.compiler.material) {
+    if (this.currentRoot instanceof THREE.Mesh && this.compiler.isProceduralMaterial(this.currentRoot.material)) {
       return this.currentRoot;
     }
 
     let firstAssigned: THREE.Mesh | null = null;
     this.currentRoot?.traverse((object) => {
-      if (firstAssigned === null && object instanceof THREE.Mesh && object.material === this.compiler.material) {
+      if (
+        firstAssigned === null &&
+        object instanceof THREE.Mesh &&
+        this.compiler.isProceduralMaterial(object.material)
+      ) {
         firstAssigned = object;
       }
     });
@@ -437,7 +461,7 @@ export class LabRenderer {
   }
 
   private effectiveTextureResolution(requested: number): number {
-    const maxTextureSize = Math.max(this.renderer.capabilities.maxTextureSize, 128);
+    const maxTextureSize = Math.max(this.bakeRenderer.capabilities.maxTextureSize, 128);
     let resolution = Math.min(requested, maxTextureSize);
     resolution = 2 ** Math.floor(Math.log2(resolution));
     return Math.max(resolution, 128);
@@ -447,8 +471,8 @@ export class LabRenderer {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
-    mesh.customDepthMaterial = this.compiler.depthMaterial;
-    mesh.customDistanceMaterial = this.compiler.distanceMaterial;
+    mesh.customDepthMaterial = undefined;
+    mesh.customDistanceMaterial = undefined;
   }
 
   private addStudioLighting(): void {
@@ -511,7 +535,7 @@ export class LabRenderer {
     disposeMaterialResources(hiddenOriginals, new Set([...visibleMeshMaterials, ...retainedNonMesh]));
 
     this.scene.remove(root);
-    disposeObjectResources(root, new Set([this.compiler.material]));
+    disposeObjectResources(root, new Set([this.compiler.material, this.compiler.renderMaterial]));
     this.currentRoot = null;
     this.originalMeshStates.clear();
     this.meshById.clear();
@@ -569,7 +593,7 @@ export class LabRenderer {
     this.profiler.reset();
     this.updateBusyIndicator();
     try {
-      this.environments.prepareStudio();
+      await this.environments.prepareStudio();
       if (this.disposed) return;
       this.setEnvironment(this.currentEnvironment, this.currentEnvironmentName);
     } catch (error) {
@@ -581,9 +605,21 @@ export class LabRenderer {
     }
   }
 
+  private async initializeRenderer(): Promise<void> {
+    try {
+      await this.renderer.init();
+      if (!this.disposed) this.start();
+    } catch (error) {
+      this.rendererInitializationError = normalizeError(error, 'WebGPU renderer initialization failed.');
+      console.error('WebGPU renderer initialization failed.', this.rendererInitializationError);
+      this.updateBusyIndicator();
+    }
+  }
+
   private materialNeedsCompilation(): boolean {
+    const material = this.compiler.renderMaterial;
     return this.currentRoot !== null && (
-      this.compiler.material.version !== this.compiledMaterialVersion ||
+      material.version !== this.compiledMaterialVersion ||
       this.sceneRevision !== this.compiledSceneRevision
     );
   }
@@ -592,7 +628,7 @@ export class LabRenderer {
     const failure = this.materialCompileFailure;
     if (
       failure === null ||
-      failure.materialVersion !== this.compiler.material.version ||
+      failure.materialVersion !== this.compiler.renderMaterial.version ||
       failure.sceneRevision !== this.sceneRevision
     ) {
       return null;
@@ -603,12 +639,13 @@ export class LabRenderer {
   private startMaterialCompilation(): void {
     if (
       this.disposed ||
+      this.rendererInitializationError !== null ||
       this.materialCompilePromise !== null ||
       !this.materialNeedsCompilation() ||
       this.currentMaterialCompileFailure() !== null
     ) return;
 
-    const materialVersion = this.compiler.material.version;
+    const materialVersion = this.compiler.renderMaterial.version;
     const sceneRevision = this.sceneRevision;
     this.profiler.reset();
     let compilation: Promise<void>;
@@ -638,6 +675,10 @@ export class LabRenderer {
   }
 
   private async ensureMaterialReady(): Promise<void> {
+    await this.rendererReady;
+    if (this.rendererInitializationError !== null) {
+      throw new Error('Renderer initialization failed.', { cause: this.rendererInitializationError });
+    }
     while (!this.disposed && this.materialNeedsCompilation()) {
       const failure = this.currentMaterialCompileFailure();
       if (failure !== null) {
@@ -654,11 +695,13 @@ export class LabRenderer {
   }
 
   private updateBusyIndicator(): void {
-    const label = this.materialCompilePromise !== null
-      ? 'Preparing material…'
-      : this.environmentWarmupActive
-        ? 'Preparing studio lighting…'
-        : null;
+    const label = this.rendererInitializationError !== null
+      ? null
+      : this.materialCompilePromise !== null
+        ? 'Preparing material…'
+        : this.environmentWarmupActive
+          ? 'Preparing studio lighting…'
+          : null;
     this.container.classList.toggle('is-loading', label !== null);
     if (label === null) {
       this.container.removeAttribute('data-loading-label');
@@ -688,6 +731,7 @@ export class LabRenderer {
 
   private start(): void {
     const render = (): void => {
+      if (this.disposed) return;
       this.animationFrame = requestAnimationFrame(render);
       this.controls.update();
       if (this.selectionHelper.visible && this.selectedMeshId !== null) {

@@ -360,6 +360,8 @@ export function assertRoundtripExport(json) {
   assertTextureReference(json, labPbr?.baseColorTexture, 'Baked base-color texture');
   assertTextureReference(json, labPbr?.metallicRoughnessTexture, 'Baked roughness texture');
   assertTextureReference(json, lab.normalTexture, 'Baked normal texture');
+  assertTextureReference(json, lab.occlusionTexture, 'Baked ambient occlusion texture');
+  assertTextureReference(json, lab.emissiveTexture, 'Baked emissive texture');
   const clearcoat = lab.extensions?.KHR_materials_clearcoat;
   if (clearcoat === undefined) throw new Error('Baked material is missing KHR_materials_clearcoat.');
   assertTextureReference(json, clearcoat.clearcoatTexture, 'Baked clearcoat texture');

@@ -1,10 +1,28 @@
-import type { MeshPhysicalMaterial } from 'three';
+import type { Color } from 'three';
 import type { PhysicalSettings } from './types';
 
 const MIN_RUNTIME_CLEARCOAT = 0.0001;
 
+interface PhysicalMaterialTarget {
+  roughness: number;
+  metalness: number;
+  clearcoat: number;
+  clearcoatRoughness: number;
+  specularIntensity: number;
+  ior: number;
+  sheen: number;
+  sheenRoughness: number;
+  sheenColor: Color;
+  transmission: number;
+  thickness: number;
+  attenuationDistance: number;
+  attenuationColor: Color;
+  opacity: number;
+  needsUpdate: boolean;
+}
+
 export function applyPhysicalSettings(
-  material: MeshPhysicalMaterial,
+  material: PhysicalMaterialTarget,
   settings: Readonly<PhysicalSettings>
 ): void {
   const hadTransmission = material.transmission > 0;

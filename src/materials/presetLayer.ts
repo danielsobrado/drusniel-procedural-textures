@@ -30,6 +30,7 @@ export function createPresetLayer(
     displacement: 0,
     groupId: null,
     maskSourceLayerId: null,
+    structureSourceLayerId: null,
     maskInvert: false,
     maskStrength: 1,
     ...overrides

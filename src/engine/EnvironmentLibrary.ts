@@ -1,4 +1,4 @@
-import * as THREE from 'three';
+import * as THREE from 'three/webgpu';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { MAX_MODEL_FILE_BYTES } from '../app/constants';
@@ -62,13 +62,14 @@ const PROFILES: Record<Exclude<EnvironmentPreset, 'custom'>, StudioLightProfile>
 
 export class EnvironmentLibrary {
   private readonly pmrem: THREE.PMREMGenerator;
-  private studioTarget: THREE.WebGLRenderTarget | null = null;
+  private studioTarget: THREE.RenderTarget | null = null;
   private studioPrepared = false;
-  private customTarget: THREE.WebGLRenderTarget | null = null;
+  private customTarget: THREE.RenderTarget | null = null;
   private customName: string | null = null;
   private loadSequence = 0;
+  private disposed = false;
 
-  public constructor(renderer: THREE.WebGLRenderer) {
+  public constructor(private readonly renderer: THREE.WebGPURenderer) {
     this.pmrem = new THREE.PMREMGenerator(renderer);
   }
 
@@ -76,11 +77,18 @@ export class EnvironmentLibrary {
     return this.studioPrepared;
   }
 
-  public prepareStudio(): void {
-    if (this.studioPrepared) return;
+  public async prepareStudio(): Promise<void> {
+    if (this.disposed || this.studioPrepared) return;
+    await this.renderer.init();
+    if (this.disposed || this.studioPrepared) return;
+
     const room = new RoomEnvironment();
     try {
       const target = this.pmrem.fromScene(room, 0.04);
+      if (this.disposed) {
+        target.dispose();
+        return;
+      }
       this.studioTarget?.dispose();
       this.studioTarget = target;
       this.studioPrepared = true;
@@ -120,12 +128,13 @@ export class EnvironmentLibrary {
     }
 
     scene.environment = this.studioTarget?.texture ?? null;
-    const profile = preset === 'custom' ? PROFILES.studio : PROFILES[preset];
+    const profile = preset === 'custom' ? PROFILES.studio : (PROFILES[preset] ?? PROFILES.studio);
     scene.environmentIntensity = profile.environmentIntensity;
     return profile;
   }
 
   public async loadHdr(file: File): Promise<boolean> {
+    if (this.disposed) return false;
     if (!file.name.toLowerCase().endsWith('.hdr')) {
       throw new Error('Environment files must use the Radiance .hdr format.');
     }
@@ -134,11 +143,13 @@ export class EnvironmentLibrary {
       throw new Error(`HDR environment exceeds the configured ${limitMiB.toFixed(0)} MiB import limit.`);
     }
 
+    await this.renderer.init();
+    if (this.disposed) return false;
     const sequence = ++this.loadSequence;
     const url = URL.createObjectURL(file);
     try {
       const texture = await new RGBELoader().loadAsync(url);
-      if (sequence !== this.loadSequence) {
+      if (this.disposed || sequence !== this.loadSequence) {
         texture.dispose();
         return false;
       }
@@ -152,7 +163,7 @@ export class EnvironmentLibrary {
         }
       })();
 
-      if (sequence !== this.loadSequence) {
+      if (this.disposed || sequence !== this.loadSequence) {
         target.dispose();
         return false;
       }
@@ -167,6 +178,8 @@ export class EnvironmentLibrary {
   }
 
   public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     this.cancelPending();
     this.customTarget?.dispose();
     this.customTarget = null;

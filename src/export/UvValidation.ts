@@ -204,6 +204,7 @@ export function createTriangleAtlas(source: THREE.BufferGeometry): THREE.BufferG
   }
 
   atlas.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  atlas.deleteAttribute('tangent');
   atlas.computeBoundingBox();
   atlas.computeBoundingSphere();
   return atlas;

@@ -1,4 +1,4 @@
-import { FRAGMENT_GLSL, SHARED_GLSL } from '../materials/ProceduralShader';
+import { FRAGMENT_GLSL, SHARED_GLSL } from '../materials/PortableProceduralShader';
 
 export const BAKE_VERTEX_GLSL = /* glsl */ `
 varying vec3 vBakePosition;
@@ -26,6 +26,7 @@ ${FRAGMENT_GLSL}
 
 uniform int uBakeMode;
 uniform float uBakeBaseRoughness;
+uniform float uBakeBaseMetalness;
 uniform float uBakeBaseClearcoat;
 uniform float uBakeBaseClearcoatRoughness;
 uniform float uBakeHeightExtent;
@@ -95,13 +96,19 @@ void main() {
     outputColor = vec3(clamp(0.5 + height / (extent * 2.0), 0.0, 1.0));
   } else if (uBakeMode == 4) {
     outputColor = vec3(max(uBakeBaseClearcoat, surface.clearcoat));
-  } else {
+  } else if (uBakeMode == 5) {
     float coatRoughness = mix(
       uBakeBaseClearcoatRoughness,
       surface.clearcoatRoughness,
       surface.clearcoat
     );
     outputColor = vec3(clamp(coatRoughness, 0.0, 1.0));
+  } else if (uBakeMode == 6) {
+    outputColor = vec3(clamp(uBakeBaseMetalness + surface.metallic, 0.0, 1.0));
+  } else if (uBakeMode == 7) {
+    outputColor = vec3(clamp(surface.ao, 0.0, 1.0));
+  } else {
+    outputColor = labLinearToSrgb(clamp(surface.emissive, 0.0, 1.0));
   }
 
   gl_FragColor = vec4(outputColor, 1.0);

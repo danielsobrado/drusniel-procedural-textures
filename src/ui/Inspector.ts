@@ -12,10 +12,13 @@ import type {
   EnvironmentPreset,
   MaterialGroup,
   MaterialLayer,
+  GenomeLocks,
   PhysicalSettings,
-  ProjectState
+  ProjectState,
+  SynthesisSettings
 } from '../materials/types';
 import { escapeHtml } from '../utils/html';
+import { compileMaterialGraph } from '../materials/MaterialGraph';
 
 export interface InspectorCallbacks {
   onLayerPatch: (id: string, patch: Partial<MaterialLayer>) => void;
@@ -27,6 +30,10 @@ export interface InspectorCallbacks {
   onBackground: (color: string) => void;
   onWireframe: (enabled: boolean) => void;
   onPhysical: (patch: Partial<PhysicalSettings>) => void;
+  onSynthesis: (patch: Partial<SynthesisSettings>) => void;
+  onGenomeLock: (key: keyof GenomeLocks, enabled: boolean) => void;
+  onMutate: (variant: number) => void;
+  onGraphMode: (enabled: boolean) => void;
   onEnvironment: (environment: EnvironmentPreset) => void;
   onEnvironmentImport: () => void;
   onMeshSelect: (id: string | null) => void;
@@ -80,6 +87,23 @@ const PHYSICAL_FIELDS: readonly PhysicalField[] = [
   { key: 'attenuationDistance', label: 'Absorb distance', ...CONTROL_RANGES.physical.attenuationDistance }
 ];
 
+const SYNTHESIS_FIELDS: ReadonlyArray<{
+  key: keyof SynthesisSettings;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+}> = [
+  { key: 'age', label: 'Age', ...CONTROL_RANGES.synthesis.age },
+  { key: 'weathering', label: 'Weathering', ...CONTROL_RANGES.synthesis.weathering },
+  { key: 'gravity', label: 'Gravity', ...CONTROL_RANGES.synthesis.gravity },
+  { key: 'macro', label: 'Macro', ...CONTROL_RANGES.synthesis.macro },
+  { key: 'meso', label: 'Meso', ...CONTROL_RANGES.synthesis.meso },
+  { key: 'micro', label: 'Micro', ...CONTROL_RANGES.synthesis.micro },
+  { key: 'variation', label: 'Variation', ...CONTROL_RANGES.synthesis.variation },
+  { key: 'stochasticTiling', label: 'Anti-repeat', ...CONTROL_RANGES.synthesis.stochasticTiling }
+];
+
 function option(value: string, label: string, selected: boolean): string {
   return `<option value="${escapeHtml(value)}" ${selected ? 'selected' : ''}>${escapeHtml(label)}</option>`;
 }
@@ -122,10 +146,13 @@ export class Inspector {
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
     const nextStructureKey = [
       `${layer?.id ?? ''}:${layer?.groupId ?? ''}`,
-      state.layers.map((item) => item.id).join('|'),
+      state.layers.map((item) => `${item.id}:${item.structureSourceLayerId ?? ''}:${item.maskSourceLayerId ?? ''}`).join('|'),
       state.groups.map((item) => `${item.id}:${item.parentId ?? ''}`).join('|'),
       state.importedMeshes.map((item) => item.id).join('|'),
-      state.environmentAssetName ?? ''
+      state.environmentAssetName ?? '',
+      JSON.stringify(state.synthesis),
+      JSON.stringify(state.genomeLocks),
+      String(state.graphMode)
     ].join('::');
 
     if (this.currentLayerId !== layer?.id || this.structureKey !== nextStructureKey) {
@@ -158,6 +185,7 @@ export class Inspector {
       </div>
 
       ${layer === null ? '<div class="empty-state">Select a layer to edit procedural routing and parameters.</div>' : this.layerSections(layer, selectedGroup, state)}
+      ${this.synthesisSection(state)}
       ${this.physicalSection(state)}
       ${this.viewportSection(state)}
     `;
@@ -174,6 +202,10 @@ export class Inspector {
       .join('');
     const groupOptions = state.groups
       .map((item) => option(item.id, item.name, item.id === layer.groupId))
+      .join('');
+    const structureOptions = state.layers
+      .filter((item) => item.id !== layer.id)
+      .map((item) => option(item.id, item.name, item.id === layer.structureSourceLayerId))
       .join('');
 
     return `
@@ -219,6 +251,13 @@ export class Inspector {
       <details class="inspector-section advanced-section" open>
         <summary>Mask & group routing</summary>
         <label class="field-stack routing-field">
+          <span>Shared structure</span>
+          <select data-field="structureSourceLayerId">
+            ${option('', 'Own generator', layer.structureSourceLayerId === null)}
+            ${structureOptions}
+          </select>
+        </label>
+        <label class="field-stack routing-field">
           <span>Mask source</span>
           <select data-field="maskSourceLayerId">
             ${option('', 'None', layer.maskSourceLayerId === null)}
@@ -239,6 +278,41 @@ export class Inspector {
         </label>
         <button class="compact-button inspector-action" data-action="add-group">＋ New group</button>
         ${group === null ? '' : this.groupEditor(group, state)}
+      </details>
+    `;
+  }
+
+  private synthesisSection(state: Readonly<ProjectState>): string {
+    const graph = compileMaterialGraph(state.layers);
+    const locks: Array<[keyof GenomeLocks, string]> = [
+      ['color', 'Color'], ['structure', 'Structure'], ['roughness', 'Roughness'], ['scale', 'Scale'], ['damage', 'Damage']
+    ];
+    return `
+      <details class="inspector-section advanced-section synthesis-section" open>
+        <summary>Material synthesis</summary>
+        <div class="synthesis-actions">
+          <span class="population-label">Evolution population</span>
+          <div class="mutation-population">
+            ${['A', 'B', 'C', 'D', 'E', 'F'].map((label, index) => `<button class="compact-button" data-action="mutate" data-variant="${index}">${label}</button>`).join('')}
+          </div>
+          <label class="toggle-row graph-toggle"><span>Advanced graph</span><input data-synthesis-action="graphMode" type="checkbox" ${state.graphMode ? 'checked' : ''}></label>
+        </div>
+        <div class="genome-locks" aria-label="Mutation trait locks">
+          ${locks.map(([key, label]) => `<label><input data-genome-lock="${key}" type="checkbox" ${state.genomeLocks[key] ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+        </div>
+        ${SYNTHESIS_FIELDS.map((field) => `
+          <div class="parameter-row">
+            <span>${field.label}</span>
+            <input data-synthesis-field="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${state.synthesis[field.key]}">
+            <input class="number-input" data-synthesis-field="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${state.synthesis[field.key]}">
+          </div>
+        `).join('')}
+        ${state.graphMode ? `
+          <div class="material-graph" aria-label="Compiled material graph">
+            ${graph.nodes.map((node) => `<div class="graph-node graph-node-${node.kind}"><strong>${escapeHtml(node.label)}</strong><small>${node.kind}</small></div>`).join('')}
+            <div class="graph-summary">${graph.edges.length} routed connections · ${graph.nodes.length} nodes</div>
+          </div>
+        ` : ''}
       </details>
     `;
   }
@@ -454,6 +528,24 @@ export class Inspector {
       this.callbacks.onPhysical({ [physicalColor]: target.value });
       return;
     }
+    const synthesisField = target.dataset.synthesisField as keyof SynthesisSettings | undefined;
+    if (synthesisField !== undefined && target instanceof HTMLInputElement) {
+      const value = this.readBoundedNumber(target);
+      if (value !== null) {
+        this.syncNumberPeers(`[data-synthesis-field="${synthesisField}"]`, target, value);
+        this.callbacks.onSynthesis({ [synthesisField]: value });
+      }
+      return;
+    }
+    const genomeLock = target.dataset.genomeLock as keyof GenomeLocks | undefined;
+    if (genomeLock !== undefined && target instanceof HTMLInputElement) {
+      this.callbacks.onGenomeLock(genomeLock, target.checked);
+      return;
+    }
+    if (target.dataset.synthesisAction === 'graphMode' && target instanceof HTMLInputElement) {
+      this.callbacks.onGraphMode(target.checked);
+      return;
+    }
     const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;
     if (physicalField !== undefined && target instanceof HTMLInputElement) {
       const value = this.readBoundedNumber(target);
@@ -499,7 +591,7 @@ export class Inspector {
       this.callbacks.onLayerPatch(layerId, { maskInvert: target.checked });
       return;
     }
-    if (field === 'groupId' || field === 'maskSourceLayerId') {
+    if (field === 'groupId' || field === 'maskSourceLayerId' || field === 'structureSourceLayerId') {
       this.callbacks.onLayerPatch(layerId, { [field]: target.value === '' ? null : target.value });
       return;
     }
@@ -544,6 +636,11 @@ export class Inspector {
       this.restoreNumberPeers(`[data-physical-field="${physicalField}"]`, state.physical[physicalField]);
       return;
     }
+    const synthesisField = target.dataset.synthesisField as keyof SynthesisSettings | undefined;
+    if (synthesisField !== undefined) {
+      this.restoreNumberPeers(`[data-synthesis-field="${synthesisField}"]`, state.synthesis[synthesisField]);
+      return;
+    }
     const groupField = target.dataset.groupField;
     if (groupField === 'opacity' && this.currentLayerId !== null) {
       const groupId = state.layers.find((item) => item.id === this.currentLayerId)?.groupId ?? null;
@@ -580,6 +677,11 @@ export class Inspector {
 
     if (target.closest('[data-action="load-hdr"]') !== null) {
       this.callbacks.onEnvironmentImport();
+      return;
+    }
+    if (target.closest('[data-action="mutate"]') !== null) {
+      const button = target.closest<HTMLElement>('[data-action="mutate"]');
+      this.callbacks.onMutate(Number(button?.dataset.variant ?? 0));
       return;
     }
 

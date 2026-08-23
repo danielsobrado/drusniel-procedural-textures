@@ -65,34 +65,37 @@ async function assertDesktop(browserType, name) {
     const failures = [];
     page.on('pageerror', (error) => failures.push(error.message));
     page.on('console', (message) => {
-      if (message.type() === 'error' && /shader|webgl|uncaught|error:/i.test(message.text())) failures.push(message.text());
+      if (message.type() === 'error' && /shader|webgpu|webgl|uncaught|error:/i.test(message.text())) failures.push(message.text());
     });
 
     const navigationWait = process.platform === 'win32' && name === 'Firefox' ? 'commit' : 'domcontentloaded';
     await page.goto(APP_URL, { waitUntil: navigationWait });
     await page.locator('.app-shell').waitFor({ state: 'attached' });
-    const supportsWebGl2 = await page.evaluate(() => {
+    const supportsRenderer = await page.evaluate(() => {
       try {
+        if ('gpu' in navigator) return true;
         return document.createElement('canvas').getContext('webgl2') !== null;
       } catch {
         return false;
       }
     });
-    if (!supportsWebGl2) {
+    if (!supportsRenderer) {
       if (name === 'Firefox' && process.platform === 'win32') {
-        console.log(`${name} desktop test verified DOM shell (WebGL2 unavailable in Windows headless runner).`);
+        console.log(`${name} desktop test verified DOM shell (GPU renderer unavailable in Windows headless runner).`);
         return;
       }
-      throw new Error(`${name} headless environment does not expose WebGL2.`);
+      throw new Error(`${name} headless environment exposes neither WebGPU nor WebGL2.`);
     }
 
     const canvas = page.locator('canvas.lab-canvas');
     await canvas.waitFor({ state: 'visible' });
-    const hasWebGl = await canvas.evaluate((element) => {
-      if (!(element instanceof HTMLCanvasElement)) return false;
-      return element.getContext('webgl2') !== null;
+    const backend = await canvas.evaluate((element) => {
+      if (!(element instanceof HTMLCanvasElement)) return null;
+      if (element.getContext('webgl2') !== null) return 'WebGL2 fallback';
+      if ('gpu' in navigator && element.getContext('webgpu') !== null) return 'WebGPU';
+      return null;
     });
-    if (!hasWebGl) throw new Error(`${name} application canvas did not expose a WebGL2 context.`);
+    if (backend === null) throw new Error(`${name} application canvas exposed neither WebGPU nor WebGL2.`);
 
     await canvas.click();
     await page.keyboard.press('Space');
@@ -100,7 +103,7 @@ async function assertDesktop(browserType, name) {
     await page.keyboard.press('Escape');
 
     if (failures.length > 0) throw new Error(`${name} runtime failures:\n${[...new Set(failures)].join('\n')}`);
-    console.log(`${name} desktop smoke passed.`);
+    console.log(`${name} desktop smoke passed with ${backend}.`);
   } finally {
     await context?.close();
     await browser.close();
@@ -128,7 +131,7 @@ async function assertMobileTouch() {
       failures.push(error.message);
     });
     page.on('console', (message) => {
-      if (message.type() === 'error' && /shader|webgl|uncaught|error:/i.test(message.text())) failures.push(message.text());
+      if (message.type() === 'error' && /shader|webgpu|webgl|uncaught|error:/i.test(message.text())) failures.push(message.text());
     });
 
     await page.goto(APP_URL, { waitUntil: 'domcontentloaded' });
@@ -180,7 +183,7 @@ async function assertMobileTouch() {
 function isLocalFirefoxCapabilityFailure(error) {
   if (process.platform !== 'win32') return false;
   const message = error instanceof Error ? error.message : String(error);
-  return /Firefox headless environment does not expose WebGL2|browser.*launch|executable.*doesn.t exist|Timeout|timed out/i.test(message);
+  return /Firefox headless environment exposes neither WebGPU nor WebGL2|browser.*launch|executable.*doesn.t exist|Timeout|timed out/i.test(message);
 }
 
 async function runDesktopSmoke(browserType, name) {

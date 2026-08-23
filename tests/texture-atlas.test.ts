@@ -1,6 +1,24 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { createSharedAtlasLayout, remapGeometryUvToAtlas } from '../src/export/TextureAtlas';
+import {
+  applyStaticDisplacement,
+  createSharedAtlasLayout,
+  remapGeometryUvToAtlas
+} from '../src/export/TextureAtlas';
+
+function solidHeight(red: number): { canvas: HTMLCanvasElement; blob: Blob } {
+  const image = {
+    width: 1,
+    height: 1,
+    data: new Uint8ClampedArray([red, red, red, 255])
+  } as ImageData;
+  const canvas = {
+    width: 1,
+    height: 1,
+    getContext: () => ({ getImageData: () => image })
+  } as unknown as HTMLCanvasElement;
+  return { canvas, blob: new Blob() };
+}
 
 describe('shared texture atlas', () => {
   it('uses a power-of-two grid within the export texture limit', () => {
@@ -39,6 +57,41 @@ describe('shared texture atlas', () => {
 
     source.dispose();
     remapped.dispose();
+  });
+
+  it('preserves authored displacement direction under mirrored transforms', () => {
+    const source = new THREE.BufferGeometry();
+    source.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      1, 0, 0,
+      0, 1, 0
+    ], 3));
+    source.setAttribute('normal', new THREE.Float32BufferAttribute([
+      0, 0, 1,
+      0, 0, 1,
+      0, 0, 1
+    ], 3));
+    source.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0.5, 0.5,
+      0.5, 0.5,
+      0.5, 0.5
+    ], 2));
+    source.setIndex([0, 1, 2]);
+
+    const displaced = applyStaticDisplacement(
+      source,
+      solidHeight(255),
+      new THREE.Matrix4().makeScale(-1, 1, 1),
+      0.2
+    );
+    const position = displaced.getAttribute('position');
+
+    expect(position.getZ(0)).toBeGreaterThan(0);
+    expect(position.getZ(1)).toBeGreaterThan(0);
+    expect(position.getZ(2)).toBeGreaterThan(0);
+
+    source.dispose();
+    displaced.dispose();
   });
 
   it('rejects slots outside the allocated atlas grid', () => {
