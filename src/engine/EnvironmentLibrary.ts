@@ -143,9 +143,10 @@ export class EnvironmentLibrary {
       throw new Error(`HDR environment exceeds the configured ${limitMiB.toFixed(0)} MiB import limit.`);
     }
 
-    await this.renderer.init();
-    if (this.disposed) return false;
     const sequence = ++this.loadSequence;
+    await this.renderer.init();
+    if (this.disposed || sequence !== this.loadSequence) return false;
+
     const url = URL.createObjectURL(file);
     try {
       const texture = await new RGBELoader().loadAsync(url);

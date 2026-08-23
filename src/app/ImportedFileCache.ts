@@ -51,15 +51,24 @@ function sameMetadata(left: readonly FileMetadata[], right: readonly FileMetadat
   });
 }
 
+function positiveSafeInteger(value: number, label: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} must be a positive safe integer.`);
+  }
+  return value;
+}
+
 export class ImportedFileCache {
   private readonly bundles = new Map<string, BundleEntry>();
   private readonly knownMetadata = new Map<string, readonly FileMetadata[]>();
+  private readonly maxEntries: number;
+  private readonly maxBytes: number;
   private totalBytes = 0;
 
-  public constructor(
-    private readonly maxEntries: number,
-    private readonly maxBytes: number
-  ) {}
+  public constructor(maxEntries: number, maxBytes: number) {
+    this.maxEntries = positiveSafeInteger(maxEntries, 'Imported file cache entry limit');
+    this.maxBytes = positiveSafeInteger(maxBytes, 'Imported file cache byte limit');
+  }
 
   public remember(primaryName: string, files: readonly File[]): void {
     if (files.length === 0) {

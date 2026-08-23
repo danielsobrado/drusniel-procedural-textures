@@ -8,7 +8,8 @@ import type {
   SurfaceGraphNode,
   SurfaceGraphOutput,
   SurfaceGraphParameterValue,
-  SurfaceGraphPortRef
+  SurfaceGraphPortRef,
+  SurfaceGraphValueType
 } from './SurfaceGraph';
 
 type RuntimeBinding = NonNullable<SurfaceGraphNode['runtime']>;
@@ -19,6 +20,7 @@ const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const MAX_GRAPH_NODES = 256;
 const MAX_GRAPH_EDGES = 768;
+const MAX_GRAPH_OUTPUTS = 10;
 const MAX_GRAPH_EXPOSED = 64;
 const MAX_GRAPH_GROUPS = 32;
 const MAX_GRAPH_SUBGRAPHS = 24;
@@ -39,6 +41,7 @@ const RUNTIME_BLEND_MODES = new Set<RuntimeBlendMode>([
 const OUTPUT_CHANNELS = new Set<SurfaceGraphOutput['channel']>([
   'baseColor', 'roughness', 'metallic', 'normal', 'height', 'ao', 'emissive', 'opacity', 'clearcoat', 'sss'
 ]);
+const SCALAR_TYPES = new Set<SurfaceGraphValueType>(['float', 'mask', 'height']);
 const EXPOSED_TYPES = new Set<SurfaceGraphExposedParameter['type']>(['float', 'color', 'boolean', 'enum']);
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -221,6 +224,10 @@ function group(value: unknown, index: number): SurfaceGraphGroup {
   };
 }
 
+function compatibleTypes(source: SurfaceGraphValueType, target: SurfaceGraphValueType): boolean {
+  return source === target || (SCALAR_TYPES.has(source) && SCALAR_TYPES.has(target));
+}
+
 function validateAcyclic(nodes: readonly SurfaceGraphNode[], edges: readonly SurfaceGraphEdge[]): void {
   const adjacency = new Map<string, string[]>();
   for (const graphEdge of edges) {
@@ -255,17 +262,47 @@ function validateGroupHierarchy(groups: readonly SurfaceGraphGroup[]): void {
 }
 
 function validateEdgePorts(nodes: ReadonlyMap<string, SurfaceGraphNode>, edges: readonly SurfaceGraphEdge[]): void {
+  const drivenInputs = new Set<string>();
   for (const item of edges) {
     const source = nodes.get(item.from.nodeId);
     const target = nodes.get(item.to.nodeId);
     if (source === undefined || target === undefined) throw new Error('Surface graph edge references a missing node.');
     const sourceSpec = SURFACE_GRAPH_NODE_SPEC_BY_KIND.get(source.kind);
     const targetSpec = SURFACE_GRAPH_NODE_SPEC_BY_KIND.get(target.kind);
-    if (sourceSpec?.outputs.some((portSpec) => portSpec.name === item.from.port) !== true) {
+    const sourcePort = sourceSpec?.outputs.find((portSpec) => portSpec.name === item.from.port);
+    const targetPort = targetSpec?.inputs.find((portSpec) => portSpec.name === item.to.port);
+    if (sourcePort === undefined) {
       throw new Error(`Surface graph edge references missing output port ${source.id}.${item.from.port}.`);
     }
-    if (targetSpec?.inputs.some((portSpec) => portSpec.name === item.to.port) !== true) {
+    if (targetPort === undefined) {
       throw new Error(`Surface graph edge references missing input port ${target.id}.${item.to.port}.`);
+    }
+    if (!compatibleTypes(sourcePort.type, targetPort.type)) {
+      throw new Error(
+        `Surface graph cannot connect ${source.id}.${item.from.port} (${sourcePort.type}) to ` +
+        `${target.id}.${item.to.port} (${targetPort.type}).`
+      );
+    }
+    const inputKey = `${target.id}:${item.to.port}`;
+    if (drivenInputs.has(inputKey)) {
+      throw new Error(`Surface graph input ${target.id}.${item.to.port} has more than one source.`);
+    }
+    drivenInputs.add(inputKey);
+  }
+}
+
+function validateOutputs(
+  nodes: ReadonlyMap<string, SurfaceGraphNode>,
+  outputs: readonly SurfaceGraphOutput[]
+): void {
+  const channels = new Set<SurfaceGraphOutput['channel']>();
+  for (const item of outputs) {
+    if (channels.has(item.channel)) {
+      throw new Error(`Surface graph defines output channel ${item.channel} more than once.`);
+    }
+    channels.add(item.channel);
+    if (!nodes.has(item.source.nodeId)) {
+      throw new Error(`Graph output ${item.channel} references a missing node.`);
     }
   }
 }
@@ -291,9 +328,11 @@ export function normalizeSurfaceGraph(value: unknown, depth = 0): SurfaceGraphDe
   validateAcyclic(nodes, edges);
 
   const outputsInput = input.outputs ?? [];
-  if (!Array.isArray(outputsInput)) throw new Error('Surface graph outputs must be an array.');
+  if (!Array.isArray(outputsInput) || outputsInput.length > MAX_GRAPH_OUTPUTS) {
+    throw new Error(`Surface graph outputs must be an array with at most ${MAX_GRAPH_OUTPUTS} entries.`);
+  }
   const outputs = outputsInput.map(output);
-  for (const item of outputs) if (!nodeIds.has(item.source.nodeId)) throw new Error(`Graph output ${item.channel} references a missing node.`);
+  validateOutputs(nodesById, outputs);
 
   const exposedInput = input.exposed ?? [];
   if (!Array.isArray(exposedInput) || exposedInput.length > MAX_GRAPH_EXPOSED) throw new Error(`Surface graph can expose at most ${MAX_GRAPH_EXPOSED} parameters.`);

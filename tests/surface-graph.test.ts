@@ -99,6 +99,26 @@ describe('surface designer graphs', () => {
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/missing runtime structure source/iu);
   });
 
+  it('rejects incompatible graph edge types', () => {
+    const graph: SurfaceGraphDefinition = {
+      version: 1,
+      id: 'edge-type-test',
+      name: 'Edge type test',
+      nodes: [
+        { id: 'color', kind: 'gradient-map', label: 'Color', position: { x: 0, y: 0 }, params: {} },
+        { id: 'levels', kind: 'levels', label: 'Levels', position: { x: 160, y: 0 }, params: {} }
+      ],
+      edges: [
+        { from: { nodeId: 'color', port: 'color' }, to: { nodeId: 'levels', port: 'height' } }
+      ],
+      outputs: [],
+      exposed: [],
+      groups: [],
+      subgraphs: []
+    };
+    expect(() => normalizeSurfaceGraph(graph)).toThrow(/cannot connect.*color.*height/iu);
+  });
+
   it('rejects ambiguous graph inputs and duplicate output channels', () => {
     const graph: SurfaceGraphDefinition = {
       version: 1,

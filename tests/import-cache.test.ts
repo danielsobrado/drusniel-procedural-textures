@@ -6,6 +6,13 @@ function file(name: string, bytes: number, lastModified = 1): File {
 }
 
 describe('ImportedFileCache', () => {
+  it('rejects invalid cache limits', () => {
+    expect(() => new ImportedFileCache(0, 1024)).toThrow(/entry limit/i);
+    expect(() => new ImportedFileCache(2, 0)).toThrow(/byte limit/i);
+    expect(() => new ImportedFileCache(1.5, 1024)).toThrow(/entry limit/i);
+    expect(() => new ImportedFileCache(2, Number.POSITIVE_INFINITY)).toThrow(/byte limit/i);
+  });
+
   it('evicts least-recently-used bundles by entry limit', () => {
     const cache = new ImportedFileCache(2, 1024);
     cache.remember('a.glb', [file('a.glb', 10)]);

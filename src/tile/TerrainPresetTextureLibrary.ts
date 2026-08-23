@@ -27,6 +27,7 @@ function textureFromCanvas(canvas: HTMLCanvasElement): TerrainTextureSource {
 export class TerrainPresetTextureLibrary {
   private readonly cache = new Map<string, TerrainTextureSource>();
   private readonly pending = new Map<string, Promise<TerrainTextureSource>>();
+  private generation = 0;
 
   public async load(presetId: string): Promise<TerrainTextureSource> {
     const cached = this.cache.get(presetId);
@@ -35,18 +36,22 @@ export class TerrainPresetTextureLibrary {
     const pending = this.pending.get(presetId);
     if (pending !== undefined) return pending;
 
+    const generation = this.generation;
     const request = this.bake(findPreset(presetId));
     this.pending.set(presetId, request);
     try {
       const texture = await request;
-      this.cache.set(presetId, texture);
+      if (generation === this.generation && this.pending.get(presetId) === request) {
+        this.cache.set(presetId, texture);
+      }
       return texture;
     } finally {
-      this.pending.delete(presetId);
+      if (this.pending.get(presetId) === request) this.pending.delete(presetId);
     }
   }
 
   public clear(): void {
+    this.generation += 1;
     this.cache.clear();
     this.pending.clear();
   }

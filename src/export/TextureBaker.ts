@@ -16,6 +16,26 @@ export type BakeChannel =
   | 'ao'
   | 'emissive';
 
+/** The PBR channels, in the order they are rendered. */
+export type PbrChannelName = Exclude<BakeChannel, 'height'>;
+
+const PBR_CHANNELS: readonly PbrChannelName[] = [
+  'albedo',
+  'roughness',
+  'normal',
+  'clearcoat',
+  'clearcoat-roughness',
+  'metallic',
+  'ao',
+  'emissive'
+];
+
+/**
+ * Reports which channel is about to be rendered. `index` is zero-based and `total`
+ * counts every channel in this bake, so the caller can render an honest fraction.
+ */
+export type BakeProgressCallback = (channel: BakeChannel, index: number, total: number) => void;
+
 export interface BakedTexture {
   canvas: HTMLCanvasElement;
   blob: Blob;
@@ -259,13 +279,14 @@ export class TextureBaker {
   public async bake(
     source: THREE.Mesh,
     settings: Readonly<PhysicalSettings>,
-    resolution: number
+    resolution: number,
+    onProgress?: BakeProgressCallback
   ): Promise<BakedTextureSet> {
     await this.compiler.ensureSimulationReady();
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
-      return await this.bakeSnapshot(snapshot, settings, resolution, material);
+      return await this.bakeSnapshot(snapshot, settings, resolution, material, onProgress);
     } finally {
       material.dispose();
       this.disposeSnapshot(snapshot);
@@ -292,12 +313,14 @@ export class TextureBaker {
     snapshot: BakeMeshSnapshot,
     settings: Readonly<PhysicalSettings>,
     resolution: number,
-    material: THREE.ShaderMaterial
+    material: THREE.ShaderMaterial,
+    onProgress?: BakeProgressCallback
   ): Promise<BakedTextureSet> {
-    const common = await this.renderPbrSnapshot(snapshot, settings, resolution, material);
+    const common = await this.renderPbrSnapshot(snapshot, settings, resolution, material, onProgress, PBR_CHANNELS.length + 1);
     const context = this.createContext(snapshot, material, resolution);
     try {
       await this.prepareContext(context, snapshot.name);
+      onProgress?.('height', PBR_CHANNELS.length, PBR_CHANNELS.length + 1);
       const height = await this.renderChannel(context, material, 'height', resolution);
       return { ...common, height };
     } finally {
@@ -318,7 +341,9 @@ export class TextureBaker {
     snapshot: BakeMeshSnapshot,
     settings: Readonly<PhysicalSettings>,
     resolution: number,
-    material: THREE.ShaderMaterial
+    material: THREE.ShaderMaterial,
+    onProgress?: BakeProgressCallback,
+    totalChannels: number = PBR_CHANNELS.length
   ): Promise<BakedPbrTextureSet> {
     if (!Number.isInteger(resolution) || resolution < 128 || resolution > 4096) {
       throw new Error('Bake resolution must be an integer between 128 and 4096 pixels.');
@@ -335,15 +360,22 @@ export class TextureBaker {
 
     try {
       await this.prepareContext(context, snapshot.name);
-      const albedo = await this.renderChannel(context, material, 'albedo', resolution);
-      const roughness = await this.renderChannel(context, material, 'roughness', resolution);
-      const normal = await this.renderChannel(context, material, 'normal', resolution);
-      const clearcoat = await this.renderChannel(context, material, 'clearcoat', resolution);
-      const clearcoatRoughness = await this.renderChannel(context, material, 'clearcoat-roughness', resolution);
-      const metallic = await this.renderChannel(context, material, 'metallic', resolution);
-      const ao = await this.renderChannel(context, material, 'ao', resolution);
-      const emissive = await this.renderChannel(context, material, 'emissive', resolution);
-      return { resolution, albedo, roughness, normal, clearcoat, clearcoatRoughness, metallic, ao, emissive };
+      const rendered = new Map<PbrChannelName, BakedTexture>();
+      for (const [index, channel] of PBR_CHANNELS.entries()) {
+        onProgress?.(channel, index, totalChannels);
+        rendered.set(channel, await this.renderChannel(context, material, channel, resolution));
+      }
+      return {
+        resolution,
+        albedo: rendered.get('albedo')!,
+        roughness: rendered.get('roughness')!,
+        normal: rendered.get('normal')!,
+        clearcoat: rendered.get('clearcoat')!,
+        clearcoatRoughness: rendered.get('clearcoat-roughness')!,
+        metallic: rendered.get('metallic')!,
+        ao: rendered.get('ao')!,
+        emissive: rendered.get('emissive')!
+      };
     } finally {
       this.disposeContext(context);
     }

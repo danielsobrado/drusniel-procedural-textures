@@ -33,8 +33,13 @@ export interface SimulationField {
 }
 
 const CPU_WORK_BUDGET = 32 * 1024 * 1024;
-const CPU_YIELD_INTERVAL = 8;
+// One simulation iteration touches size*size cells, so at the default 128 grid the old
+// interval of 8 meant ~131k tight-loop iterations between yields - long enough to drop
+// frames. Yielding every iteration keeps the main thread responsive; the simulation is
+// already off the critical path.
+const CPU_YIELD_INTERVAL = 1;
 const GPU_DISPATCH_BATCH = 128;
+const SIMULATION_KINDS = new Set<SimulationKind>(['reaction-diffusion', 'thermal-erosion']);
 const DEFAULT_REACTION_DIFFUSION: Readonly<ReactionDiffusionParameters> = {
   feed: 0.055,
   kill: 0.062,
@@ -141,8 +146,25 @@ function finite(value: number, label: string, min: number, max: number): number 
   return value;
 }
 
+/**
+ * setTimeout(0) is clamped to 4ms once nesting passes five levels, which serialised
+ * badly across thousands of yields. A message-channel task has no such clamp.
+ */
+const yieldChannel = typeof MessageChannel === 'function' ? new MessageChannel() : null;
+
 function waitForTask(): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  if (yieldChannel === null) {
+    return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+  }
+  return new Promise((resolve) => {
+    const done = (): void => {
+      yieldChannel.port1.removeEventListener('message', done);
+      resolve();
+    };
+    yieldChannel.port1.addEventListener('message', done);
+    yieldChannel.port1.start();
+    yieldChannel.port2.postMessage(null);
+  });
 }
 
 export class MaterialComputeEngine {
@@ -163,10 +185,12 @@ export class MaterialComputeEngine {
     return this.pipelineCache.size;
   }
 
-  public initialize(): Promise<Readonly<ComputeStatus>> {
-    if (this.device !== null) return Promise.resolve(this.status);
+  public async initialize(): Promise<Readonly<ComputeStatus>> {
+    if (this.device !== null) return this.status;
     this.initializationPromise ??= this.initializeGpu();
-    return this.initializationPromise;
+    const status = await this.initializationPromise;
+    if (!status.available) this.initializationPromise = null;
+    return status;
   }
 
   public async simulate(request: Readonly<SimulationRequest>): Promise<SimulationField> {
@@ -217,6 +241,9 @@ export class MaterialComputeEngine {
   }
 
   private validateRequest(request: Readonly<SimulationRequest>): void {
+    if (!SIMULATION_KINDS.has(request.kind)) {
+      throw new Error(`Unsupported simulation kind: ${String(request.kind)}.`);
+    }
     if (!Number.isInteger(request.size) || request.size < 8 || request.size > 1024) {
       throw new Error('Simulation size must be an integer between 8 and 1024.');
     }
@@ -289,40 +316,46 @@ export class MaterialComputeEngine {
     const UNIFORM = 0x0040;
     const MAP_READ = 0x0001;
     const bytes = state.byteLength;
-    const first = device.createBuffer({ size: bytes, usage: STORAGE | COPY_SRC | COPY_DST });
-    const second = device.createBuffer({ size: bytes, usage: STORAGE | COPY_SRC | COPY_DST });
-    const params = device.createBuffer({ size: 32, usage: UNIFORM | COPY_DST });
-    const readback = device.createBuffer({ size: bytes, usage: COPY_DST | MAP_READ });
-    const parameterBytes = new ArrayBuffer(32);
-    const parameterView = new DataView(parameterBytes);
-    const reaction = request.reactionDiffusion ?? DEFAULT_REACTION_DIFFUSION;
-    parameterView.setUint32(0, request.size, true);
-    parameterView.setUint32(4, request.size, true);
-    parameterView.setFloat32(8, reaction.feed, true);
-    parameterView.setFloat32(12, reaction.kill, true);
-    parameterView.setFloat32(16, reaction.diffusionA, true);
-    parameterView.setFloat32(20, reaction.diffusionB, true);
-    device.queue.writeBuffer(first, 0, state);
-    device.queue.writeBuffer(params, 0, new Uint8Array(parameterBytes));
-
-    const bindAB = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: first } },
-        { binding: 1, resource: { buffer: second } },
-        { binding: 2, resource: { buffer: params } }
-      ]
-    });
-    const bindBA = device.createBindGroup({
-      layout: pipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: second } },
-        { binding: 1, resource: { buffer: first } },
-        { binding: 2, resource: { buffer: params } }
-      ]
-    });
+    let first: GpuBufferLike | null = null;
+    let second: GpuBufferLike | null = null;
+    let params: GpuBufferLike | null = null;
+    let readback: GpuBufferLike | null = null;
+    let readbackMapped = false;
 
     try {
+      const firstBuffer = first = device.createBuffer({ size: bytes, usage: STORAGE | COPY_SRC | COPY_DST });
+      const secondBuffer = second = device.createBuffer({ size: bytes, usage: STORAGE | COPY_SRC | COPY_DST });
+      const paramsBuffer = params = device.createBuffer({ size: 32, usage: UNIFORM | COPY_DST });
+      const readbackBuffer = readback = device.createBuffer({ size: bytes, usage: COPY_DST | MAP_READ });
+      const parameterBytes = new ArrayBuffer(32);
+      const parameterView = new DataView(parameterBytes);
+      const reaction = request.reactionDiffusion ?? DEFAULT_REACTION_DIFFUSION;
+      parameterView.setUint32(0, request.size, true);
+      parameterView.setUint32(4, request.size, true);
+      parameterView.setFloat32(8, reaction.feed, true);
+      parameterView.setFloat32(12, reaction.kill, true);
+      parameterView.setFloat32(16, reaction.diffusionA, true);
+      parameterView.setFloat32(20, reaction.diffusionB, true);
+      device.queue.writeBuffer(firstBuffer, 0, state);
+      device.queue.writeBuffer(paramsBuffer, 0, new Uint8Array(parameterBytes));
+
+      const bindAB = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: firstBuffer } },
+          { binding: 1, resource: { buffer: secondBuffer } },
+          { binding: 2, resource: { buffer: paramsBuffer } }
+        ]
+      });
+      const bindBA = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: secondBuffer } },
+          { binding: 1, resource: { buffer: firstBuffer } },
+          { binding: 2, resource: { buffer: paramsBuffer } }
+        ]
+      });
+
       for (let batchStart = 0; batchStart < request.iterations; batchStart += GPU_DISPATCH_BATCH) {
         const batchEnd = Math.min(batchStart + GPU_DISPATCH_BATCH, request.iterations);
         const encoder = device.createCommandEncoder();
@@ -336,22 +369,25 @@ export class MaterialComputeEngine {
         device.queue.submit([encoder.finish()]);
       }
 
-      const source = request.iterations % 2 === 0 ? first : second;
+      const source = request.iterations % 2 === 0 ? firstBuffer : secondBuffer;
       const encoder = device.createCommandEncoder();
-      encoder.copyBufferToBuffer(source, 0, readback, 0, bytes);
+      encoder.copyBufferToBuffer(source, 0, readbackBuffer, 0, bytes);
       device.queue.submit([encoder.finish()]);
-      await readback.mapAsync(MAP_READ);
-      const mapped = new Float32Array(readback.getMappedRange().slice(0));
-      readback.unmap();
+      await readbackBuffer.mapAsync(MAP_READ);
+      readbackMapped = true;
+      const mapped = new Float32Array(readbackBuffer.getMappedRange().slice(0));
+      readbackBuffer.unmap();
+      readbackMapped = false;
       return Float32Array.from(
         { length: itemCount },
         (_, index) => mapped[index * 2 + 1] ?? 0
       );
     } finally {
-      first.destroy();
-      second.destroy();
-      params.destroy();
-      readback.destroy();
+      if (readbackMapped) readback?.unmap();
+      first?.destroy();
+      second?.destroy();
+      params?.destroy();
+      readback?.destroy();
     }
   }
 

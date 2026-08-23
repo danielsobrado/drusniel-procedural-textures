@@ -199,10 +199,49 @@ function createClosedTorusKnotGeometry(): THREE.BufferGeometry {
   ), TORUS_KNOT_MERGE_TOLERANCE);
 }
 
+/**
+ * Welded geometry templates, keyed by preset.
+ *
+ * Building the default sphere costs ~5 ms but welding it costs ~60 ms, and the caller
+ * rebuilds the preview mesh on every object change and every undo/redo. Cloning a cached
+ * template is ~0.8 ms, so the weld is paid once per preset per session.
+ *
+ * A clone is essential rather than an optimisation detail: replaceRoot() disposes the
+ * geometry of the mesh it swaps out, so handing out the template itself would dispose
+ * the cache entry.
+ */
+const geometryTemplates = new Map<ObjectPreset, THREE.BufferGeometry>();
+
+function templateGeometry(preset: ObjectPreset, build: () => THREE.BufferGeometry): THREE.BufferGeometry {
+  let template = geometryTemplates.get(preset);
+  if (template === undefined) {
+    template = build();
+    template.computeVertexNormals();
+    geometryTemplates.set(preset, template);
+  }
+  return template.clone();
+}
+
 export function createProceduralMesh(
   preset: ObjectPreset,
   material: THREE.Material
 ): THREE.Mesh {
+  const geometry = templateGeometry(preset, () => buildPresetGeometry(preset));
+
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.userData.labProceduralPreview = true;
+  mesh.userData.labObjectPreset = preset;
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+
+  if (preset === 'plane') {
+    mesh.rotation.x = PLANE_TILT_X;
+  }
+
+  return mesh;
+}
+
+function buildPresetGeometry(preset: ObjectPreset): THREE.BufferGeometry {
   let geometry: THREE.BufferGeometry;
 
   switch (preset) {
@@ -254,17 +293,5 @@ export function createProceduralMesh(
       break;
   }
 
-  geometry.computeVertexNormals();
-
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.userData.labProceduralPreview = true;
-  mesh.userData.labObjectPreset = preset;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
-
-  if (preset === 'plane') {
-    mesh.rotation.x = PLANE_TILT_X;
-  }
-
-  return mesh;
+  return geometry;
 }

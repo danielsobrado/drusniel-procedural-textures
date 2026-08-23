@@ -1,7 +1,7 @@
 import { TILE_CONFIG } from '../config/tileConfig';
 import { measureEdgeMismatch } from '../export/SeamlessTexture';
 import type { BakedTextureSet } from '../export/TextureBaker';
-import { TerrainTileLabPanel } from './TerrainTileLabPanel';
+import type { TerrainTileLabPanel } from './TerrainTileLabPanel';
 
 interface TilePreviewCallbacks {
   onClose: () => void;
@@ -60,6 +60,8 @@ export class TilePreviewPanel {
   private readonly terrainHost: HTMLElement;
   private readonly resizeObserver: ResizeObserver;
   private terrainPanel: TerrainTileLabPanel | null = null;
+  private terrainPanelPromise: Promise<TerrainTileLabPanel | null> | null = null;
+  private disposed = false;
   private currentMaterialTexture: HTMLCanvasElement | null = null;
   private textures: BakedTextureSet | null = null;
   private channel: TileChannel = 'albedo';
@@ -150,7 +152,7 @@ export class TilePreviewPanel {
     }
 
     this.resizeObserver = new ResizeObserver(() => {
-      if (this.root.getBoundingClientRect().width > 0 && this.mode === 'terrain') this.ensureTerrainPanel();
+      if (this.root.getBoundingClientRect().width > 0 && this.mode === 'terrain') void this.ensureTerrainPanel();
       this.render();
     });
     this.resizeObserver.observe(this.root);
@@ -182,7 +184,7 @@ export class TilePreviewPanel {
     this.updateMetrics();
     this.empty.hidden = true;
     this.refreshButton.disabled = false;
-    this.saveButton.disabled = false;
+    this.saveButton.disabled = preserveStale;
     if (preserveStale) {
       this.currentMaterialTexture = null;
       this.terrainPanel?.clearCurrentMaterialTexture();
@@ -196,6 +198,7 @@ export class TilePreviewPanel {
   public markStale(): void {
     this.currentMaterialTexture = null;
     this.terrainPanel?.clearCurrentMaterialTexture();
+    this.saveButton.disabled = true;
     if (this.root.getAttribute('aria-busy') === 'true') {
       this.invalidatedDuringLoad = true;
       this.root.dataset.stale = 'true';
@@ -208,7 +211,6 @@ export class TilePreviewPanel {
     this.textureStatus = 'Material changed · refresh preview';
     if (this.mode === 'texture') this.status.textContent = this.textureStatus;
     this.refreshButton.disabled = false;
-    this.saveButton.disabled = false;
   }
 
   public setError(message: string): void {
@@ -219,28 +221,49 @@ export class TilePreviewPanel {
     this.empty.hidden = this.textures !== null;
     if (this.textures === null) this.empty.textContent = message;
     this.refreshButton.disabled = false;
-    this.saveButton.disabled = false;
+    this.saveButton.disabled = this.textures === null || this.root.dataset.stale === 'true';
     this.terrainPanel?.setCurrentMaterialError(message);
   }
 
   public dispose(): void {
+    this.disposed = true;
     this.resizeObserver.disconnect();
     this.terrainPanel?.dispose();
   }
 
-  private ensureTerrainPanel(): TerrainTileLabPanel {
-    if (this.terrainPanel !== null) return this.terrainPanel;
-    this.terrainPanel = new TerrainTileLabPanel(this.terrainHost, {
-      onStatus: (message) => {
-        this.terrainStatus = message;
-        if (this.mode === 'terrain') this.status.textContent = message;
-      },
-      onCurrentMaterialRequested: () => this.callbacks.onTextureRequested?.()
-    });
-    if (this.currentMaterialTexture !== null) {
-      this.terrainPanel.setCurrentMaterialTexture(this.currentMaterialTexture);
-    }
-    return this.terrainPanel;
+  /**
+   * The terrain lab drags in the whole terrain stack (generator, hydrology, mesh
+   * preview, player controller) plus its stylesheets, none of which the material
+   * workspace needs. It is fetched the first time the terrain view is actually shown.
+   * The in-flight promise is cached because the ResizeObserver can ask repeatedly
+   * before the import resolves.
+   */
+  private ensureTerrainPanel(): Promise<TerrainTileLabPanel | null> {
+    if (this.terrainPanelPromise !== null) return this.terrainPanelPromise;
+
+    this.terrainPanelPromise = import('./TerrainTileLabPanel')
+      .then(({ TerrainTileLabPanel }) => {
+        if (this.disposed) return null;
+        const panel = new TerrainTileLabPanel(this.terrainHost, {
+          onStatus: (message) => {
+            this.terrainStatus = message;
+            if (this.mode === 'terrain') this.status.textContent = message;
+          },
+          onCurrentMaterialRequested: () => this.callbacks.onTextureRequested?.()
+        });
+        this.terrainPanel = panel;
+        if (this.currentMaterialTexture !== null) {
+          panel.setCurrentMaterialTexture(this.currentMaterialTexture);
+        }
+        return panel;
+      })
+      .catch((error: unknown) => {
+        this.terrainPanelPromise = null;
+        console.warn('Terrain tile lab failed to load.', error);
+        return null;
+      });
+
+    return this.terrainPanelPromise;
   }
 
   private setMode(mode: TileLabMode): void {
@@ -258,7 +281,7 @@ export class TilePreviewPanel {
       this.render();
       this.callbacks.onTextureRequested?.();
     } else if (this.root.getBoundingClientRect().width > 0) {
-      this.ensureTerrainPanel();
+      void this.ensureTerrainPanel();
     }
   }
 

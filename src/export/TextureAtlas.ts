@@ -23,13 +23,31 @@ function floorPowerOfTwo(value: number): number {
   return 2 ** Math.floor(Math.log2(value));
 }
 
+function positiveInteger(value: number, label: string): number {
+  if (!Number.isInteger(value) || value < 1) throw new Error(`${label} must be a positive integer.`);
+  return value;
+}
+
+function validateAtlasLayout(layout: Readonly<SharedAtlasLayout>): void {
+  positiveInteger(layout.grid, 'Shared atlas grid');
+  positiveInteger(layout.tileSize, 'Shared atlas tile size');
+  positiveInteger(layout.resolution, 'Shared atlas resolution');
+  if (layout.resolution !== layout.grid * layout.tileSize) {
+    throw new Error('Shared atlas resolution must equal grid multiplied by tile size.');
+  }
+}
+
 export function createSharedAtlasLayout(
   count: number,
   requestedTileSize: number,
   maxTextureSize: number,
   minTileSize: number
 ): SharedAtlasLayout {
-  if (!Number.isInteger(count) || count < 1) throw new Error('Shared atlas requires at least one material target.');
+  positiveInteger(count, 'Shared atlas material target count');
+  positiveInteger(requestedTileSize, 'Requested shared atlas tile size');
+  positiveInteger(maxTextureSize, 'Shared atlas maximum texture size');
+  positiveInteger(minTileSize, 'Shared atlas minimum tile size');
+
   const minimumGrid = Math.ceil(Math.sqrt(count));
   const grid = 2 ** Math.ceil(Math.log2(minimumGrid));
   const maximumTile = floorPowerOfTwo(maxTextureSize / grid);
@@ -80,6 +98,10 @@ export function combinePbrTextureSets(
   layout: SharedAtlasLayout
 ): SharedAtlasTextureSet {
   if (sets.length === 0) throw new Error('Cannot combine an empty baked material set.');
+  validateAtlasLayout(layout);
+  if (sets.length > layout.grid * layout.grid) {
+    throw new Error('Shared atlas layout does not have enough slots for the baked material sets.');
+  }
   return {
     grid: layout.grid,
     tileSize: layout.tileSize,
@@ -100,15 +122,8 @@ export function remapGeometryUvToAtlas(
   slot: number,
   layout: Readonly<SharedAtlasLayout>
 ): THREE.BufferGeometry {
-  if (
-    !Number.isInteger(slot) ||
-    slot < 0 ||
-    slot >= layout.grid * layout.grid ||
-    !Number.isInteger(layout.grid) ||
-    layout.grid < 1 ||
-    !Number.isInteger(layout.resolution) ||
-    layout.resolution < 1
-  ) {
+  validateAtlasLayout(layout);
+  if (!Number.isInteger(slot) || slot < 0 || slot >= layout.grid * layout.grid) {
     throw new Error('Invalid shared-atlas slot or layout.');
   }
   const geometry = source.clone();

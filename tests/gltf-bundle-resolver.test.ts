@@ -40,10 +40,18 @@ describe('GLTF bundle resolver', () => {
       'ipfs://asset/a.png',
       'custom:asset.png',
       '//example.com/a.png',
+      '/textures/a.png',
+      '\\textures\\a.png',
       'https%3A%2F%2Fexample.com%2Fa.png'
     ]) {
-      expect(() => collectExternalUris({ images: [{ uri }] })).toThrow(/remote/i);
+      expect(() => collectExternalUris({ images: [{ uri }] })).toThrow(/remote or absolute/i);
     }
+  });
+
+  it('rejects absolute paths during direct bundle resolution too', () => {
+    const texture = bundleFile('albedo.png', 'textures/albedo.png');
+    const index = createBundleIndex([texture]);
+    expect(() => resolveBundleFile('/textures/albedo.png', index, 'scene.gltf')).toThrow(/remote or absolute/i);
   });
 
   it('ignores uri-shaped metadata that the loader will not fetch', () => {

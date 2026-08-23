@@ -28,6 +28,11 @@ export function terrainTextureFromCanvas(source: HTMLCanvasElement): TerrainText
 
 export class TerrainSurfaceComposer {
   private readonly textures = new Map<number, TerrainTextureSource>();
+  // Reused per-pixel colour scratch. The previous code returned a fresh 3-element array
+  // from both colorAt and materialColor, i.e. up to three million allocations per
+  // repaint at the configured 1.5M-pixel preview budget.
+  private readonly autoColor = new Float64Array(3);
+  private readonly overrideColor = new Float64Array(3);
 
   public setTexture(materialIndex: number, texture: TerrainTextureSource | null): void {
     if (texture === null) this.textures.delete(materialIndex);
@@ -44,29 +49,30 @@ export class TerrainSurfaceComposer {
     const height = Math.max(1, Math.round(bounds.height * ratio));
     if (canvas.width !== width) canvas.width = width;
     if (canvas.height !== height) canvas.height = height;
-    this.render(canvas, fields, paint, view, materialRepeat, view === 'repeat' ? 3 : 1);
+    this.render(canvas, fields, paint, view, materialRepeat, view === 'repeat' ? 3 : 1, true);
   }
 
-  public createMaterialCanvas(fields: Readonly<TerrainFields>, paint: Readonly<TerrainPaintMask>, materialRepeat: number, size = 512): HTMLCanvasElement {
+  public createMaterialCanvas(fields: Readonly<TerrainFields>, paint: Readonly<TerrainPaintMask>, materialRepeat: number, size = 512, decorateMap = true): HTMLCanvasElement {
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
-    this.render(canvas, fields, paint, 'material', materialRepeat, 1);
+    this.render(canvas, fields, paint, 'material', materialRepeat, 1, decorateMap);
     return canvas;
   }
 
-  private render(canvas: HTMLCanvasElement, fields: Readonly<TerrainFields>, paint: Readonly<TerrainPaintMask>, view: TerrainViewMode, materialRepeat: number, tiles: number): void {
+  private render(canvas: HTMLCanvasElement, fields: Readonly<TerrainFields>, paint: Readonly<TerrainPaintMask>, view: TerrainViewMode, materialRepeat: number, tiles: number, decorateMap: boolean): void {
     const context = canvas.getContext('2d');
     if (context === null) return;
     const image = context.createImageData(canvas.width, canvas.height);
+    const data = image.data;
     for (let y = 0; y < canvas.height; y += 1) {
       const v = ((y + 0.5) / canvas.height) * tiles;
       for (let x = 0; x < canvas.width; x += 1) {
         const u = ((x + 0.5) / canvas.width) * tiles;
         const index = fieldIndex(u, v, fields.resolution);
-        const color = this.colorAt(fields, paint, index, u, v, view, materialRepeat);
         const target = (y * canvas.width + x) * 4;
-        image.data[target] = color[0]; image.data[target + 1] = color[1]; image.data[target + 2] = color[2]; image.data[target + 3] = 255;
+        this.writeColorAt(data, target, fields, paint, index, u, v, view, materialRepeat, decorateMap);
+        data[target + 3] = 255;
       }
     }
     context.putImageData(image, 0, 0);
@@ -83,38 +89,88 @@ export class TerrainSurfaceComposer {
     context.restore();
   }
 
-  private colorAt(fields: Readonly<TerrainFields>, paint: Readonly<TerrainPaintMask>, index: number, u: number, v: number, view: TerrainViewMode, materialRepeat: number): readonly [number, number, number] {
-    if (view === 'height') { const n = byte((fields.height[index] ?? 0) * 255); return [n, n, n]; }
-    if (view === 'slope') { const n = fields.slope[index] ?? 0; return [byte(42 + n * 205), byte(48 + n * 116), byte(58 + n * 65)]; }
-    if (view === 'flow') { const n = fields.flow[index] ?? 0; return [byte(20 + n * 75), byte(35 + n * 145), byte(50 + n * 200)]; }
-    if (view === 'river') { const n = fields.river[index] ?? 0; return [byte(16 + n * 40), byte(28 + n * 110), byte(36 + n * 175)]; }
-    if (view === 'wetness') { const n = fields.wetness[index] ?? 0; return [byte(35 + n * 55), byte(45 + n * 105), byte(43 + n * 125)]; }
+  /** Writes one RGB pixel straight into the image buffer, allocating nothing. */
+  private writeColorAt(
+    data: Uint8ClampedArray,
+    target: number,
+    fields: Readonly<TerrainFields>,
+    paint: Readonly<TerrainPaintMask>,
+    index: number,
+    u: number,
+    v: number,
+    view: TerrainViewMode,
+    materialRepeat: number,
+    decorateMap: boolean
+  ): void {
+    if (view === 'height') {
+      const n = byte((fields.height[index] ?? 0) * 255);
+      data[target] = n; data[target + 1] = n; data[target + 2] = n;
+      return;
+    }
+    if (view === 'slope') {
+      const n = fields.slope[index] ?? 0;
+      data[target] = byte(42 + n * 205); data[target + 1] = byte(48 + n * 116); data[target + 2] = byte(58 + n * 65);
+      return;
+    }
+    if (view === 'flow') {
+      const n = fields.flow[index] ?? 0;
+      data[target] = byte(20 + n * 75); data[target + 1] = byte(35 + n * 145); data[target + 2] = byte(50 + n * 200);
+      return;
+    }
+    if (view === 'river') {
+      const n = fields.river[index] ?? 0;
+      data[target] = byte(16 + n * 40); data[target + 1] = byte(28 + n * 110); data[target + 2] = byte(36 + n * 175);
+      return;
+    }
+    if (view === 'wetness') {
+      const n = fields.wetness[index] ?? 0;
+      data[target] = byte(35 + n * 55); data[target + 1] = byte(45 + n * 105); data[target + 2] = byte(43 + n * 125);
+      return;
+    }
 
     const autoIndex = fields.material[index] ?? 0;
     const overrideIndex = paint.material[index] ?? NO_MATERIAL;
     const weight = overrideIndex === NO_MATERIAL ? 0 : paint.weight[index] ?? 0;
-    const auto = this.materialColor(autoIndex, u, v, fields, index, materialRepeat);
-    const override = overrideIndex === NO_MATERIAL ? auto : this.materialColor(overrideIndex, u, v, fields, index, materialRepeat);
-    const river = Math.min(0.92, (fields.river[index] ?? 0) * 0.94);
-    const shade = 1 - (fields.slope[index] ?? 0) * 0.18;
-    return [
-      byte(mix(mix(auto[0], override[0], weight) * shade, WATER[0], river)),
-      byte(mix(mix(auto[1], override[1], weight) * shade, WATER[1], river)),
-      byte(mix(mix(auto[2], override[2], weight) * shade, WATER[2], river))
-    ];
+
+    this.writeMaterialColor(this.autoColor, autoIndex, u, v, fields, index, materialRepeat);
+    const auto = this.autoColor;
+    let override = auto;
+    if (overrideIndex !== NO_MATERIAL) {
+      this.writeMaterialColor(this.overrideColor, overrideIndex, u, v, fields, index, materialRepeat);
+      override = this.overrideColor;
+    }
+
+    const river = decorateMap ? Math.min(0.92, (fields.river[index] ?? 0) * 0.94) : 0;
+    const shade = decorateMap ? 1 - (fields.slope[index] ?? 0) * 0.18 : 1;
+    data[target] = byte(mix(mix(auto[0]!, override[0]!, weight) * shade, WATER[0], river));
+    data[target + 1] = byte(mix(mix(auto[1]!, override[1]!, weight) * shade, WATER[1], river));
+    data[target + 2] = byte(mix(mix(auto[2]!, override[2]!, weight) * shade, WATER[2], river));
   }
 
-  private materialColor(materialIndex: number, u: number, v: number, fields: Readonly<TerrainFields>, index: number, materialRepeat: number): readonly [number, number, number] {
+  private writeMaterialColor(
+    out: Float64Array,
+    materialIndex: number,
+    u: number,
+    v: number,
+    fields: Readonly<TerrainFields>,
+    index: number,
+    materialRepeat: number
+  ): void {
     const texture = this.textures.get(materialIndex);
     if (texture !== undefined) {
       const tx = Math.floor(fract(u * materialRepeat) * texture.width) % texture.width;
       const ty = Math.floor(fract(v * materialRepeat) * texture.height) % texture.height;
       const source = (ty * texture.width + tx) * 4;
-      return [texture.pixels[source] ?? 0, texture.pixels[source + 1] ?? 0, texture.pixels[source + 2] ?? 0];
+      out[0] = texture.pixels[source] ?? 0;
+      out[1] = texture.pixels[source + 1] ?? 0;
+      out[2] = texture.pixels[source + 2] ?? 0;
+      return;
     }
     const base = (TERRAIN_MATERIALS[materialIndex] ?? TERRAIN_MATERIALS[0]!).color;
     const grain = (noise(index % fields.resolution, Math.floor(index / fields.resolution)) - 0.5) * 18;
     const wet = (fields.wetness[index] ?? 0) * (materialIndex === 2 ? 20 : 5);
-    return [byte(base[0] + grain - wet), byte(base[1] + grain * 0.82 - wet), byte(base[2] + grain * 0.58 - wet)];
+    out[0] = byte(base[0] + grain - wet);
+    out[1] = byte(base[1] + grain * 0.82 - wet);
+    out[2] = byte(base[2] + grain * 0.58 - wet);
   }
 }

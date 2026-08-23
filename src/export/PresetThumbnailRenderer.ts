@@ -1,8 +1,7 @@
 import * as THREE from 'three';
-import { EXPORT_CONFIG } from '../app/constants';
+import { DEFAULT_SYNTHESIS, EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
-import type { MaterialPreset, PhysicalSettings } from '../materials/types';
+import type { MaterialPreset, PhysicalSettings, SynthesisSettings } from '../materials/types';
 import { canvasToPngDataUrl } from '../utils/canvas';
 
 function flipRows(source: Uint8Array, size: number): Uint8ClampedArray<ArrayBuffer> {
@@ -69,8 +68,17 @@ export class PresetThumbnailRenderer {
       ...this.defaultPhysical,
       ...(preset.physical ?? {})
     };
-    this.compiler.sync(preset.layers, preset.groups ?? [], false);
-    applyPhysicalSettings(this.compiler.material, physical);
+    const synthesis: SynthesisSettings = {
+      ...DEFAULT_SYNTHESIS,
+      ...(preset.synthesis ?? {})
+    };
+    this.compiler.sync(
+      preset.layers,
+      preset.groups ?? [],
+      false,
+      synthesis
+    );
+    this.compiler.applyPhysical(physical);
   }
 
   private async captureAsync(): Promise<string> {

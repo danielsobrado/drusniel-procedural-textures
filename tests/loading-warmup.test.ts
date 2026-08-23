@@ -38,12 +38,12 @@ describe('nonblocking renderer warmup', () => {
     expect(refinementStyles).toContain('content: attr(data-loading-label)');
   });
 
-  it('loads preset thumbnails lazily near the viewport', () => {
-    expect(librarySource).toContain('new IntersectionObserver(');
-    expect(librarySource).toContain('onThumbnailRequested');
-    expect(appSource).toContain('private queuePresetThumbnail(preset: MaterialPreset): void');
-    expect(appSource).toContain('await waitForBackgroundIdle();');
-    expect(appSource).toContain('this.library.setThumbnail(id, thumbnail);');
+  it('loads cached preset thumbnails lazily without runtime rendering', () => {
+    expect(librarySource).toContain('loading="lazy"');
+    expect(librarySource).toContain('presetThumbnailUrl(preset.id)');
+    expect(librarySource).not.toContain('onThumbnailRequested');
+    expect(appSource).not.toContain('queuePresetThumbnail');
+    expect(appSource).not.toContain('generatePresetThumbnail');
     expect(appSource).not.toContain('this.schedulePresetThumbnails();');
     expect(appSource).not.toContain('this.library.setThumbnails(thumbnails);');
   });

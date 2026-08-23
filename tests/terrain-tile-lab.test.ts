@@ -6,6 +6,7 @@ import {
   sampleTerrainHeight,
   wrapTerrainCoordinate
 } from '../src/tile/TerrainPlayerController';
+import { buildRiverAlphaData } from '../src/tile/TerrainRiverLayer';
 import type { TerrainFields, TerrainSettings } from '../src/tile/TerrainTypes';
 
 const SETTINGS: TerrainSettings = {
@@ -30,6 +31,39 @@ describe('terrain tile lab', () => {
     expect(first.height.every((value) => value >= 0 && value <= 1)).toBe(true);
   });
 
+  it('normalizes terrain seeds to WebGPU u32 semantics', async () => {
+    const engine = new TerrainComputeEngine();
+    const signed = await engine.generate({ ...SETTINGS, seed: -1 }, 32);
+    const unsigned = await engine.generate({ ...SETTINGS, seed: 0xffffffff }, 32);
+    expect(signed.height).toEqual(unsigned.height);
+  });
+
+  it('keeps RPG terrain broad instead of producing needle peaks', async () => {
+    const engine = new TerrainComputeEngine();
+    const settings = {
+      ...SETTINGS,
+      mountainCoverage: 0.46,
+      mountainHeight: 0.6,
+      ridgeSharpness: 1.6,
+      detail: 0.22
+    };
+    const result = await engine.generate(settings, 64);
+    let maximumStep = 0;
+    let extremeCount = 0;
+    for (let y = 0; y < 64; y += 1) {
+      for (let x = 0; x < 64; x += 1) {
+        const index = y * 64 + x;
+        const value = result.height[index] ?? 0;
+        const right = result.height[y * 64 + ((x + 1) % 64)] ?? value;
+        const down = result.height[((y + 1) % 64) * 64 + x] ?? value;
+        maximumStep = Math.max(maximumStep, Math.abs(value - right), Math.abs(value - down));
+        if (value > 0.85) extremeCount += 1;
+      }
+    }
+    expect(maximumStep).toBeLessThan(0.18);
+    expect(extremeCount / result.height.length).toBeLessThan(0.08);
+  });
+
   it('derives finite periodic hydrology fields and terrain materials', () => {
     const size = 16;
     const height = new Float32Array(size * size);
@@ -44,6 +78,69 @@ describe('terrain tile lab', () => {
     expect(fields.river.every((value) => value >= 0 && value <= 1)).toBe(true);
     expect(fields.wetness.every((value) => value >= 0 && value <= 1)).toBe(true);
     expect(fields.material.every((value) => value <= 3)).toBe(true);
+  });
+
+  it('produces visible river ribbons at useful density', () => {
+    const size = 32;
+    const height = new Float32Array(size * size);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        height[y * size + x] = 0.2 + Math.abs(x - size / 2) / size * 0.6;
+      }
+    }
+    const fields = buildTerrainFields(
+      height,
+      size,
+      { ...SETTINGS, riverDensity: 0.8 },
+      'cpu'
+    );
+    expect(fields.river.some((value) => value > 0.15)).toBe(true);
+  });
+
+  it('increases river coverage monotonically with density', () => {
+    const size = 32;
+    const height = new Float32Array(size * size);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        height[y * size + x] =
+          0.5 +
+          Math.sin(x / size * Math.PI * 2) * 0.18 +
+          Math.cos(y / size * Math.PI * 2) * 0.12 +
+          Math.sin((x + y) / size * Math.PI * 4) * 0.04;
+      }
+    }
+    const sparse = buildTerrainFields(
+      height,
+      size,
+      { ...SETTINGS, riverDensity: 0.15 },
+      'cpu'
+    );
+    const dense = buildTerrainFields(
+      height,
+      size,
+      { ...SETTINGS, riverDensity: 0.85 },
+      'cpu'
+    );
+    const sparseCount = sparse.river.filter((value) => value > 0.15).length;
+    const denseCount = dense.river.filter((value) => value > 0.15).length;
+    expect(sparseCount).toBeGreaterThan(0);
+    expect(denseCount).toBeGreaterThan(sparseCount);
+  });
+
+  it('widens rendered river water across wrapped tile edges', () => {
+    const size = 8;
+    const river = new Float32Array(size * size);
+    river[4 * size] = 1;
+    const alpha = buildRiverAlphaData(river, size, 2);
+    expect(alpha[(4 * size + 7) * 4 + 1]).toBeGreaterThan(0);
+    expect(alpha[(4 * size + 4) * 4 + 1]).toBe(0);
+  });
+
+  it('rejects invalid river alpha dimensions and widths', () => {
+    expect(() => buildRiverAlphaData(new Float32Array(16), 0, 1)).toThrow();
+    expect(() => buildRiverAlphaData(new Float32Array(15), 4, 1)).toThrow();
+    expect(() => buildRiverAlphaData(new Float32Array(16), 4, 0)).toThrow();
+    expect(() => buildRiverAlphaData(new Float32Array(16), 4, 5)).toThrow();
   });
 
   it('uses the recipe wetness radius when deriving terrain moisture', () => {

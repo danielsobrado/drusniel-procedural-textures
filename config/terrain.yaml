@@ -1,17 +1,21 @@
 resolution: 256
 worldSize: 512
-heightScale: 84
+heightScale: 64
 meshSegments: 128
 materialRepeat: 24
 mountains:
-  coverage: 0.72
-  height: 0.82
-  ridgeSharpness: 2.4
-  detail: 0.34
+  coverage: 0.46
+  height: 0.6
+  ridgeSharpness: 1.6
+  detail: 0.22
 hydrology:
-  riverDensity: 0.52
-  riverDepth: 0.045
+  riverDensity: 0.62
+  riverDepth: 0.04
   wetnessRadius: 5
+  minRiverCoverage: 0.002
+  maxRiverCoverage: 0.025
+  riverMaxThreshold: 0.98
+  riverBankFalloff: 0.7
 painting:
   radius: 0.035
   hardness: 0.65
@@ -35,3 +39,11 @@ imports:
   maxDimension: 4096
 preview:
   maxPixels: 1500000
+  riverWidthPixels: 1
+  riverOpacity: 0.86
+  riverColor: 3968949
+  riverOffsetMeters: 0.6
+  riverRoughness: 0.18
+  riverAlphaStart: 0.04
+  riverAlphaEnd: 0.52
+  skyColor: 7438482

@@ -11,6 +11,7 @@ import {
   UI_CONFIG
 } from './constants';
 import { AppState, createDefaultProject, type StateChangeReason } from './AppState';
+import { reportBootStage } from './BootProgress';
 import { ImportedFileCache } from './ImportedFileCache';
 import {
   MAX_IMPORTED_MESHES,
@@ -24,20 +25,34 @@ import type { QualityTier } from '../engine/Quality';
 import { TILE_CONFIG } from '../config/tileConfig';
 import { makeTextureSetSeamless } from '../export/SeamlessTexture';
 import { TileMaterialBaker } from '../export/TileMaterialBaker';
-import type { BakedTextureSet } from '../export/TextureBaker';
+import type { BakeChannel, BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import type { EnvironmentPreset, LayerKind, MaterialPreset, ProjectState } from '../materials/types';
+import type { EnvironmentPreset, LayerKind, ProjectState } from '../materials/types';
 import { serializeMaterialRecipe } from '../runtime/MaterialRecipe';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
 import { LibraryPanel } from '../ui/LibraryPanel';
+import { ProgressOverlay } from '../ui/ProgressOverlay';
 import { RadialMenu, type RadialCommand } from '../ui/RadialMenu';
 import { Shell } from '../ui/Shell';
 import { TilePreviewPanel } from '../ui/TilePreviewPanel';
 import { TileWorkspace } from '../ui/TileWorkspace';
 import { downloadBlob, downloadDataUrl, downloadText } from '../utils/download';
+import { idleTurn, nextPaint } from '../utils/scheduling';
 
 const BYTES_PER_MIB = 1024 * 1024;
+
+const BAKE_CHANNEL_LABELS: Readonly<Record<BakeChannel, string>> = {
+  albedo: 'albedo',
+  roughness: 'roughness',
+  normal: 'normal',
+  height: 'height',
+  clearcoat: 'clearcoat',
+  'clearcoat-roughness': 'clearcoat roughness',
+  metallic: 'metallic',
+  ao: 'ambient occlusion',
+  emissive: 'emissive'
+};
 const IMPORT_CACHE_ENTRY_LIMIT = HISTORY_LIMIT + 1;
 const MODEL_EXTENSIONS = new Set(['glb', 'gltf']);
 
@@ -76,20 +91,6 @@ async function readUtf8File(file: File, label: string): Promise<string> {
   }
 }
 
-function waitForNextPaint(): Promise<void> {
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-}
-
-function waitForBackgroundIdle(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(() => resolve());
-      return;
-    }
-    window.setTimeout(resolve, UI_CONFIG.idleWorkTimeoutMs);
-  });
-}
-
 function loadInitialProject(): ProjectState {
   const storageKeys = [STORAGE_KEY, ...LEGACY_STORAGE_KEYS];
   for (const storageKey of storageKeys) {
@@ -126,9 +127,14 @@ export class App {
   private readonly radial: RadialMenu;
   private readonly tilePreview: TilePreviewPanel;
   private readonly importedFiles = new ImportedFileCache(IMPORT_CACHE_ENTRY_LIMIT, MAX_MODEL_FILE_BYTES);
-  private readonly pendingPresetThumbnails = new Map<string, MaterialPreset>();
-  private readonly completedPresetThumbnailIds = new Set<string>();
   private autosaveTimer: number | null = null;
+  private readonly progress: ProgressOverlay;
+  private panelRenderFrame = 0;
+  private pendingPanelState: Readonly<ProjectState> | null = null;
+  private pendingLayersRender = false;
+  private pendingInspectorRender = false;
+  private pendingLibraryRender = false;
+  private pendingAutosaveState: Readonly<ProjectState> | null = null;
   private autosaveFailureShown = false;
   private activeImportedName: string | null = null;
   private suppressImportedRestore = false;
@@ -138,12 +144,13 @@ export class App {
   private tilePreviewMaps: BakedTextureSet | null = null;
   private tilePreviewStale = true;
   private tilePreviewRevision = 0;
-  private presetThumbnailGenerationActive = false;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
+    this.progress = new ProgressOverlay(root);
     this.tileWorkspace = new TileWorkspace(root);
     this.state = new AppState(loadInitialProject());
+    reportBootStage('Starting renderer');
     this.renderer = new LabRenderer(this.shell.elements.viewport, this.compiler);
     this.tileBaker = new TileMaterialBaker(this.compiler);
     this.renderer.setMeshSelectionCallback((id) => this.state.selectMesh(id));
@@ -153,7 +160,7 @@ export class App {
       onObject: (preset) => this.runSafely(() => this.state.setObjectPreset(preset)),
       onPreset: (preset) => this.runSafely(() => this.state.applyPreset(preset)),
       onImport: () => this.shell.elements.modelInput.click(),
-      onThumbnailRequested: (preset) => this.queuePresetThumbnail(preset)
+      getProjectState: () => this.state.snapshot
     });
 
     this.inspector = new Inspector(this.shell.elements.inspector, {
@@ -199,7 +206,7 @@ export class App {
     this.bindViewportGestures();
     this.bindKeyboard();
     this.syncAll(this.state.snapshot);
-    void this.initializeCompute();
+    void this.scheduleComputeStatusProbe();
   }
 
   private handleStateChange(state: Readonly<ProjectState>, reason: StateChangeReason): void {
@@ -219,15 +226,14 @@ export class App {
       reason === 'layers' || reason === 'groups' || reason === 'selection' ||
       reason === 'mesh' || reason === 'environment' || reason === 'synthesis' || reason === 'project'
     ) {
-      this.layers.render(state);
-      this.inspector.render(state);
+      this.schedulePanelRender(state, { layers: true, inspector: true });
     } else if (reason === 'background' || reason === 'wireframe' || reason === 'physical' || reason === 'object') {
-      this.inspector.render(state);
+      this.schedulePanelRender(state, { inspector: true });
     }
 
     if (reason === 'object' || reason === 'project') {
       this.syncObject(state);
-      this.library.render(state);
+      this.schedulePanelRender(state, { library: true });
     } else if (reason === 'mesh') {
       this.renderer.setMeshAssignments(state.meshAssignments);
       this.renderer.setSelectedMesh(state.selectedMeshId);
@@ -243,8 +249,46 @@ export class App {
       this.tilePreview.markStale();
     }
 
+    this.renderer.invalidate();
     this.shell.setStatus(this.projectStatus(state));
     this.scheduleAutosave(state);
+  }
+
+  /**
+   * Panel re-renders are coalesced to one frame. A slider drag emits a state change per
+   * pointermove, and each one used to run the inspector and layer-strip renders
+   * synchronously - together roughly a hundred DOM queries per event.
+   */
+  private schedulePanelRender(
+    state: Readonly<ProjectState>,
+    panels: { layers?: boolean; inspector?: boolean; library?: boolean }
+  ): void {
+    this.pendingPanelState = state;
+    this.pendingLayersRender ||= panels.layers === true;
+    this.pendingInspectorRender ||= panels.inspector === true;
+    this.pendingLibraryRender ||= panels.library === true;
+    if (this.panelRenderFrame !== 0) return;
+    this.panelRenderFrame = window.requestAnimationFrame(() => {
+      this.panelRenderFrame = 0;
+      this.flushPanelRender();
+    });
+  }
+
+  private flushPanelRender(): void {
+    const state = this.pendingPanelState;
+    const layers = this.pendingLayersRender;
+    const inspector = this.pendingInspectorRender;
+    const library = this.pendingLibraryRender;
+    this.pendingPanelState = null;
+    this.pendingLayersRender = false;
+    this.pendingInspectorRender = false;
+    this.pendingLibraryRender = false;
+    if (state === null) return;
+    this.runSafely(() => {
+      if (layers) this.layers.render(state);
+      if (inspector) this.inspector.render(state);
+      if (library) this.library.render(state);
+    });
   }
 
   private syncAll(state: Readonly<ProjectState>): void {
@@ -560,6 +604,19 @@ export class App {
     this.shell.toast('Project JSON saved.');
   }
 
+  /**
+   * Acquiring the compute device costs a full `requestAdapter`/`requestDevice` pair
+   * plus a WGSL pipeline compile, and the default project has no simulation layer, so
+   * none of it belongs on the boot path. Simulation correctness does not depend on this
+   * running: `MaterialCompiler.prepareSimulation` awaits `compute.initialize()` itself.
+   * This only keeps the status badge populated for a browser that never simulates.
+   */
+  private async scheduleComputeStatusProbe(): Promise<void> {
+    await nextPaint();
+    await idleTurn();
+    await this.initializeCompute();
+  }
+
   private async initializeCompute(): Promise<void> {
     const status = await this.compiler.initializeCompute();
     this.shell.elements.viewport.dataset.computeBackend = status.backend;
@@ -605,6 +662,8 @@ export class App {
       const requested = TILE_CONFIG.previewResolution;
       this.tilePreview.setLoading(`Baking seamless preview · ${requested}²…`);
       this.shell.setStatus(`Baking seamless tile preview · ${requested}²…`);
+      this.progress.begin(`Baking seamless preview · ${requested}²`);
+      this.progress.report('Generating seamless tile…', null);
       const maps = await this.buildSeamlessTileSet(requested);
       const isCurrent = revision === this.tilePreviewRevision;
       this.tilePreviewMaps = maps;
@@ -617,6 +676,7 @@ export class App {
       this.tilePreview.setError(message);
       this.shell.toast(message, 'error');
     } finally {
+      this.progress.finish();
       this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
@@ -627,6 +687,8 @@ export class App {
     try {
       const quality = this.renderer.getQualityTierSettings();
       this.shell.setStatus(`Baking seamless PBR maps · ${quality.bakeResolution}²…`);
+      this.progress.begin(`Baking seamless PBR maps · ${quality.bakeResolution}²`);
+      this.progress.report('Generating seamless tile…', null);
       const maps = await this.buildSeamlessTileSet(quality.bakeResolution);
       const stem = `${EXPORT_CONFIG.textureFileStem}-${TILE_CONFIG.fileSuffix}`;
       this.downloadTextureSet(maps, stem);
@@ -635,6 +697,7 @@ export class App {
       console.error('Seamless texture export failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
     } finally {
+      this.progress.finish();
       this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
@@ -673,13 +736,18 @@ export class App {
     try {
       const quality = this.renderer.getQualityTierSettings();
       this.shell.setStatus(`Baking PBR maps · ${quality.bakeResolution}²…`);
-      const maps = await this.renderer.bakeCurrentMaterial(this.state.snapshot.physical);
+      this.progress.begin(`Baking PBR maps · ${quality.bakeResolution}²`);
+      const maps = await this.renderer.bakeCurrentMaterial(
+        this.state.snapshot.physical,
+        (channel, index, total) => this.reportBakeChannel(channel, index, total)
+      );
       this.downloadTextureSet(maps, EXPORT_CONFIG.textureFileStem);
       this.shell.toast(`Baked 9 maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Texture bake failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
     } finally {
+      this.progress.finish();
       this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
@@ -689,6 +757,8 @@ export class App {
     if (!this.beginProductionOperation('export')) return;
     try {
       this.shell.setStatus('Baking material and exporting GLB…');
+      this.progress.begin('Exporting GLB');
+      this.progress.report('Baking material…', null);
       const blob = await this.renderer.exportCurrentGlb(this.state.snapshot.physical);
       downloadBlob(EXPORT_CONFIG.glbFileName, blob);
       this.shell.toast(`Exported ${EXPORT_CONFIG.glbFileName} · ${(blob.size / BYTES_PER_MIB).toFixed(1)} MiB`);
@@ -696,9 +766,14 @@ export class App {
       console.error('GLB export failed.', error);
       this.shell.toast(this.errorMessage(error), 'error');
     } finally {
+      this.progress.finish();
       this.productionOperation = null;
       this.shell.setStatus(this.projectStatus(this.state.snapshot));
     }
+  }
+
+  private reportBakeChannel(channel: BakeChannel, index: number, total: number): void {
+    this.progress.report(`Baking ${BAKE_CHANNEL_LABELS[channel]}…`, total === 0 ? null : index / total);
   }
 
   private beginProductionOperation(operation: ProductionOperation): boolean {
@@ -725,58 +800,24 @@ export class App {
     });
   }
 
-  private queuePresetThumbnail(preset: MaterialPreset): void {
-    if (!this.renderer.supportsTextureBaking()) return;
-    if (
-      this.completedPresetThumbnailIds.has(preset.id) ||
-      this.pendingPresetThumbnails.has(preset.id)
-    ) return;
-
-    this.pendingPresetThumbnails.set(preset.id, preset);
-    if (!this.presetThumbnailGenerationActive) void this.processPresetThumbnailQueue();
-  }
-
-  private async processPresetThumbnailQueue(): Promise<void> {
-    if (this.presetThumbnailGenerationActive) return;
-    this.presetThumbnailGenerationActive = true;
-
-    try {
-      while (this.pendingPresetThumbnails.size > 0) {
-        while (this.productionOperation !== null) await waitForNextPaint();
-        await waitForBackgroundIdle();
-        if (this.productionOperation !== null) continue;
-
-        const next = this.pendingPresetThumbnails.entries().next().value as
-          | [string, MaterialPreset]
-          | undefined;
-        if (next === undefined) break;
-
-        const [id, preset] = next;
-        try {
-          const thumbnail = await this.renderer.generatePresetThumbnail(preset);
-          this.completedPresetThumbnailIds.add(id);
-          this.library.setThumbnail(id, thumbnail);
-        } catch (error) {
-          console.warn(`Preset thumbnail generation failed for ${id}.`, error);
-        } finally {
-          this.pendingPresetThumbnails.delete(id);
-        }
-        await waitForNextPaint();
-      }
-    } finally {
-      this.presetThumbnailGenerationActive = false;
-      if (this.pendingPresetThumbnails.size > 0) void this.processPresetThumbnailQueue();
-    }
-  }
-
   private projectStatus(state: Readonly<ProjectState>): string {
     return `${state.layers.length} layers · ${state.groups.length} groups · ${this.compiler.computeStatus.label}`;
   }
 
   private scheduleAutosave(state: Readonly<ProjectState>): void {
     if (this.autosaveTimer !== null) window.clearTimeout(this.autosaveTimer);
-    const snapshot = structuredClone(state);
+    // The clone used to run here, outside the timer, so a slider drag paid a full deep
+    // copy of the project on every pointermove while the debounce only protected the
+    // write. Keeping the reference and serialising inside the timer means one
+    // serialisation per quiet period instead of one clone per event.
+    this.pendingAutosaveState = state;
     this.autosaveTimer = window.setTimeout(() => {
+      const snapshot = this.pendingAutosaveState;
+      this.pendingAutosaveState = null;
+      if (snapshot === null) {
+        this.autosaveTimer = null;
+        return;
+      }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
         this.autosaveFailureShown = false;

@@ -44,6 +44,11 @@ export interface WebGpuSurfaceNodes {
   displacement: Node<'float'>;
 }
 
+export type WebGpuLayerFieldResolver = (
+  layerIndex: number,
+  position: Node<'vec3'>
+) => Node<'float'>;
+
 function hash31(position: Node<'vec3'>): Node<'float'> {
   const p = fract(position.mul(0.1031));
   const mixed = p.add(p.dot(vec3(p.y, p.z, p.x).add(33.33)));
@@ -317,6 +322,7 @@ function layerField(
     );
     return mix(terrain, sediment, 0.72);
   }
+  if (kind === 'pattern') return float(0.5);
 
   const cell = fract(p).sub(0.5);
   const sphere = cell.length().sub(uniforms.sdfRadius);
@@ -348,15 +354,13 @@ function resolveStructureIndex(
   return current;
 }
 
-function fieldForLayer(
-  layerIndex: number,
+function fieldAtIndex(
+  fieldIndex: number,
   position: Node<'vec3'>,
   layers: readonly MaterialLayer[],
-  indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
   simulation: Readonly<WebGpuSimulationState>
 ): Node<'float'> {
-  const fieldIndex = resolveStructureIndex(layerIndex, layers, indexById);
   const fieldLayer = layers[fieldIndex];
   if (fieldLayer === undefined) return float(0.5);
   const meso = layerField(fieldIndex, fieldLayer.kind, position, uniforms, simulation);
@@ -372,19 +376,47 @@ function fieldForLayer(
   );
 }
 
+function fieldForLayer(
+  layerIndex: number,
+  position: Node<'vec3'>,
+  layers: readonly MaterialLayer[],
+  indexById: ReadonlyMap<string, number>,
+  uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>
+): Node<'float'> {
+  const fieldIndex = resolveStructureIndex(layerIndex, layers, indexById);
+  return fieldAtIndex(fieldIndex, position, layers, uniforms, simulation);
+}
+
+export function buildWebGpuProceduralLayerRawField(
+  layerIndex: number,
+  position: Node<'vec3'>,
+  layers: readonly MaterialLayer[],
+  uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>
+): Node<'float'> {
+  const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
+  const layer = activeLayers[layerIndex];
+  if (layer === undefined || layer.kind === 'pattern') return float(0.5);
+  return fieldAtIndex(layerIndex, position, activeLayers, uniforms, simulation);
+}
+
 function shapedField(field: Node<'float'>, strength: Node<'float'>): Node<'float'> {
   return clamp(float(0.5).add(field.sub(0.5).mul(max(strength, 0))), 0, 1);
 }
 
 function coverage(kind: LayerKind, shaped: Node<'float'>): Node<'float'> {
   if (kind === 'base') return float(1);
+  if (kind === 'pattern') return smoothstep(0.04, 0.92, shaped);
   if (kind === 'spots' || kind === 'veins' || kind === 'vessels') return smoothstep(0.03, 0.92, shaped);
   if (kind === 'ridges') return mix(0.24, 1, shaped);
   return mix(0.48, 1, shaped);
 }
 
 function displacementSignal(kind: LayerKind, shaped: Node<'float'>): Node<'float'> {
-  return kind === 'spots' || kind === 'veins' || kind === 'vessels' ? shaped : shaped.sub(0.5);
+  return kind === 'spots' || kind === 'veins' || kind === 'vessels' || kind === 'pattern'
+    ? shaped
+    : shaped.sub(0.5);
 }
 
 function displacementGain(kind: LayerKind): number {
@@ -397,13 +429,13 @@ function maskForLayer(
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
-  simulation: Readonly<WebGpuSimulationState>
+  resolveField: WebGpuLayerFieldResolver
 ): Node<'float'> {
   const sourceId = layers[layerIndex]?.maskSourceLayerId;
   if (sourceId === null || sourceId === undefined) return float(1);
   const sourceIndex = indexById.get(sourceId);
   if (sourceIndex === undefined) return float(1);
-  const sourceField = fieldForLayer(sourceIndex, position, layers, indexById, uniforms, simulation);
+  const sourceField = resolveField(sourceIndex, position);
   const shaped = shapedField(sourceField, uniforms.strength[sourceIndex]!);
   const inverted = mix(shaped, shaped.oneMinus(), uniforms.maskInvert[layerIndex]!);
   return mix(1, inverted, clamp(uniforms.maskStrength[layerIndex]!, 0, 1));
@@ -415,13 +447,13 @@ function effectiveOpacity(
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
-  simulation: Readonly<WebGpuSimulationState>
+  resolveField: WebGpuLayerFieldResolver
 ): Node<'float'> {
   return clamp(
     uniforms.enabled[layerIndex]!
       .mul(uniforms.opacity[layerIndex]!)
       .mul(uniforms.groupOpacity[layerIndex]!)
-      .mul(maskForLayer(layerIndex, position, layers, indexById, uniforms, simulation)),
+      .mul(maskForLayer(layerIndex, position, layers, indexById, uniforms, resolveField)),
     0,
     1
   );
@@ -453,10 +485,14 @@ export function buildWebGpuSurfaceNodes(
   position: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   uniforms: WebGpuMaterialUniforms,
-  simulation: Readonly<WebGpuSimulationState>
+  simulation: Readonly<WebGpuSimulationState>,
+  fieldResolver?: WebGpuLayerFieldResolver
 ): WebGpuSurfaceNodes {
   const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
   const indexById = layerIndexById(activeLayers);
+  const resolveField: WebGpuLayerFieldResolver = fieldResolver ?? ((layerIndex, samplePosition) =>
+    fieldForLayer(layerIndex, samplePosition, activeLayers, indexById, uniforms, simulation)
+  );
   let surfaceColor: Node<'vec3'> = vec3(0.42, 0.45, 0.50);
   let roughness: Node<'float'> = float(0);
   let clearcoat: Node<'float'> = float(0);
@@ -469,8 +505,8 @@ export function buildWebGpuSurfaceNodes(
   let displacement: Node<'float'> = float(0);
 
   activeLayers.forEach((layer, index) => {
-    const opacityBase = effectiveOpacity(index, position, activeLayers, indexById, uniforms, simulation);
-    const field = fieldForLayer(index, position, activeLayers, indexById, uniforms, simulation);
+    const opacityBase = effectiveOpacity(index, position, activeLayers, indexById, uniforms, resolveField);
+    const field = resolveField(index, position);
     const shaped = shapedField(field, uniforms.strength[index]!);
     const layerCoverage = coverage(layer.kind, shaped);
     const opacity = clamp(opacityBase.mul(layerCoverage), 0, 1);
@@ -489,7 +525,11 @@ export function buildWebGpuSurfaceNodes(
       surfaceColor = blendColor(surfaceColor, layerColor, layer.blendMode, opacity);
     }
     if (layer.channel === 'surface' || layer.channel === 'roughness') {
-      const weight = layer.kind === 'base' ? float(1) : mix(0.4, 1, shaped);
+      const weight = layer.kind === 'base'
+        ? float(1)
+        : layer.kind === 'pattern'
+          ? mix(0.45, 1, shaped)
+          : mix(0.4, 1, shaped);
       roughness = roughness.add(uniforms.roughness[index]!.mul(opacity).mul(weight));
     }
     if (layer.channel === 'clearcoat') {

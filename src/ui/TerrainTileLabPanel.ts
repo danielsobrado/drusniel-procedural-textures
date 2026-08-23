@@ -1,3 +1,6 @@
+import '../styles/terrain-tile-lab.css';
+import '../styles/terrain-player.css';
+import '../styles/terrain-player-toolbar.css';
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
 import { MATERIAL_PRESETS } from '../materials/presets';
 import { TerrainGenerator } from '../tile/TerrainGenerator';
@@ -139,6 +142,7 @@ export class TerrainTileLabPanel {
   private generationSequence = 0;
   private textureImportSequence = 0;
   private renderFrame = 0;
+  private surfaceFrame = 0;
   private drawingPointer: number | null = null;
   private drawingErase = false;
   private lastStroke: { x: number; y: number } | null = null;
@@ -281,6 +285,7 @@ export class TerrainTileLabPanel {
       this.presetLoadSequences[material] = (this.presetLoadSequences[material] ?? 0) + 1;
     }
     if (this.renderFrame !== 0) cancelAnimationFrame(this.renderFrame);
+    if (this.surfaceFrame !== 0) cancelAnimationFrame(this.surfaceFrame);
     this.resizeObserver.disconnect();
     this.presetTextures.clear();
     this.meshPreview.dispose();
@@ -432,7 +437,15 @@ export class TerrainTileLabPanel {
     this.readGenerationSettings();
     this.setStatus('Generating tileable mountains, drainage and material masks…');
     try {
-      const fields = await this.generator.generate(this.settings);
+      const fields = await this.generator.generate(
+        this.settings,
+        undefined,
+        (phase, fraction) => {
+          if (sequence === this.generationSequence) {
+            this.setStatus(`${phase}… ${Math.round(fraction * 100)}%`);
+          }
+        }
+      );
       if (sequence !== this.generationSequence) return;
       this.fields = fields;
       this.painter.resize(fields.resolution);
@@ -552,13 +565,32 @@ export class TerrainTileLabPanel {
     });
   }
 
+  /**
+   * Coalesced to one frame: in 3D mode this rebuilds a 384x384 material canvas, i.e. a
+   * ~147k-pixel loop, and it used to run synchronously on every slider input event.
+   */
   private refreshSurface(): void {
     if (this.fields === null) return;
     if (this.previewMode !== '3d') {
       this.scheduleRender();
       return;
     }
-    const surface = this.composer.createMaterialCanvas(this.fields, this.painter.mask, this.settings.materialRepeat, 384);
+    if (this.surfaceFrame !== 0) return;
+    this.surfaceFrame = requestAnimationFrame(() => {
+      this.surfaceFrame = 0;
+      this.rebuildSurface();
+    });
+  }
+
+  private rebuildSurface(): void {
+    if (this.fields === null || this.previewMode !== '3d') return;
+    const surface = this.composer.createMaterialCanvas(
+      this.fields,
+      this.painter.mask,
+      this.settings.materialRepeat,
+      384,
+      false
+    );
     this.meshPreview.update(this.fields, surface);
   }
 

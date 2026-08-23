@@ -9,6 +9,7 @@ import {
   type TerrainPlayerState
 } from './TerrainPlayerController';
 import { TerrainPlayerOverlay } from './TerrainPlayerOverlay';
+import { TerrainRiverLayer } from './TerrainRiverLayer';
 import type { TerrainFields } from './TerrainTypes';
 
 const TERRAIN_SIZE = 10;
@@ -16,7 +17,7 @@ const TERRAIN_HEIGHT = TERRAIN_SIZE * (TERRAIN_CONFIG.heightScale / TERRAIN_CONF
 const MIN_DISTANCE = 6;
 const MAX_DISTANCE = 18;
 const ORBIT_NEAR = 0.1;
-const BACKGROUND_COLOR = 0x080b10;
+const BACKGROUND_COLOR = TERRAIN_CONFIG.preview.skyColor;
 
 export interface TerrainMeshPreviewCallbacks {
   onPlayerStateChange?: (state: TerrainPlayerState) => void;
@@ -33,8 +34,9 @@ export class TerrainMeshPreview {
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(44, 1, ORBIT_NEAR, 100);
   private readonly geometry: THREE.PlaneGeometry;
-  private readonly material = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0 });
+  private readonly material = new THREE.MeshStandardMaterial({ roughness: 0.88, metalness: 0 });
   private readonly terrainMeshes: THREE.Mesh[] = [];
+  private readonly riverLayer: TerrainRiverLayer;
   private readonly player: TerrainPlayerController;
   private readonly playerOverlay: TerrainPlayerOverlay;
   private readonly playerFog = new THREE.Fog(
@@ -66,9 +68,15 @@ export class TerrainMeshPreview {
     );
     this.geometry.rotateX(-Math.PI / 2);
     this.createTerrainTiles();
-    this.scene.add(new THREE.HemisphereLight(0xc7d1e8, 0x26221d, 1.4));
-    const sun = new THREE.DirectionalLight(0xfff1d2, 2.3);
-    sun.position.set(5, 9, 4);
+    this.riverLayer = new TerrainRiverLayer(
+      this.scene,
+      this.geometry,
+      TERRAIN_CONFIG.player.tileRadius,
+      TERRAIN_SIZE
+    );
+    this.scene.add(new THREE.HemisphereLight(0xd6e4f5, 0x39402d, 1.65));
+    const sun = new THREE.DirectionalLight(0xffefcf, 2.25);
+    sun.position.set(6, 10, 4);
     this.scene.add(sun);
     this.playerOverlay = new TerrainPlayerOverlay(this.canvas, {
       onToggle: () => this.togglePlayerMode()
@@ -143,6 +151,7 @@ export class TerrainMeshPreview {
     this.geometry.computeBoundingBox();
     this.geometry.computeBoundingSphere();
     this.player.setFields(fields);
+    this.riverLayer.update(fields);
 
     this.texture?.dispose();
     this.texture = new THREE.CanvasTexture(surface);
@@ -162,6 +171,7 @@ export class TerrainMeshPreview {
     this.observer.disconnect();
     this.visibilityObserver.disconnect();
     this.texture?.dispose();
+    this.riverLayer.dispose();
     this.geometry.dispose();
     this.material.dispose();
     this.renderer?.dispose();
@@ -258,6 +268,7 @@ export class TerrainMeshPreview {
     for (const mesh of this.terrainMeshes) {
       mesh.visible = visible || (mesh.position.x === 0 && mesh.position.z === 0);
     }
+    this.riverLayer.setRepeatedVisible(visible);
   }
 
   private updateCamera(): void {

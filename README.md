@@ -58,18 +58,26 @@ npm run build
 npm run preview
 ```
 
+Preset thumbnails are static PNGs under `public/thumbnails/presets`. Generate only missing files after adding presets with:
+
+```bash
+npm run thumbnails:generate
+```
+
+Pass `-- --force` to rebuild the complete thumbnail cache.
+
 ## Controls
 
-| Action          | Control                                      |
-| --------------- | -------------------------------------------- |
-| Orbit           | Left drag                                    |
-| Pan             | Right drag                                   |
-| Zoom            | Wheel or pinch                               |
-| Frame selection | `F`                                        |
-| Wireframe       | `W`                                        |
-| Radial menu     | Right click,`Space`, or touch and hold     |
-| Undo            | `Ctrl/Cmd + Z`                             |
-| Redo            | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
+| Action | Control |
+| --- | --- |
+| Orbit | Left drag |
+| Pan | Right drag |
+| Zoom | Wheel or pinch |
+| Frame selection | `F` |
+| Wireframe | `W` |
+| Radial menu | Right click, `Space`, or touch and hold |
+| Undo | `Ctrl/Cmd + Z` |
+| Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
 ## Surface Designer
 

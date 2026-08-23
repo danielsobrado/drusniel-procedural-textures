@@ -12,16 +12,18 @@ export interface ProceduralMaterialOptions {
   coordinateSpace?: MaterialCoordinateSpace;
 }
 
-function seedOffset(seed: number): number {
+const UINT32_RANGE = 0x1_0000_0000;
+
+export function runtimeSeedOffset(seed: number): number {
   if (seed === 0) return 0;
-  return (Math.imul(seed, 0x9e37_79b1) >>> 0) / 0xffff_ffff * 100;
+  return (Math.imul(seed, 0x9e37_79b1) >>> 0) / UINT32_RANGE * 100;
 }
 
 function variantLayers(
   layers: readonly MaterialLayer[],
   recipeSeed: number
 ): MaterialLayer[] {
-  const offset = seedOffset(recipeSeed);
+  const offset = runtimeSeedOffset(recipeSeed);
   if (offset === 0) return layers.map((layer) => ({ ...layer }));
   return layers.map((layer) => ({
     ...layer,

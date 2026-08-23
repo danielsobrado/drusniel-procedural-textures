@@ -4,22 +4,20 @@ import { WebGLRenderer } from 'three';
 import {
   DEFAULT_BACKGROUND,
   DEFAULT_ENVIRONMENT,
-  DEFAULT_PHYSICAL,
   PERFORMANCE_CONFIG,
-  RENDERER_CONFIG,
-  UI_CONFIG
+  RENDERER_CONFIG
 } from '../app/constants';
-import { GlbExporter } from '../export/GlbExporter';
-import { PresetThumbnailRenderer } from '../export/PresetThumbnailRenderer';
-import { TextureBaker, type BakedTextureSet } from '../export/TextureBaker';
+import type { GlbExporter } from '../export/GlbExporter';
+import type { BakeProgressCallback, BakedTextureSet, TextureBaker } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type {
   EnvironmentPreset,
-  MaterialPreset,
   ObjectPreset,
   PhysicalSettings
 } from '../materials/types';
+import { finishBoot, reportBootStage } from '../app/BootProgress';
 import { canvasToPngDataUrl } from '../utils/canvas';
+import { idleTurn, nextPaint } from '../utils/scheduling';
 import { EnvironmentLibrary, type StudioLightProfile } from './EnvironmentLibrary';
 import { createProceduralMesh } from './MeshFactory';
 import {
@@ -65,20 +63,6 @@ function isQualityTier(value: string): value is QualityTier {
   return value === 'auto' || Object.prototype.hasOwnProperty.call(PERFORMANCE_CONFIG.tiers, value);
 }
 
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
-}
-
-function idleTurn(): Promise<void> {
-  return new Promise((resolve) => {
-    if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(() => resolve(), { timeout: UI_CONFIG.idleWorkTimeoutMs });
-      return;
-    }
-    window.setTimeout(resolve, 0);
-  });
-}
-
 function normalizeError(error: unknown, fallback: string): Error {
   if (error instanceof Error) return error;
   return new Error(fallback, { cause: error });
@@ -104,14 +88,15 @@ export class LabRenderer {
     RENDERER_CONFIG.cameraFar
   );
   private readonly renderer: THREE.WebGPURenderer;
-  private readonly bakeRenderer: WebGLRenderer | null;
+  private bakeRenderer: WebGLRenderer | null = null;
+  private bakeRendererResolved = false;
   private readonly rendererReady: Promise<void>;
   private readonly controls: OrbitControls;
   private readonly resizeObserver: ResizeObserver;
   private readonly compiler: MaterialCompiler;
   private readonly environments: EnvironmentLibrary;
-  private readonly baker: TextureBaker | null;
-  private readonly glbExporter: GlbExporter | null;
+  private baker: TextureBaker | null = null;
+  private glbExporter: GlbExporter | null = null;
   private readonly profiler = new PerformanceProfiler(PERFORMANCE_CONFIG.sampleIntervalMs);
   private readonly hemisphere = new THREE.HemisphereLight('#edf4ff', '#231d1a', 1.2);
   private readonly key = new THREE.DirectionalLight('#fff3e4', 3.1);
@@ -131,7 +116,6 @@ export class LabRenderer {
   private performanceCallback: ((stats: PerformanceStats) => void) | null = null;
   private requestedQualityTier: QualityTier = PERFORMANCE_CONFIG.defaultTier;
   private activeQualityTier: FixedQualityTier = PERFORMANCE_CONFIG.autoDesktopTier;
-  private presetThumbnailRenderer: PresetThumbnailRenderer | null = null;
   private currentEnvironment: EnvironmentPreset = DEFAULT_ENVIRONMENT;
   private currentEnvironmentName: string | null = null;
   private materialCompilePromise: Promise<void> | null = null;
@@ -143,6 +127,7 @@ export class LabRenderer {
   private compiledSceneRevision = -1;
   private sceneRevision = 0;
   private animationFrame = 0;
+  private needsRender = true;
   private disposed = false;
 
   public constructor(container: HTMLElement, compiler: MaterialCompiler) {
@@ -150,11 +135,6 @@ export class LabRenderer {
     this.compiler = compiler;
     this.renderer = new THREE.WebGPURenderer({
       antialias: true,
-      alpha: false,
-      powerPreference: 'high-performance'
-    });
-    this.bakeRenderer = createOptionalWebGlRenderer({
-      antialias: false,
       alpha: false,
       powerPreference: 'high-performance'
     });
@@ -167,19 +147,10 @@ export class LabRenderer {
     this.renderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
-    if (this.bakeRenderer !== null) {
-      this.bakeRenderer.outputColorSpace = THREE.SRGBColorSpace;
-      this.bakeRenderer.toneMapping = THREE.ACESFilmicToneMapping;
-      this.bakeRenderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
-      container.dataset.bakeBackend = 'webgl2';
-    } else {
-      container.dataset.bakeBackend = 'unavailable';
-    }
+    container.dataset.bakeBackend = 'deferred';
     this.scene.background = new THREE.Color(DEFAULT_BACKGROUND);
 
     this.environments = new EnvironmentLibrary(this.renderer);
-    this.baker = this.bakeRenderer === null ? null : new TextureBaker(this.bakeRenderer, this.compiler);
-    this.glbExporter = this.baker === null ? null : new GlbExporter(this.baker, this.compiler);
     this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls = new OrbitControls(this.camera, this.canvas);
     this.controls.enableDamping = true;
@@ -233,12 +204,21 @@ export class LabRenderer {
     return active;
   }
 
+  /**
+   * Marks the viewport as needing a redraw. The render loop is on-demand, so anything
+   * that changes what the camera would see must call this. Over-calling costs one
+   * frame; under-calling leaves a stale viewport, so prefer to call it.
+   */
+  public invalidate(): void {
+    this.needsRender = true;
+  }
+
   public getQualityTierSettings(): Readonly<QualityTierSettings> {
     return PERFORMANCE_CONFIG.tiers[this.activeQualityTier];
   }
 
   public supportsTextureBaking(): boolean {
-    return this.baker !== null;
+    return this.ensureBakeRenderer() !== null;
   }
 
   public setPrimitive(preset: ObjectPreset): void {
@@ -380,26 +360,23 @@ export class LabRenderer {
     return canvasToPngDataUrl(this.canvas);
   }
 
-  public async bakeCurrentMaterial(settings: Readonly<PhysicalSettings>): Promise<BakedTextureSet> {
-    const baker = this.requireBaker();
+  public async bakeCurrentMaterial(
+    settings: Readonly<PhysicalSettings>,
+    onProgress?: BakeProgressCallback
+  ): Promise<BakedTextureSet> {
+    const baker = await this.requireBaker();
     const target = this.getBakeTarget();
     const resolution = this.effectiveTextureResolution(this.getQualityTierSettings().bakeResolution);
-    return baker.bake(target, settings, resolution);
+    return baker.bake(target, settings, resolution, onProgress);
   }
 
   public async exportCurrentGlb(settings: Readonly<PhysicalSettings>): Promise<Blob> {
-    const glbExporter = this.requireGlbExporter();
+    const glbExporter = await this.requireGlbExporter();
     if (this.currentRoot === null) throw new Error('There is no preview object to export.');
     const quality = this.getQualityTierSettings();
     const bakeResolution = this.effectiveTextureResolution(quality.bakeResolution);
     const maxTextureSize = this.effectiveTextureResolution(quality.maxExportTextureSize);
     return glbExporter.export(this.currentRoot, settings, bakeResolution, maxTextureSize);
-  }
-
-  public async generatePresetThumbnail(preset: MaterialPreset): Promise<string> {
-    const bakeRenderer = this.requireBakeRenderer();
-    this.presetThumbnailRenderer ??= new PresetThumbnailRenderer(bakeRenderer, DEFAULT_PHYSICAL);
-    return this.presetThumbnailRenderer.renderAsync(preset);
   }
 
   public dispose(): void {
@@ -420,8 +397,6 @@ export class LabRenderer {
     this.key.shadow.map = null;
     this.key.shadow.mapPass?.dispose();
     this.key.shadow.mapPass = null;
-    this.presetThumbnailRenderer?.dispose();
-    this.presetThumbnailRenderer = null;
     this.compiler.dispose();
     this.renderer.dispose();
     this.bakeRenderer?.dispose();
@@ -462,18 +437,61 @@ export class LabRenderer {
     return firstAssigned;
   }
 
-  private requireBakeRenderer(): WebGLRenderer {
-    if (this.bakeRenderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
-    return this.bakeRenderer;
+  /**
+   * The bake/export path needs a second, WebGL2 context. Creating it during boot cost a
+   * real GPU context on every load for a feature most sessions never touch, so it is
+   * built on first use instead. The negative result is cached too - a browser without
+   * WebGL2 should be asked exactly once.
+   */
+  private ensureBakeRenderer(): WebGLRenderer | null {
+    if (this.bakeRendererResolved) return this.bakeRenderer;
+    this.bakeRendererResolved = true;
+
+    const renderer = createOptionalWebGlRenderer({
+      antialias: false,
+      alpha: false,
+      powerPreference: 'high-performance'
+    });
+
+    if (renderer !== null) {
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = RENDERER_CONFIG.toneMappingExposure;
+    }
+
+    this.bakeRenderer = renderer;
+    if (!this.disposed) {
+      this.container.dataset.bakeBackend = renderer === null ? 'unavailable' : 'webgl2';
+    }
+    return renderer;
   }
 
-  private requireBaker(): TextureBaker {
-    if (this.baker === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
+  private requireBakeRenderer(): WebGLRenderer {
+    const renderer = this.ensureBakeRenderer();
+    if (renderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
+    return renderer;
+  }
+
+  /**
+   * The bake and GLB-export modules pull in GLTFExporter, SkeletonUtils and the
+   * tessellation modifier - roughly a third of a megabyte of dependency that a session
+   * which never exports should not download. Both entry points are already async.
+   */
+  private async requireBaker(): Promise<TextureBaker> {
+    if (this.baker === null) {
+      const renderer = this.requireBakeRenderer();
+      const { TextureBaker: Baker } = await import('../export/TextureBaker');
+      this.baker ??= new Baker(renderer, this.compiler);
+    }
     return this.baker;
   }
 
-  private requireGlbExporter(): GlbExporter {
-    if (this.glbExporter === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
+  private async requireGlbExporter(): Promise<GlbExporter> {
+    if (this.glbExporter === null) {
+      const baker = await this.requireBaker();
+      const { GlbExporter: Exporter } = await import('../export/GlbExporter');
+      this.glbExporter ??= new Exporter(baker, this.compiler);
+    }
     return this.glbExporter;
   }
 
@@ -614,6 +632,7 @@ export class LabRenderer {
   private async warmEnvironment(): Promise<void> {
     if (this.disposed || this.rendererInitializationError !== null || this.environments.studioReady) return;
     this.environmentWarmupActive = true;
+    reportBootStage('Preparing studio lighting');
     this.profiler.reset();
     this.updateBusyIndicator();
     try {
@@ -626,6 +645,7 @@ export class LabRenderer {
       this.environmentWarmupActive = false;
       this.profiler.reset();
       this.updateBusyIndicator();
+      this.invalidate();
     }
   }
 
@@ -634,6 +654,7 @@ export class LabRenderer {
       await this.renderer.init();
       if (!this.disposed) {
         this.container.dataset.rendererState = 'ready';
+        reportBootStage('Compiling material');
         this.start();
       }
     } catch (error) {
@@ -641,6 +662,7 @@ export class LabRenderer {
       console.warn('GPU renderer unavailable; continuing without the 3D preview.', this.rendererInitializationError);
       this.showRendererFallback();
       this.updateBusyIndicator();
+      finishBoot();
     }
   }
 
@@ -710,6 +732,7 @@ export class LabRenderer {
       .finally(() => {
         if (this.materialCompilePromise === compilation) this.materialCompilePromise = null;
         this.profiler.reset();
+        this.invalidate();
         if (
           !this.disposed &&
           this.materialNeedsCompilation() &&
@@ -774,17 +797,38 @@ export class LabRenderer {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
+    this.invalidate();
   }
 
   private start(): void {
     const render = (): void => {
       if (this.disposed) return;
       this.animationFrame = requestAnimationFrame(render);
-      this.controls.update();
+
+      // OrbitControls reports whether damping is still settling; while it is, every
+      // frame is genuinely different and must be drawn.
+      const cameraMoved = this.controls.update();
+
       this.startMaterialCompilation();
-      if (this.materialCompilePromise !== null || this.currentMaterialCompileFailure() !== null) return;
+      if (this.materialCompilePromise !== null) return;
+      if (this.currentMaterialCompileFailure() !== null) {
+        // A failed compile never produces a frame, so the splash would otherwise
+        // outlive boot. The failure itself is surfaced by the busy indicator.
+        finishBoot();
+        return;
+      }
+
+      // No material in this app is time-driven, so an unchanged scene re-rendered at
+      // 60 Hz was pure waste - it saturated the GPU and made every backdrop-filtered
+      // panel re-blur on each frame.
+      if (!this.needsRender && cameraMoved !== true) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      this.needsRender = false;
 
       this.renderer.render(this.scene, this.camera);
+      // The splash is dismissed by the first frame the user could actually see,
+      // not by the renderer merely reporting itself ready.
+      finishBoot();
       const stats = this.profiler.sample(
         this.renderer,
         this.requestedQualityTier,

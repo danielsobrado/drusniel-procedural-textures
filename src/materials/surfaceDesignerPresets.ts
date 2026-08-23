@@ -102,6 +102,13 @@ function graph(
   };
 }
 
+/**
+ * Compilation is deferred to first access. Eleven presets were each running
+ * normalizeSurfaceGraph + validateUnambiguousGraph + compileMaterialGraph at module
+ * evaluation, i.e. on the boot path, even though the library only needs id, name,
+ * description and tags to render a card. The compiled result is memoised, so applying a
+ * preset costs the same as before.
+ */
 function makePreset(
   definition: SurfaceGraphDefinition,
   description: string,
@@ -109,7 +116,12 @@ function makePreset(
   physical: Partial<PhysicalSettings>,
   synthesis: Partial<SynthesisSettings> = {}
 ): MaterialPreset {
-  const compiled = compileSurfaceGraph(definition);
+  let compiled: ReturnType<typeof compileSurfaceGraph> | null = null;
+  const compile = (): ReturnType<typeof compileSurfaceGraph> => {
+    compiled ??= compileSurfaceGraph(definition);
+    return compiled;
+  };
+
   return {
     id: definition.id,
     name: definition.name,
@@ -117,9 +129,9 @@ function makePreset(
     tags: ['surface-designer', 'v0.3', ...tags],
     physical,
     synthesis,
-    groups: compiled.groups,
-    layers: compiled.layers,
-    graph: compiled.graph
+    get groups() { return compile().groups; },
+    get layers() { return compile().layers; },
+    get graph() { return compile().graph; }
   };
 }
 
@@ -359,6 +371,12 @@ export const SURFACE_DESIGNER_PRESETS: readonly MaterialPreset[] = [
   makePreset(COBBLE_GRAPH, 'Irregular cobblestones with individual stone variation, mortar and moss in protected gaps.', ['cobblestone', 'stone', 'construction'], { roughness: 0.7, clearcoat: 0.04 }, { age: 0.46, weathering: 0.52, variation: 0.58 })
 ];
 
-export const SURFACE_DESIGNER_GRAPHS: readonly SurfaceGraphDefinition[] = SURFACE_DESIGNER_PRESETS
-  .map((preset) => preset.graph)
-  .filter((item): item is SurfaceGraphDefinition => item !== undefined);
+/**
+ * Compiles every designer preset and returns their graphs. Deliberately a function, not
+ * a module-level constant: as a constant it forced all eleven compilations during boot.
+ */
+export function surfaceDesignerGraphs(): readonly SurfaceGraphDefinition[] {
+  return SURFACE_DESIGNER_PRESETS
+    .map((preset) => preset.graph)
+    .filter((item): item is SurfaceGraphDefinition => item !== undefined);
+}

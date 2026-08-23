@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { createDefaultLayer, createDefaultProject } from '../src/app/AppState';
 import { createMaterialRecipe } from '../src/runtime/MaterialRecipe';
-import { ProceduralMaterial } from '../src/runtime/ProceduralMaterial';
+import { ProceduralMaterial, runtimeSeedOffset } from '../src/runtime/ProceduralMaterial';
 
 describe('ProceduralMaterial runtime', () => {
   it('compiles recipe settings into a Three.js physical material', () => {
@@ -20,6 +20,12 @@ describe('ProceduralMaterial runtime', () => {
     } finally {
       runtime.dispose();
     }
+  });
+
+  it('keeps the maximum uint32 recipe seed distinct from zero', () => {
+    expect(runtimeSeedOffset(0)).toBe(0);
+    expect(runtimeSeedOffset(0xffffffff)).toBeGreaterThan(0);
+    expect(runtimeSeedOffset(0xffffffff)).toBeLessThan(100);
   });
 
   it('installs surface and shadow materials on a mesh', () => {

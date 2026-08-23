@@ -6,11 +6,13 @@ import {
   parseMaterialPresetFile,
   serializeMaterialPresetFile
 } from '../src/app/MaterialPresetFile';
+import { SURFACE_DESIGNER_CATALOG } from '../src/materials/surfaceDesignerCatalog';
 
 describe('material preset files', () => {
   it('round-trips the authored material without project-only state', () => {
     const project = createDefaultProject();
     project.physical.roughness = 0.42;
+    project.synthesis.weathering = 0.73;
     project.layers[1]!.scale = 7.5;
 
     const serialized = serializeMaterialPresetFile(project, 'Shared Moss');
@@ -25,8 +27,39 @@ describe('material preset files', () => {
     expect(document.version).toBe(MATERIAL_PRESET_FILE_VERSION);
     expect(preset.name).toBe('Shared Moss');
     expect(preset.physical).toEqual(project.physical);
+    expect(preset.synthesis).toEqual(project.synthesis);
     expect(preset.groups).toEqual(project.groups);
     expect(preset.layers).toEqual(project.layers);
+  });
+
+  it('preserves graph-backed designer presets', () => {
+    const source = SURFACE_DESIGNER_CATALOG.find((item) => item.id === 'designer-old-brick-wall');
+    if (source === undefined) throw new Error('Brick designer preset is missing.');
+    const state = new AppState();
+    state.applyPreset(source);
+
+    const preset = parseMaterialPresetFile(JSON.parse(
+      serializeMaterialPresetFile(state.snapshot, 'Portable Brick')
+    ) as unknown);
+
+    expect(preset.graph?.id).toBe('designer-old-brick-wall');
+    expect(preset.layers.some((layer) => layer.kind === 'pattern')).toBe(true);
+    expect(preset.groups).toEqual(state.snapshot.groups);
+  });
+
+  it('rebuilds graph-backed presets instead of trusting stale generated layers', () => {
+    const source = SURFACE_DESIGNER_CATALOG.find((item) => item.id === 'designer-old-brick-wall');
+    if (source === undefined) throw new Error('Brick designer preset is missing.');
+    const state = new AppState();
+    state.applyPreset(source);
+    const document = JSON.parse(
+      serializeMaterialPresetFile(state.snapshot, 'Portable Brick')
+    ) as { material: { layers: Array<Record<string, unknown>> } };
+    document.material.layers = [{ id: 'stale', kind: 'removed-generator' }];
+
+    const preset = parseMaterialPresetFile(document);
+    expect(preset.graph?.id).toBe('designer-old-brick-wall');
+    expect(preset.layers.some((layer) => layer.kind === 'pattern')).toBe(true);
   });
 
   it('applies a loaded preset through normal runtime validation', () => {
@@ -39,6 +72,20 @@ describe('material preset files', () => {
     expect(() => state.applyPreset(preset)).not.toThrow();
     expect(state.snapshot.layers).toHaveLength(project.layers.length);
     expect(state.snapshot.physical).toEqual(project.physical);
+    expect(state.snapshot.synthesis).toEqual(project.synthesis);
+  });
+
+  it('loads legacy version-one preset files that omit synthesis and graphs', () => {
+    const project = createDefaultProject();
+    const document = JSON.parse(
+      serializeMaterialPresetFile(project, 'Legacy Compatible')
+    ) as { material: Record<string, unknown> };
+    delete document.material.synthesis;
+    delete document.material.graph;
+
+    const preset = parseMaterialPresetFile(document);
+    expect(preset.synthesis).toEqual(createDefaultProject().synthesis);
+    expect(preset.graph).toBeUndefined();
   });
 
   it('rejects unrelated JSON files', () => {

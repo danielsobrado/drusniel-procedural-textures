@@ -1,14 +1,8 @@
-import {
-  AUTOSAVE_DELAY_MS,
-  MAX_PROJECT_FILE_BYTES,
-  OBJECT_PRESETS,
-  STORAGE_KEY
-} from '../app/constants';
+import { MAX_PROJECT_FILE_BYTES, OBJECT_PRESETS } from '../app/constants';
 import {
   parseMaterialPresetFile,
   serializeMaterialPresetFile
 } from '../app/MaterialPresetFile';
-import { normalizeProject } from '../app/ProjectFile';
 import { MATERIAL_PRESETS } from '../materials/presets';
 import type { MaterialPreset, ObjectPreset, ProjectState } from '../materials/types';
 import { downloadText } from '../utils/download';
@@ -18,15 +12,17 @@ export interface LibraryCallbacks {
   onObject: (preset: ObjectPreset) => void;
   onPreset: (preset: MaterialPreset) => void;
   onImport: () => void;
-  onThumbnailRequested: (preset: MaterialPreset) => void;
+  getProjectState: () => Readonly<ProjectState>;
 }
 
 const PRESET_TAGS = [...new Set(MATERIAL_PRESETS.flatMap((preset) => preset.tags))]
   .sort((left, right) => left.localeCompare(right));
 const PRESET_FILE_SUFFIX = '.ptlpreset.json';
-const PRESET_AUTOSAVE_SETTLE_MS = AUTOSAVE_DELAY_MS + 60;
-const PRESET_THUMBNAIL_PREFETCH_MARGIN = '240px 0px';
 const BYTES_PER_MIB = 1024 * 1024;
+
+export function presetThumbnailUrl(id: string): string {
+  return `${import.meta.env.BASE_URL}thumbnails/presets/${encodeURIComponent(id)}.png`;
+}
 
 function presetFileStem(name: string): string {
   const stem = name
@@ -38,32 +34,32 @@ function presetFileStem(name: string): string {
   return stem.length > 0 ? stem : 'material-preset';
 }
 
-function delay(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
-}
-
 export class LibraryPanel {
   private filter = '';
   private activeTag = 'all';
-  private readonly thumbnails = new Map<string, string>();
-  private readonly thumbnailObserver: IntersectionObserver | null;
+  private built = false;
 
   public constructor(
     private readonly container: HTMLElement,
     private readonly callbacks: LibraryCallbacks
   ) {
-    this.thumbnailObserver = typeof IntersectionObserver === 'undefined'
-      ? null
-      : new IntersectionObserver(
-        (entries) => this.handleThumbnailIntersections(entries),
-        { rootMargin: PRESET_THUMBNAIL_PREFETCH_MARGIN }
-      );
     this.container.addEventListener('click', (event) => this.handleClick(event));
     this.container.addEventListener('input', (event) => this.handleInput(event));
     this.container.addEventListener('change', (event) => this.handleChange(event));
+    this.container.addEventListener('error', (event) => this.handleThumbnailError(event), true);
   }
 
+  /**
+   * The 48 preset cards come from a module constant and never depend on project state,
+   * so only the first render builds markup. Re-rendering everything tore down and
+   * recreated all 48 thumbnail <img> elements on each undo/redo and object change.
+   */
   public render(state: Readonly<ProjectState>): void {
+    if (this.built) {
+      this.syncState(state);
+      return;
+    }
+    this.built = true;
     this.container.innerHTML = `
       <div class="panel-header">
         <div>
@@ -81,7 +77,7 @@ export class LibraryPanel {
       <section class="library-section preview-library-section">
         <div class="section-heading">
           <span>Preview object</span>
-          ${state.importedAssetName === null ? '' : `<span class="asset-chip">${escapeHtml(state.importedAssetName)}</span>`}
+          <span class="asset-chip" data-role="asset-chip"${state.importedAssetName === null ? ' hidden' : ''}>${escapeHtml(state.importedAssetName ?? '')}</span>
         </div>
         <div class="object-grid compact-object-grid" role="group" aria-label="Preview object">
           ${OBJECT_PRESETS.map((item) => `
@@ -138,24 +134,24 @@ export class LibraryPanel {
     this.applyFilter();
   }
 
-  public setThumbnail(id: string, thumbnail: string): void {
-    this.thumbnails.set(id, thumbnail);
-    const card = Array.from(this.container.querySelectorAll<HTMLElement>('[data-preset]'))
-      .find((item) => item.dataset.preset === id);
-    if (card === undefined) return;
+  /** Updates only the parts of the panel that actually depend on project state. */
+  private syncState(state: Readonly<ProjectState>): void {
+    const chip = this.container.querySelector<HTMLElement>('[data-role="asset-chip"]');
+    if (chip !== null) {
+      chip.hidden = state.importedAssetName === null;
+      chip.textContent = state.importedAssetName ?? '';
+    }
 
-    this.thumbnailObserver?.unobserve(card);
-    const host = card.querySelector<HTMLElement>('[data-role="preset-thumb"]');
-    if (host === null) return;
-    host.innerHTML = `<img src="${escapeHtml(thumbnail)}" alt="" aria-hidden="true">`;
-    host.classList.add('has-thumbnail');
+    const usingImported = state.importedAssetName !== null;
+    for (const tile of this.container.querySelectorAll<HTMLElement>('[data-object]')) {
+      tile.classList.toggle(
+        'is-active',
+        !usingImported && tile.dataset.object === state.selectedObject
+      );
+    }
   }
 
   private presetCard(preset: MaterialPreset): string {
-    const thumbnail = this.thumbnails.get(preset.id);
-    const thumbnailContent = thumbnail === undefined
-      ? ''
-      : `<img src="${escapeHtml(thumbnail)}" alt="" aria-hidden="true">`;
     const tags = preset.tags.join(' ');
     return `
       <button
@@ -165,11 +161,11 @@ export class LibraryPanel {
         data-search="${escapeHtml(`${preset.name} ${preset.description} ${tags}`.toLowerCase())}"
       >
         <span
-          class="preset-swatch ${thumbnail === undefined ? '' : 'has-thumbnail'}"
+          class="preset-swatch has-thumbnail"
           data-role="preset-thumb"
           aria-hidden="true"
           style="--swatch-a:${preset.layers[0]?.colorA ?? '#333'};--swatch-b:${preset.layers.at(-1)?.colorB ?? '#aaa'}"
-        >${thumbnailContent}</span>
+        ><img src="${escapeHtml(presetThumbnailUrl(preset.id))}" width="144" height="144" loading="lazy" decoding="async" alt="" aria-hidden="true" data-preset-thumbnail></span>
         <span class="preset-copy">
           <strong>${escapeHtml(preset.name)}</strong>
           <small>${escapeHtml(preset.description)}</small>
@@ -180,27 +176,10 @@ export class LibraryPanel {
     `;
   }
 
-  private handleThumbnailIntersections(entries: readonly IntersectionObserverEntry[]): void {
-    for (const entry of entries) {
-      if (!entry.isIntersecting || !(entry.target instanceof HTMLElement)) continue;
-      const card = entry.target;
-      this.thumbnailObserver?.unobserve(card);
-      const id = card.dataset.preset;
-      if (id === undefined || this.thumbnails.has(id)) continue;
-      const preset = MATERIAL_PRESETS.find((item) => item.id === id);
-      if (preset !== undefined) this.callbacks.onThumbnailRequested(preset);
-    }
-  }
-
-  private observePresetThumbnails(): void {
-    if (this.thumbnailObserver === null) return;
-    this.thumbnailObserver.disconnect();
-    const cards = this.container.querySelectorAll<HTMLElement>('[data-preset]');
-    for (const card of cards) {
-      const id = card.dataset.preset;
-      if (id === undefined || card.hidden || this.thumbnails.has(id)) continue;
-      this.thumbnailObserver.observe(card);
-    }
+  private handleThumbnailError(event: Event): void {
+    if (!(event.target instanceof HTMLImageElement) || !event.target.hasAttribute('data-preset-thumbnail')) return;
+    event.target.closest('.preset-swatch')?.classList.remove('has-thumbnail');
+    event.target.remove();
   }
 
   private handleClick(event: Event): void {
@@ -233,7 +212,7 @@ export class LibraryPanel {
     }
 
     if (target.closest('[data-action="save-preset"]') !== null) {
-      void this.savePreset();
+      this.savePreset();
       return;
     }
 
@@ -259,18 +238,12 @@ export class LibraryPanel {
     if (file !== undefined) void this.loadPreset(file);
   }
 
-  private async savePreset(): Promise<void> {
+  private savePreset(): void {
     const requestedName = window.prompt('Preset name', 'Shared Material');
     if (requestedName === null) return;
 
     try {
-      await delay(PRESET_AUTOSAVE_SETTLE_MS);
-      const serializedProject = localStorage.getItem(STORAGE_KEY);
-      if (serializedProject === null) {
-        throw new Error('Current material is not available in local autosave yet. Try again in a moment.');
-      }
-      const project = normalizeProject(JSON.parse(serializedProject) as unknown);
-      const content = serializeMaterialPresetFile(project, requestedName);
+      const content = serializeMaterialPresetFile(this.callbacks.getProjectState(), requestedName);
       const parsed = parseMaterialPresetFile(JSON.parse(content) as unknown);
       downloadText(`${presetFileStem(parsed.name)}${PRESET_FILE_SUFFIX}`, content);
       this.setPresetFileStatus(`Saved ${parsed.name}.`, 'info');
@@ -330,6 +303,5 @@ export class LibraryPanel {
 
     const empty = this.container.querySelector<HTMLElement>('[data-role="filter-empty"]');
     if (empty !== null) empty.hidden = visibleCount !== 0;
-    this.observePresetThumbnails();
   }
 }

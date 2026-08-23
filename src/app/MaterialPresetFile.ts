@@ -1,11 +1,14 @@
+import { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
+import { compileSurfaceGraph } from '../materials/SurfaceGraphCompiler';
+import type { MaterialPreset, ProjectState } from '../materials/types';
 import {
   DEFAULT_BACKGROUND,
   DEFAULT_ENVIRONMENT,
   DEFAULT_OBJECT,
-  DEFAULT_PHYSICAL
+  DEFAULT_PHYSICAL,
+  DEFAULT_SYNTHESIS
 } from './constants';
 import { normalizeProject } from './ProjectFile';
-import type { MaterialPreset, ProjectState } from '../materials/types';
 
 export const MATERIAL_PRESET_FILE_FORMAT = 'procedural-texture-lab-material-preset';
 export const MATERIAL_PRESET_FILE_VERSION = 1;
@@ -17,8 +20,10 @@ interface MaterialPresetFile {
   name: string;
   material: {
     physical: ProjectState['physical'];
+    synthesis?: ProjectState['synthesis'];
     groups: ProjectState['groups'];
     layers: ProjectState['layers'];
+    graph?: ProjectState['surfaceGraph'];
   };
 }
 
@@ -47,8 +52,10 @@ export function serializeMaterialPresetFile(state: Readonly<ProjectState>, name:
     name: normalizePresetName(name),
     material: {
       physical: structuredClone(state.physical),
+      synthesis: structuredClone(state.synthesis),
       groups: structuredClone(state.groups),
-      layers: structuredClone(state.layers)
+      layers: structuredClone(state.layers),
+      graph: structuredClone(state.surfaceGraph ?? null)
     }
   };
   return `${JSON.stringify(file, null, 2)}\n`;
@@ -65,6 +72,10 @@ export function parseMaterialPresetFile(value: unknown): MaterialPreset {
 
   const name = normalizePresetName(file.name);
   const material = asRecord(file.material, 'Material preset');
+  const surfaceGraph = material.graph === null || material.graph === undefined
+    ? null
+    : normalizeSurfaceGraph(material.graph);
+  const graphCompilation = surfaceGraph === null ? null : compileSurfaceGraph(surfaceGraph);
   const normalized = normalizeProject({
     version: 2,
     selectedObject: DEFAULT_OBJECT,
@@ -78,8 +89,10 @@ export function parseMaterialPresetFile(value: unknown): MaterialPreset {
     background: DEFAULT_BACKGROUND,
     wireframe: false,
     physical: material.physical ?? DEFAULT_PHYSICAL,
-    groups: material.groups ?? [],
-    layers: material.layers
+    synthesis: material.synthesis ?? DEFAULT_SYNTHESIS,
+    surfaceGraph: graphCompilation?.graph ?? null,
+    groups: graphCompilation?.groups ?? material.groups ?? [],
+    layers: graphCompilation?.layers ?? material.layers
   });
 
   return {
@@ -88,7 +101,11 @@ export function parseMaterialPresetFile(value: unknown): MaterialPreset {
     description: 'Shared Procedural Texture Lab material preset.',
     tags: ['shared', 'custom'],
     physical: normalized.physical,
+    synthesis: normalized.synthesis,
     groups: normalized.groups,
-    layers: normalized.layers
+    layers: normalized.layers,
+    ...(normalized.surfaceGraph === null || normalized.surfaceGraph === undefined
+      ? {}
+      : { graph: normalized.surfaceGraph })
   };
 }

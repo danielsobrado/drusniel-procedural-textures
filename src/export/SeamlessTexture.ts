@@ -11,6 +11,7 @@ const CHANNEL_COUNT = 4;
 const NORMAL_Z = 1;
 const INNER_EDGE_OFFSET = 1;
 const NORMAL_REBUILD_YIELD_ROWS = 16;
+const BLEND_YIELD_ROWS = 64;
 const NORMALIZE_YIELD_PIXELS = 262_144;
 const DISPLACEMENT_EXTENT = Symbol('seamless-displacement-extent');
 
@@ -69,15 +70,20 @@ function blendPair(
   }
 }
 
-function blendHorizontalEdges(
+/**
+ * Yields periodically: at a 2048 bake this is ~671k blendPair calls, which ran as one
+ * unbroken block and stalled the frame (and any progress bar) for its whole duration.
+ */
+async function blendHorizontalEdges(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
   blendPixels: number
-): void {
+): Promise<void> {
   const source = new Uint8ClampedArray(pixels);
   const denominator = Math.max(blendPixels - 1, 1);
   for (let y = 0; y < height; y += 1) {
+    if (y > 0 && y % BLEND_YIELD_ROWS === 0) await yieldToMainThread();
     for (let distance = 0; distance < blendPixels; distance += 1) {
       const leftX = distance;
       const rightX = width - 1 - distance;
@@ -94,15 +100,16 @@ function blendHorizontalEdges(
   }
 }
 
-function blendVerticalEdges(
+async function blendVerticalEdges(
   pixels: Uint8ClampedArray,
   width: number,
   height: number,
   blendPixels: number
-): void {
+): Promise<void> {
   const source = new Uint8ClampedArray(pixels);
   const denominator = Math.max(blendPixels - 1, 1);
   for (let x = 0; x < width; x += 1) {
+    if (x > 0 && x % BLEND_YIELD_ROWS === 0) await yieldToMainThread();
     for (let distance = 0; distance < blendPixels; distance += 1) {
       const topY = distance;
       const bottomY = height - 1 - distance;
@@ -430,9 +437,9 @@ async function seamTexture(texture: BakedTexture, blendFraction: number): Promis
     Math.max(2, Math.round(Math.min(width, height) * blendFraction))
   );
 
-  blendHorizontalEdges(image.data, width, height, blendPixels);
+  await blendHorizontalEdges(image.data, width, height, blendPixels);
   await yieldToMainThread();
-  blendVerticalEdges(image.data, width, height, blendPixels);
+  await blendVerticalEdges(image.data, width, height, blendPixels);
   await yieldToMainThread();
   stabilizePixelSeamSlopes(image.data, width, height);
   context.putImageData(image, 0, 0);

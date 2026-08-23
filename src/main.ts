@@ -2,16 +2,17 @@ import './styles/app.css';
 import './styles/refinements.css';
 import './styles/library-compact.css';
 import './styles/tile-preview.css';
-import './styles/terrain-tile-lab.css';
-import './styles/terrain-player.css';
-import './styles/terrain-player-toolbar.css';
 import './styles/brand.css';
 import './styles/marble-glass.css';
 import './styles/status-badge.css';
+import './styles/progress.css';
 import './styles/surface-depth.css';
 import './styles/surface-designer.css';
+import { reportBootStage } from './app/BootProgress';
 import { App } from './app/App';
 import { TouchRadialTrigger } from './ui/TouchRadialTrigger';
+
+reportBootStage('Loading interface');
 
 const root = document.querySelector<HTMLElement>('#app');
 if (root === null) {

@@ -93,7 +93,10 @@ export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] = [
   { kind: 'normal-combine', label: 'Normal Combine', category: 'utility', inputs: [normal('a'), normal('b')], outputs: [normal()] },
   { kind: 'normal-blend', label: 'Normal Blend', category: 'utility', inputs: [normal('a'), normal('b'), mask('opacity', true)], outputs: [normal()] },
   { kind: 'normal-rotate', label: 'Normal Rotate', category: 'utility', inputs: [normal()], outputs: [normal()] },
-  { kind: 'rgb-to-hsl', label: 'RGB to HSL', category: 'utility', inputs: [color()], outputs: [{ name: 'hsl', type: 'vector3' }] },
+  // Typed as a colour, not a bare vector3: nothing in the catalog consumes vector3, so
+  // the vector3 form made this a dead-end node that could not be wired to anything - not
+  // even to `hsl-adjust`, which takes a colour. It also already lowers to a colour layer.
+  { kind: 'rgb-to-hsl', label: 'RGB to HSL', category: 'utility', inputs: [color()], outputs: [color('hsl')] },
   { kind: 'hsl-adjust', label: 'HSL Adjust', category: 'utility', inputs: [color()], outputs: [color()] },
   { kind: 'color-variation', label: 'Color Variation', category: 'utility', inputs: [color(), id('id', true)], outputs: [color()] },
   { kind: 'sdf', label: 'SDF Shape', category: 'sdf', inputs: [height('a', true), height('b', true)], outputs: [height()] },

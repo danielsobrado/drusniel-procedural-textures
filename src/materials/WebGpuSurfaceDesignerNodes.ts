@@ -5,6 +5,7 @@ import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
 import { buildWebGpuPatternField } from './WebGpuPatternNodes';
 import {
+  buildWebGpuProceduralLayerRawField,
   buildWebGpuSurfaceNodes as buildLegacySurfaceNodes,
   webGpuTopologyFingerprint as legacyTopologyFingerprint,
   type WebGpuSimulationState,
@@ -38,44 +39,73 @@ function blendColor(
   return mix(base, blended, clamp(opacity, 0, 1));
 }
 
-function patternFieldForLayer(
+function designerFieldForLayer(
   index: number,
   position: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>,
   visited = new Set<number>()
 ): Node<'float'> {
   if (visited.has(index)) return float(0.5);
   visited.add(index);
   const layer = layers[index];
-  if (layer === undefined || layer.kind !== 'pattern') return float(0.5);
+  if (layer === undefined) return float(0.5);
+
   if (layer.structureSourceLayerId !== null) {
     const sourceIndex = indexById.get(layer.structureSourceLayerId);
-    if (sourceIndex !== undefined && layers[sourceIndex]?.kind === 'pattern') {
-      return patternFieldForLayer(sourceIndex, position, layers, indexById, uniforms, visited);
+    if (sourceIndex !== undefined) {
+      return designerFieldForLayer(
+        sourceIndex,
+        position,
+        layers,
+        indexById,
+        uniforms,
+        simulation,
+        visited
+      );
     }
   }
+
+  if (layer.kind !== 'pattern') {
+    return buildWebGpuProceduralLayerRawField(index, position, layers, uniforms, simulation);
+  }
+
   const settings = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
   const seed = uniforms.seed[index]!.add(17);
   const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
   const domain = position.mul(uniforms.scale[index]!).mul(max(uniforms.meso, 0.1)).add(seedOffset);
-  return buildWebGpuPatternField(domain, settings, seed);
+  return buildWebGpuPatternField(domain, settings, uniforms.patternParams(index), seed);
 }
 
 function patternMaskForLayer(
+  layerIndex: number,
   layer: Readonly<MaterialLayer>,
   position: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
-  uniforms: WebGpuMaterialUniforms
+  uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>
 ): Node<'float'> {
   if (layer.maskSourceLayerId === null) return float(1);
   const sourceIndex = indexById.get(layer.maskSourceLayerId);
-  if (sourceIndex === undefined || layers[sourceIndex]?.kind !== 'pattern') return float(1);
-  const source = patternFieldForLayer(sourceIndex, position, layers, indexById, uniforms);
-  const inverted = layer.maskInvert ? source.oneMinus() : source;
-  return mix(1, inverted, clamp(layer.maskStrength, 0, 1));
+  if (sourceIndex === undefined) return float(1);
+  const sourceField = designerFieldForLayer(
+    sourceIndex,
+    position,
+    layers,
+    indexById,
+    uniforms,
+    simulation
+  );
+  const source = clamp(
+    float(0.5).add(sourceField.sub(0.5).mul(max(uniforms.strength[sourceIndex]!, 0))),
+    0,
+    1
+  );
+  const inverted = mix(source, source.oneMinus(), clamp(uniforms.maskInvert[layerIndex]!, 0, 1));
+  return mix(1, inverted, clamp(uniforms.maskStrength[layerIndex]!, 0, 1));
 }
 
 export function buildWebGpuSurfaceNodes(
@@ -100,10 +130,18 @@ export function buildWebGpuSurfaceNodes(
 
   activeLayers.forEach((layer, index) => {
     if (layer.kind !== 'pattern') return;
-    const field = patternFieldForLayer(index, position, activeLayers, indexById, uniforms);
+    const field = designerFieldForLayer(index, position, activeLayers, indexById, uniforms, simulation);
     const shaped = clamp(float(0.5).add(field.sub(0.5).mul(max(uniforms.strength[index]!, 0))), 0, 1);
     const coverage = smoothstep(0.04, 0.92, shaped);
-    const mask = patternMaskForLayer(layer, position, activeLayers, indexById, uniforms);
+    const mask = patternMaskForLayer(
+      index,
+      layer,
+      position,
+      activeLayers,
+      indexById,
+      uniforms,
+      simulation
+    );
     const opacity = clamp(
       uniforms.enabled[index]!
         .mul(uniforms.opacity[index]!)
@@ -146,8 +184,10 @@ export function webGpuTopologyFingerprint(
   coordinateSpace: MaterialCoordinateSpace,
   readyLayers: readonly boolean[]
 ): string {
+  // Only the pattern kind is structural now; the numeric parameters are uniforms, so
+  // including them here would rebuild the node tree for a value the shader reads at runtime.
   return `${legacyTopologyFingerprint(layers, coordinateSpace, readyLayers)}:${JSON.stringify(
-    layers.slice(0, PTL_MAX_LAYERS).map((layer) => layer.pattern)
+    layers.slice(0, PTL_MAX_LAYERS).map((layer) => layer.pattern?.kind ?? null)
   )}`;
 }
 

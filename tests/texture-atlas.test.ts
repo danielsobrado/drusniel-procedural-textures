@@ -34,6 +34,13 @@ describe('shared texture atlas', () => {
     });
   });
 
+  it('rejects invalid atlas dimension inputs', () => {
+    expect(() => createSharedAtlasLayout(0, 512, 2048, 128)).toThrow(/target count/i);
+    expect(() => createSharedAtlasLayout(1, Number.NaN, 2048, 128)).toThrow(/requested.*tile size/i);
+    expect(() => createSharedAtlasLayout(1, 512, 0, 128)).toThrow(/maximum texture size/i);
+    expect(() => createSharedAtlasLayout(1, 512, 2048, 0)).toThrow(/minimum tile size/i);
+  });
+
   it('rejects atlas layouts that would destroy useful material resolution', () => {
     expect(() => createSharedAtlasLayout(200, 512, 1024, 128)).toThrow(/below 128 px/i);
   });
@@ -131,6 +138,7 @@ describe('shared texture atlas', () => {
     source.setAttribute('uv', new THREE.Float32BufferAttribute([0, 0, 1, 0, 0, 1], 2));
     const layout = createSharedAtlasLayout(4, 512, 1024, 128);
     expect(() => remapGeometryUvToAtlas(source, 4, layout)).toThrow(/invalid shared-atlas/i);
+    expect(() => remapGeometryUvToAtlas(source, 0, { ...layout, resolution: 999 })).toThrow(/resolution must equal/i);
     source.dispose();
   });
 });

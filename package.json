@@ -14,6 +14,7 @@
     "build": "tsc --noEmit && vite build && npm run build:runtime",
     "build:runtime": "tsc --noEmit && vite build --config vite.runtime.config.ts && tsc -p tsconfig.runtime.json",
     "preview": "vite preview",
+    "thumbnails:generate": "node scripts/generate-preset-thumbnails.mjs",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs && node scripts/renderer-fallback-smoke.mjs",

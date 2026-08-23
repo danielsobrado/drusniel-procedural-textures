@@ -53,6 +53,16 @@ export function isRemoteResourceUri(value: string): boolean {
   return PROTOCOL_RELATIVE_URI.test(decoded) || URI_SCHEME.test(decoded);
 }
 
+function isAbsoluteLocalResourceUri(value: string): boolean {
+  return decodeResourcePath(value).startsWith('/');
+}
+
+function assertBundleResourceUri(value: string): void {
+  if (isRemoteResourceUri(value) || isAbsoluteLocalResourceUri(value)) {
+    throw new Error(`Remote or absolute GLTF resource URIs are not supported: ${value}`);
+  }
+}
+
 function collectResourceSectionUris(
   root: Readonly<Record<string, unknown>>,
   section: 'buffers' | 'images',
@@ -65,9 +75,7 @@ function collectResourceSectionUris(
     const record = asRecord(entry);
     const uri = record?.uri;
     if (typeof uri !== 'string' || DATA_URI.test(uri)) continue;
-    if (isRemoteResourceUri(uri)) {
-      throw new Error(`Remote GLTF resource URIs are not supported: ${uri}`);
-    }
+    assertBundleResourceUri(uri);
     uris.add(uri);
   }
 }
@@ -127,7 +135,7 @@ export function resolveBundleFile(
   index: ReadonlyMap<string, File[]>,
   primaryPath: string
 ): File {
-  if (isRemoteResourceUri(uri)) throw new Error(`Remote GLTF resource URIs are not supported: ${uri}`);
+  assertBundleResourceUri(uri);
   const normalized = canonicalResourcePath(uri);
   const primaryRelative = joinBundlePath(dirname(primaryPath), normalized);
   for (const candidate of [primaryRelative, normalized]) {
