@@ -10,10 +10,207 @@
     >
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧪</text></svg>">
     <title>Procedural Texture Lab</title>
-    <script type="module" crossorigin src="./assets/index-EBe6CmqL.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-Cpxx5I_T.css">
+
+    <!--
+      Boot splash. Deliberately inlined: the module graph is multi-megabyte in dev, so
+      anything served from a stylesheet or a module paints far too late to be useful.
+      The colour literals are copies of the tokens in src/styles/marble-glass.css and
+      src/styles/brand.css - keep them in sync when those change.
+    -->
+    <style>
+      :root { color-scheme: dark; }
+
+      html, body { height: 100%; }
+
+      body {
+        margin: 0;
+        background:
+          radial-gradient(ellipse at 16% -12%, rgba(139, 151, 182, 0.16), transparent 35%),
+          radial-gradient(ellipse at 86% 112%, rgba(81, 91, 113, 0.14), transparent 38%),
+          #080b10;
+        font-family: ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+      }
+
+      #boot-splash {
+        position: fixed;
+        z-index: 9999;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        opacity: 1;
+        transition: opacity 260ms ease;
+      }
+
+      #boot-splash[data-state="done"] { opacity: 0; }
+
+      .boot-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+        width: min(340px, calc(100% - 48px));
+        padding: 26px 26px 22px;
+        border: 1px solid rgba(248, 250, 255, 0.24);
+        border-radius: 18px;
+        background:
+          radial-gradient(ellipse at 8% 0%, rgba(255, 255, 255, 0.15), transparent 34%),
+          radial-gradient(ellipse at 96% 108%, rgba(184, 194, 215, 0.1), transparent 39%),
+          linear-gradient(155deg, rgba(255, 255, 255, 0.055), transparent 28%, rgba(6, 9, 14, 0.08) 76%, rgba(255, 255, 255, 0.025)),
+          rgba(50, 56, 67, 0.84);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.07),
+          0 24px 60px rgba(0, 0, 0, 0.46);
+        -webkit-backdrop-filter: blur(28px) saturate(112%);
+        backdrop-filter: blur(28px) saturate(112%);
+      }
+
+      .boot-brand { display: flex; align-items: center; gap: 12px; }
+
+      .boot-mark {
+        display: flex;
+        flex: 0 0 38px;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        border: 1px solid rgba(226, 232, 255, 0.36);
+        border-radius: 11px;
+        background:
+          radial-gradient(circle at 28% 18%, rgba(255, 255, 255, 0.36), transparent 24%),
+          linear-gradient(145deg, rgba(176, 188, 255, 0.98), rgba(105, 121, 235, 0.94) 34%, rgba(64, 75, 169, 0.95) 67%, rgba(31, 38, 94, 0.98));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.46),
+          0 7px 13px rgba(0, 0, 0, 0.42),
+          0 0 18px rgba(102, 120, 255, 0.22);
+        color: #f7f9ff;
+        font-size: 10px;
+        font-weight: 900;
+        letter-spacing: 0.075em;
+      }
+
+      .boot-copy { display: flex; flex-direction: column; }
+      .boot-copy strong { color: #f2f4f8; font-size: 12px; font-weight: 760; letter-spacing: -0.015em; }
+      .boot-copy span { color: #8793a7; font-size: 8px; letter-spacing: 0.012em; }
+
+      .boot-track {
+        position: relative;
+        overflow: hidden;
+        height: 5px;
+        border: 1px solid rgba(241, 245, 255, 0.13);
+        border-radius: 999px;
+        background: rgba(10, 13, 18, 0.84);
+      }
+
+      .boot-fill {
+        width: 100%;
+        height: 100%;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(105, 121, 235, 0.95), rgba(176, 188, 255, 0.98));
+        box-shadow: 0 0 12px rgba(102, 120, 255, 0.45);
+        transform: scaleX(0.04);
+        transform-origin: left center;
+        transition: transform 320ms cubic-bezier(0.22, 0.68, 0.32, 1);
+        will-change: transform;
+      }
+
+      /* Indeterminate sheen, shown only until a real fraction arrives. */
+      .boot-track::after {
+        position: absolute;
+        content: "";
+        inset: 0;
+        background: linear-gradient(90deg, transparent, rgba(226, 232, 255, 0.22), transparent);
+        transform: translateX(-100%);
+        animation: boot-sheen 1400ms ease-in-out infinite;
+      }
+
+      #boot-splash[data-determinate="true"] .boot-track::after { display: none; }
+
+      @keyframes boot-sheen {
+        to { transform: translateX(100%); }
+      }
+
+      .boot-status {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        color: #cfd6ff;
+        font-size: 9px;
+        font-weight: 650;
+        letter-spacing: 0.01em;
+      }
+
+      .boot-status span:last-child { color: #8793a7; font-variant-numeric: tabular-nums; }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-splash { transition: none; }
+        .boot-fill { transition: none; }
+        .boot-track::after { animation: none; display: none; }
+      }
+    </style>
+    <script type="module" crossorigin src="./assets/index-D8Qh1HEL.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BldSKLmM.css">
   </head>
   <body>
-    <div id="app"></div>
+    <div id="boot-splash" data-determinate="false" role="status" aria-live="polite">
+      <div class="boot-panel">
+        <div class="boot-brand">
+          <span class="boot-mark" aria-hidden="true">PTL</span>
+          <div class="boot-copy">
+            <strong>Procedural Texture Lab</strong>
+            <span>Realtime material authoring</span>
+          </div>
+        </div>
+        <div class="boot-track"><div class="boot-fill" id="boot-fill"></div></div>
+        <div class="boot-status">
+          <span id="boot-stage">Loading interface</span>
+          <span id="boot-percent"></span>
+        </div>
+      </div>
+    </div>
+
+    <div id="app"></div>
+
+    <!--
+      Installed before the module script so no early milestone is dropped: the app
+      reports into this handle as soon as its modules evaluate.
+    -->
+    <script>
+      (function () {
+        var splash = document.getElementById('boot-splash');
+        var fill = document.getElementById('boot-fill');
+        var stageLabel = document.getElementById('boot-stage');
+        var percentLabel = document.getElementById('boot-percent');
+        var settled = false;
+
+        function removeSplash() {
+          if (splash !== null && splash.parentNode !== null) splash.parentNode.removeChild(splash);
+        }
+
+        window.__ptlBoot = {
+          report: function (stage, fraction) {
+            if (settled || splash === null) return;
+            if (typeof stage === 'string' && stageLabel !== null) stageLabel.textContent = stage;
+            if (typeof fraction === 'number' && isFinite(fraction)) {
+              var clamped = Math.max(0.04, Math.min(1, fraction));
+              splash.setAttribute('data-determinate', 'true');
+              if (fill !== null) fill.style.transform = 'scaleX(' + clamped + ')';
+              if (percentLabel !== null) percentLabel.textContent = Math.round(clamped * 100) + '%';
+            }
+          },
+          finish: function () {
+            if (settled || splash === null) return;
+            settled = true;
+            if (fill !== null) fill.style.transform = 'scaleX(1)';
+            if (stageLabel !== null) stageLabel.textContent = 'Ready';
+            if (percentLabel !== null) percentLabel.textContent = '100%';
+            splash.setAttribute('data-state', 'done');
+            var reduced = window.matchMedia !== undefined &&
+              window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            if (reduced) removeSplash();
+            else window.setTimeout(removeSplash, 300);
+          }
+        };
+      })();
+    </script>
   </body>
 </html>
