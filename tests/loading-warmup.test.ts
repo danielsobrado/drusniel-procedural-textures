@@ -5,9 +5,8 @@ const rendererSource = readFileSync(new URL('../src/engine/LabRenderer.ts', impo
 const appSource = readFileSync(new URL('../src/app/App.ts', import.meta.url), 'utf8');
 const environmentSource = readFileSync(new URL('../src/engine/EnvironmentLibrary.ts', import.meta.url), 'utf8');
 const profilerSource = readFileSync(new URL('../src/engine/PerformanceProfiler.ts', import.meta.url), 'utf8');
-const thumbnailSource = readFileSync(new URL('../src/export/PresetThumbnailRenderer.ts', import.meta.url), 'utf8');
+const librarySource = readFileSync(new URL('../src/ui/LibraryPanel.ts', import.meta.url), 'utf8');
 const refinementStyles = readFileSync(new URL('../src/styles/refinements.css', import.meta.url), 'utf8');
-const loadingProgressStyles = readFileSync(new URL('../src/styles/loading-progress.css', import.meta.url), 'utf8');
 
 describe('nonblocking renderer warmup', () => {
   it('does not generate the studio PMREM synchronously in the environment constructor', () => {
@@ -23,26 +22,6 @@ describe('nonblocking renderer warmup', () => {
     expect(rendererSource).toContain('this.currentMaterialCompileFailure() !== null');
   });
 
-  it('lets the loading UI paint and coalesces stale requests before GPU compilation starts', () => {
-    expect(rendererSource).toContain("this.materialCompileStage = 'queued';");
-    expect(rendererSource).toContain("this.materialCompileStage = 'compiling';");
-    expect(rendererSource).toContain('await nextPaint();');
-    expect(rendererSource).toContain('await idleTurn();');
-    expect(rendererSource).toContain('!this.isCompileRequestCurrent(request)');
-  });
-
-  it('retains compiled physical shader variants instead of repeatedly rebuilding them', () => {
-    expect(rendererSource).toContain('private readonly materialProgramKeepers = new Map<string, MaterialCompiler>();');
-    expect(rendererSource).toContain('await this.retainMaterialProgram(request);');
-    expect(rendererSource).toContain("key: `${sheen ? 'sheen' : 'no-sheen'}:${transmission ? 'transmission' : 'opaque'}`");
-  });
-
-  it('reuses thumbnail compilers for matching physical shader variants', () => {
-    expect(thumbnailSource).toContain('private readonly compilers = new Map<string, MaterialCompiler>();');
-    expect(thumbnailSource).toContain('const compiler = this.compilerFor(physical);');
-    expect(thumbnailSource).toContain('this.mesh.material = compiler.material;');
-  });
-
   it('excludes warmup stalls from steady-state performance samples', () => {
     expect(profilerSource).toContain('public reset(now = performance.now()): void');
     expect(rendererSource).toContain('this.profiler.reset();');
@@ -53,12 +32,19 @@ describe('nonblocking renderer warmup', () => {
     expect(appSource).toContain('const dataUrl = await this.renderer.capturePng();');
   });
 
-  it('keeps a visible viewport warmup state with an indeterminate progress bar', () => {
+  it('keeps a visible viewport warmup state while expensive startup work runs', () => {
     expect(rendererSource).toContain("this.container.classList.toggle('is-loading', label !== null)");
     expect(refinementStyles).toContain('.viewport.is-loading::before');
     expect(refinementStyles).toContain('content: attr(data-loading-label)');
-    expect(loadingProgressStyles).toContain('.viewport.is-loading::after');
-    expect(loadingProgressStyles).toContain('@keyframes viewport-loading-progress');
-    expect(loadingProgressStyles).toContain('prefers-reduced-motion: reduce');
+  });
+
+  it('loads preset thumbnails lazily near the viewport', () => {
+    expect(librarySource).toContain('new IntersectionObserver(');
+    expect(librarySource).toContain('onThumbnailRequested');
+    expect(appSource).toContain('private queuePresetThumbnail(preset: MaterialPreset): void');
+    expect(appSource).toContain('await waitForBackgroundIdle();');
+    expect(appSource).toContain('this.library.setThumbnail(id, thumbnail);');
+    expect(appSource).not.toContain('this.schedulePresetThumbnails();');
+    expect(appSource).not.toContain('this.library.setThumbnails(thumbnails);');
   });
 });

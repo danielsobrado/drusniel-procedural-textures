@@ -1,0 +1,167 @@
+.pattern-editor {
+  border-color: rgba(190, 202, 214, 0.18);
+}
+
+.pattern-editor summary,
+.graph-exposed-panel .section-heading span,
+.surface-graph-header strong {
+  letter-spacing: 0.01em;
+}
+
+.graph-exposed-panel {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid rgba(200, 210, 220, 0.14);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.045), rgba(120, 130, 142, 0.025));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.graph-exposed-panel .section-heading {
+  align-items: baseline;
+  gap: 8px;
+}
+
+.graph-exposed-panel .section-heading small {
+  overflow: hidden;
+  color: var(--muted, #929aa4);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-exposed-grid {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.graph-exposed-control {
+  margin: 0;
+}
+
+.surface-graph-editor {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px;
+  border: 1px solid rgba(202, 211, 220, 0.14);
+  border-radius: 14px;
+  background: rgba(13, 16, 20, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+
+.surface-graph-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.surface-graph-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.surface-graph-header small,
+.surface-graph-header > span {
+  color: var(--muted, #929aa4);
+  font-size: 10px;
+}
+
+.surface-graph-header > span {
+  text-align: right;
+}
+
+.surface-graph-nodes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+}
+
+.surface-graph-node {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(213, 220, 228, 0.12);
+  border-radius: 10px;
+  background: linear-gradient(150deg, rgba(68, 75, 84, 0.42), rgba(30, 34, 40, 0.34));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 5px 14px rgba(0, 0, 0, 0.12);
+}
+
+.surface-graph-node-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.surface-graph-node-heading strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-graph-node-heading span {
+  padding: 2px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  color: var(--muted, #929aa4);
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.surface-graph-node > small {
+  display: block;
+  margin-top: 3px;
+  color: rgba(215, 222, 230, 0.68);
+  font-size: 9px;
+}
+
+.surface-graph-ports {
+  display: grid;
+  gap: 2px;
+  margin-top: 7px;
+  color: rgba(199, 208, 217, 0.55);
+  font-size: 8px;
+  line-height: 1.25;
+}
+
+.surface-graph-routes {
+  display: grid;
+  gap: 4px;
+  max-height: 160px;
+  overflow: auto;
+  padding: 7px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.surface-graph-edge {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  color: rgba(211, 218, 226, 0.68);
+  font-size: 9px;
+}
+
+.surface-graph-edge span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.surface-subgraph-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.surface-subgraph-list span {
+  padding: 4px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: rgba(216, 223, 230, 0.68);
+  font-size: 9px;
+}

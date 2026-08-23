@@ -1,4 +1,25 @@
 import {
+  setSurfaceGraphExposedValue,
+  surfaceGraphExposedValue,
+  type SurfaceGraphExposedValue
+} from '../core/graph/SurfaceGraphParameters';
+import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
+import { mutateGenome } from '../materials/MaterialGenome';
+import { compileSurfaceGraph } from '../materials/SurfaceGraphCompiler';
+import type {
+  EnvironmentPreset,
+  GenomeLocks,
+  ImportedMeshTarget,
+  MaterialGroup,
+  MaterialLayer,
+  MaterialPreset,
+  ObjectPreset,
+  PhysicalSettings,
+  ProjectState,
+  SynthesisSettings
+} from '../materials/types';
+import { createId } from '../utils/ids';
+import {
   DEFAULT_BACKGROUND,
   DEFAULT_ENVIRONMENT,
   DEFAULT_OBJECT,
@@ -20,23 +41,9 @@ import {
   normalizeMaterialLayer,
   normalizeObjectPreset,
   normalizePhysicalSettings,
-  normalizeSynthesisSettings,
-  normalizeProject
+  normalizeProject,
+  normalizeSynthesisSettings
 } from './ProjectFile';
-import type {
-  EnvironmentPreset,
-  ImportedMeshTarget,
-  MaterialGroup,
-  MaterialLayer,
-  GenomeLocks,
-  MaterialPreset,
-  ObjectPreset,
-  PhysicalSettings,
-  ProjectState,
-  SynthesisSettings
-} from '../materials/types';
-import { createId } from '../utils/ids';
-import { mutateGenome } from '../materials/MaterialGenome';
 
 export type StateChangeReason =
   | 'project'
@@ -51,14 +58,11 @@ export type StateChangeReason =
   | 'physical'
   | 'synthesis';
 
-export type StateListener = (
-  state: Readonly<ProjectState>,
-  reason: StateChangeReason
-) => void;
+export type StateListener = (state: Readonly<ProjectState>, reason: StateChangeReason) => void;
 
 const CONTINUOUS_LAYER_FIELDS = new Set<keyof MaterialLayer>([
   'name', 'opacity', 'scale', 'strength', 'seed', 'colorA', 'colorB',
-  'roughness', 'displacement', 'maskStrength'
+  'roughness', 'displacement', 'maskStrength', 'pattern'
 ]);
 const CONTINUOUS_GROUP_FIELDS = new Set<keyof MaterialGroup>(['name', 'opacity']);
 const COPY_SUFFIX = ' copy';
@@ -96,22 +100,14 @@ function groupCoalesceKey(id: string, patch: Partial<MaterialGroup>): string | u
 }
 
 function defaultChannel(kind: MaterialLayer['kind']): MaterialLayer['channel'] {
-  if (kind === 'wet-film') {
-    return 'clearcoat';
-  }
-  if (kind === 'sss') {
-    return 'sss';
-  }
-  if (kind === 'vessels') {
-    return 'color';
-  }
+  if (kind === 'wet-film') return 'clearcoat';
+  if (kind === 'sss') return 'sss';
+  if (kind === 'vessels') return 'color';
   return 'surface';
 }
 
 export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
-  if (!LAYER_KIND_IDS.has(kind)) {
-    throw new Error(`Unsupported layer kind: ${String(kind)}.`);
-  }
+  if (!LAYER_KIND_IDS.has(kind)) throw new Error(`Unsupported layer kind: ${String(kind)}.`);
 
   const names: Record<MaterialLayer['kind'], string> = {
     base: 'Base color',
@@ -126,9 +122,9 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     sss: 'Subsurface tissue',
     'reaction-diffusion': 'Reaction diffusion',
     erosion: 'Thermal erosion',
-    sdf: 'SDF structure'
+    sdf: 'SDF structure',
+    pattern: 'Pattern sampler'
   };
-
   const colors: Record<MaterialLayer['kind'], [string, string]> = {
     base: ['#343941', '#9ba5b2'],
     fbm: ['#2a3037', '#b0bac4'],
@@ -142,7 +138,8 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     sss: ['#e99b4a', '#bd3e48'],
     'reaction-diffusion': ['#142d31', '#d6a85d'],
     erosion: ['#28231d', '#9b8462'],
-    sdf: ['#1c2737', '#b9d7ef']
+    sdf: ['#1c2737', '#b9d7ef'],
+    pattern: ['#34312d', '#a89a83']
   };
 
   return {
@@ -164,7 +161,8 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     maskSourceLayerId: null,
     structureSourceLayerId: null,
     maskInvert: false,
-    maskStrength: 1
+    maskStrength: 1,
+    pattern: kind === 'pattern' ? { ...DEFAULT_PATTERN_SETTINGS } : null
   };
 }
 
@@ -175,7 +173,6 @@ export function createDefaultProject(): ProjectState {
   noise.opacity = 0.38;
   noise.scale = 3.2;
   noise.displacement = 0.035;
-
   return {
     version: 2,
     selectedObject: DEFAULT_OBJECT,
@@ -192,6 +189,7 @@ export function createDefaultProject(): ProjectState {
     synthesis: { ...DEFAULT_SYNTHESIS },
     genomeLocks: { color: false, structure: false, roughness: false, scale: false, damage: false },
     graphMode: false,
+    surfaceGraph: null,
     groups: [],
     layers: [base, noise]
   };
@@ -200,14 +198,8 @@ export function createDefaultProject(): ProjectState {
 function clonePreset(preset: MaterialPreset): Pick<ProjectState, 'groups' | 'layers'> {
   const groupIdMap = new Map<string, string>();
   const layerIdMap = new Map<string, string>();
-
-  for (const group of preset.groups ?? []) {
-    groupIdMap.set(group.id, createId('group'));
-  }
-  for (const layer of preset.layers) {
-    layerIdMap.set(layer.id, createId('layer'));
-  }
-
+  for (const group of preset.groups ?? []) groupIdMap.set(group.id, createId('group'));
+  for (const layer of preset.layers) layerIdMap.set(layer.id, createId('layer'));
   const groups = (preset.groups ?? []).map((group) => ({
     ...group,
     id: groupIdMap.get(group.id) ?? createId('group'),
@@ -215,16 +207,12 @@ function clonePreset(preset: MaterialPreset): Pick<ProjectState, 'groups' | 'lay
   }));
   const layers = preset.layers.map((layer) => ({
     ...layer,
+    pattern: layer.pattern === undefined || layer.pattern === null ? layer.pattern ?? null : { ...layer.pattern },
     id: layerIdMap.get(layer.id) ?? createId('layer'),
     groupId: layer.groupId === null ? null : groupIdMap.get(layer.groupId) ?? null,
-    maskSourceLayerId: layer.maskSourceLayerId === null
-      ? null
-      : layerIdMap.get(layer.maskSourceLayerId) ?? null,
-    structureSourceLayerId: layer.structureSourceLayerId === null
-      ? null
-      : layerIdMap.get(layer.structureSourceLayerId) ?? null
+    maskSourceLayerId: layer.maskSourceLayerId === null ? null : layerIdMap.get(layer.maskSourceLayerId) ?? null,
+    structureSourceLayerId: layer.structureSourceLayerId === null ? null : layerIdMap.get(layer.structureSourceLayerId) ?? null
   }));
-
   return { groups, layers };
 }
 
@@ -240,9 +228,7 @@ export class AppState {
     this.project = cloneProject(normalizeProject(initialProject));
   }
 
-  public get snapshot(): Readonly<ProjectState> {
-    return this.project;
-  }
+  public get snapshot(): Readonly<ProjectState> { return this.project; }
 
   public subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
@@ -250,11 +236,10 @@ export class AppState {
   }
 
   public addLayer(kind: MaterialLayer['kind']): void {
-    if (this.project.layers.length >= MAX_LAYERS) {
-      throw new Error(`A material can contain at most ${MAX_LAYERS} layers.`);
-    }
+    if (this.project.layers.length >= MAX_LAYERS) throw new Error(`A material can contain at most ${MAX_LAYERS} layers.`);
     const layer = normalizeMaterialLayer(createDefaultLayer(kind), this.project.layers.length);
     this.commit();
+    this.invalidateSurfaceGraph();
     this.project.layers.push(layer);
     this.project.selectedLayerId = layer.id;
     this.emit('layers');
@@ -263,37 +248,30 @@ export class AppState {
   public updateLayer(id: string, patch: Partial<MaterialLayer>): void {
     const index = this.project.layers.findIndex((layer) => layer.id === id);
     const current = this.project.layers[index];
-    if (index < 0 || current === undefined) {
-      return;
-    }
+    if (index < 0 || current === undefined) return;
     const candidate = normalizeMaterialLayer({ ...current, ...patch, id }, index);
     const normalized = normalizeProject({
       ...this.project,
+      surfaceGraph: null,
       layers: this.project.layers.map((layer, layerIndex) => layerIndex === index ? candidate : layer)
     });
     const next = normalized.layers[index];
-    if (next === undefined || !patchChanges(current, next)) {
-      return;
-    }
+    if (next === undefined || !patchChanges(current, next)) return;
     this.commit(layerCoalesceKey(id, patch));
+    this.project.surfaceGraph = null;
     this.project.layers[index] = next;
     this.emit('layers');
   }
 
   public removeLayer(id: string): void {
-    if (this.project.layers.length <= 1) {
-      throw new Error('A material must keep at least one layer.');
-    }
+    if (this.project.layers.length <= 1) throw new Error('A material must keep at least one layer.');
     const index = this.project.layers.findIndex((layer) => layer.id === id);
-    if (index < 0) {
-      return;
-    }
+    if (index < 0) return;
     this.commit();
+    this.invalidateSurfaceGraph();
     this.project.layers.splice(index, 1);
     for (const layer of this.project.layers) {
-      if (layer.maskSourceLayerId === id) {
-        layer.maskSourceLayerId = null;
-      }
+      if (layer.maskSourceLayerId === id) layer.maskSourceLayerId = null;
       if (layer.structureSourceLayerId === id) layer.structureSourceLayerId = null;
     }
     if (this.project.selectedLayerId === id) {
@@ -303,14 +281,10 @@ export class AppState {
   }
 
   public duplicateLayer(id: string): void {
-    if (this.project.layers.length >= MAX_LAYERS) {
-      throw new Error(`A material can contain at most ${MAX_LAYERS} layers.`);
-    }
+    if (this.project.layers.length >= MAX_LAYERS) throw new Error(`A material can contain at most ${MAX_LAYERS} layers.`);
     const index = this.project.layers.findIndex((layer) => layer.id === id);
     const source = this.project.layers[index];
-    if (index < 0 || source === undefined) {
-      return;
-    }
+    if (index < 0 || source === undefined) return;
     const duplicate = normalizeMaterialLayer({
       ...source,
       id: createId('layer'),
@@ -318,6 +292,7 @@ export class AppState {
       maskSourceLayerId: source.maskSourceLayerId === source.id ? null : source.maskSourceLayerId
     }, index + 1);
     this.commit();
+    this.invalidateSurfaceGraph();
     this.project.layers.splice(index + 1, 0, duplicate);
     this.project.selectedLayerId = duplicate.id;
     this.emit('layers');
@@ -325,39 +300,26 @@ export class AppState {
 
   public reorderLayer(id: string, targetIndex: number): void {
     const sourceIndex = this.project.layers.findIndex((layer) => layer.id === id);
-    if (sourceIndex < 0) {
-      return;
-    }
-    if (!Number.isInteger(targetIndex)) {
-      throw new Error('Layer target index must be an integer.');
-    }
+    if (sourceIndex < 0) return;
+    if (!Number.isInteger(targetIndex)) throw new Error('Layer target index must be an integer.');
     const clampedIndex = Math.max(0, Math.min(targetIndex, this.project.layers.length - 1));
-    if (sourceIndex === clampedIndex) {
-      return;
-    }
+    if (sourceIndex === clampedIndex) return;
     this.commit();
+    this.invalidateSurfaceGraph();
     const [layer] = this.project.layers.splice(sourceIndex, 1);
-    if (layer !== undefined) {
-      this.project.layers.splice(clampedIndex, 0, layer);
-    }
+    if (layer !== undefined) this.project.layers.splice(clampedIndex, 0, layer);
     this.emit('layers');
   }
 
   public selectLayer(id: string | null): void {
-    if (id !== null && !this.project.layers.some((layer) => layer.id === id)) {
-      return;
-    }
-    if (this.project.selectedLayerId === id) {
-      return;
-    }
+    if (id !== null && !this.project.layers.some((layer) => layer.id === id)) return;
+    if (this.project.selectedLayerId === id) return;
     this.project.selectedLayerId = id;
     this.emit('selection');
   }
 
   public addGroup(layerId: string | null = this.project.selectedLayerId): void {
-    if (this.project.groups.length >= MAX_GROUPS) {
-      throw new Error(`A material can contain at most ${MAX_GROUPS} groups.`);
-    }
+    if (this.project.groups.length >= MAX_GROUPS) throw new Error(`A material can contain at most ${MAX_GROUPS} groups.`);
     const group = normalizeMaterialGroup({
       id: createId('group'),
       name: `Group ${this.project.groups.length + 1}`.slice(0, MAX_GROUP_NAME_LENGTH),
@@ -366,74 +328,94 @@ export class AppState {
       opacity: 1
     }, this.project.groups.length);
     this.commit();
+    this.invalidateSurfaceGraph();
     this.project.groups.push(group);
     const layer = this.project.layers.find((item) => item.id === layerId);
-    if (layer !== undefined) {
-      layer.groupId = group.id;
-    }
+    if (layer !== undefined) layer.groupId = group.id;
     this.emit('groups');
   }
 
   public updateGroup(id: string, patch: Partial<MaterialGroup>): void {
     const index = this.project.groups.findIndex((group) => group.id === id);
     const current = this.project.groups[index];
-    if (index < 0 || current === undefined) {
-      return;
-    }
+    if (index < 0 || current === undefined) return;
     const candidate = normalizeMaterialGroup({ ...current, ...patch, id }, index);
     const normalized = normalizeProject({
       ...this.project,
+      surfaceGraph: null,
       groups: this.project.groups.map((group, groupIndex) => groupIndex === index ? candidate : group)
     });
     const next = normalized.groups[index];
-    if (next === undefined || !patchChanges(current, next)) {
-      return;
-    }
+    if (next === undefined || !patchChanges(current, next)) return;
     this.commit(groupCoalesceKey(id, patch));
+    this.project.surfaceGraph = null;
     this.project.groups[index] = next;
     this.emit('groups');
   }
 
   public removeGroup(id: string): void {
     const index = this.project.groups.findIndex((group) => group.id === id);
-    if (index < 0) {
-      return;
-    }
+    if (index < 0) return;
     this.commit();
+    this.invalidateSurfaceGraph();
     this.project.groups.splice(index, 1);
-    for (const group of this.project.groups) {
-      if (group.parentId === id) {
-        group.parentId = null;
-      }
-    }
-    for (const layer of this.project.layers) {
-      if (layer.groupId === id) {
-        layer.groupId = null;
-      }
-    }
+    for (const group of this.project.groups) if (group.parentId === id) group.parentId = null;
+    for (const layer of this.project.layers) if (layer.groupId === id) layer.groupId = null;
     this.emit('groups');
   }
 
   public applyPreset(preset: MaterialPreset): void {
-    const cloned = clonePreset(preset);
+    const graphCompilation = preset.graph === undefined
+      ? null
+      : compileSurfaceGraph(structuredClone(preset.graph));
+    const material = graphCompilation === null ? clonePreset(preset) : graphCompilation;
+    const groups = material.groups.slice(0, MAX_GROUPS);
+    const layers = material.layers.slice(0, MAX_LAYERS);
     const next = normalizeProject({
       ...this.project,
-      groups: cloned.groups.slice(0, MAX_GROUPS),
-      layers: cloned.layers.slice(0, MAX_LAYERS),
-      selectedLayerId: cloned.layers.at(-1)?.id ?? null,
+      groups,
+      layers,
+      selectedLayerId: layers.at(-1)?.id ?? null,
       physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
-      synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) }
+      synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) },
+      surfaceGraph: graphCompilation?.graph ?? null
     });
     this.commit();
     this.project = next;
     this.emit('layers');
   }
 
+  public setSurfaceGraphParameter(id: string, value: SurfaceGraphExposedValue): void {
+    const current = this.project.surfaceGraph;
+    if (current === null || current === undefined) return;
+    const graph = setSurfaceGraphExposedValue(current, id, value);
+    if (surfaceGraphExposedValue(current, id) === surfaceGraphExposedValue(graph, id)) return;
+
+    const compiled = compileSurfaceGraph(graph);
+    const requestedSelection = this.project.selectedLayerId;
+    const selectedName = requestedSelection === null
+      ? undefined
+      : this.project.layers.find((layer) => layer.id === requestedSelection)?.name;
+    const selectedLayerId = requestedSelection !== null && compiled.layers.some((layer) => layer.id === requestedSelection)
+      ? requestedSelection
+      : selectedName === undefined
+        ? compiled.layers.at(-1)?.id ?? null
+        : compiled.layers.find((layer) => layer.name === selectedName)?.id ?? compiled.layers.at(-1)?.id ?? null;
+    const next = normalizeProject({
+      ...this.project,
+      surfaceGraph: compiled.graph,
+      groups: compiled.groups,
+      layers: compiled.layers,
+      selectedLayerId
+    });
+    this.commit(`surface-graph:${id}`);
+    this.project = next;
+    this.emit('layers');
+  }
+
   public setObjectPreset(preset: ObjectPreset): void {
     const normalizedPreset = normalizeObjectPreset(preset);
-    if (this.project.selectedObject === normalizedPreset && this.project.importedAssetName === null) {
-      return;
-    }
+    if (this.project.selectedObject === normalizedPreset && this.project.importedAssetName === null) return;
     this.commit();
     this.project.selectedObject = normalizedPreset;
     this.project.importedAssetName = null;
@@ -447,18 +429,13 @@ export class AppState {
     const normalizedName = normalizeImportedAssetName(name);
     const restoringSameAsset = this.project.importedAssetName === normalizedName;
     const meshIds = new Set(meshes.map((mesh) => mesh.id));
-    const nextAssignments = Object.fromEntries(
-      meshes.map((mesh) => [
-        mesh.id,
-        restoringSameAsset ? this.project.meshAssignments[mesh.id] ?? true : true
-      ])
-    );
-    const nextSelection = restoringSameAsset &&
-      this.project.selectedMeshId !== null &&
-      meshIds.has(this.project.selectedMeshId)
-        ? this.project.selectedMeshId
-        : meshes[0]?.id ?? null;
-
+    const nextAssignments = Object.fromEntries(meshes.map((mesh) => [
+      mesh.id,
+      restoringSameAsset ? this.project.meshAssignments[mesh.id] ?? true : true
+    ]));
+    const nextSelection = restoringSameAsset && this.project.selectedMeshId !== null && meshIds.has(this.project.selectedMeshId)
+      ? this.project.selectedMeshId
+      : meshes[0]?.id ?? null;
     const next = normalizeProject({
       ...this.project,
       importedAssetName: normalizedName,
@@ -475,23 +452,15 @@ export class AppState {
   }
 
   public selectMesh(id: string | null): void {
-    if (id !== null && !this.project.importedMeshes.some((mesh) => mesh.id === id)) {
-      return;
-    }
-    if (this.project.selectedMeshId === id) {
-      return;
-    }
+    if (id !== null && !this.project.importedMeshes.some((mesh) => mesh.id === id)) return;
+    if (this.project.selectedMeshId === id) return;
     this.project.selectedMeshId = id;
     this.emit('mesh');
   }
 
   public setMeshAssignment(id: string, assigned: boolean): void {
-    if (!this.project.importedMeshes.some((mesh) => mesh.id === id)) {
-      return;
-    }
-    if (this.project.meshAssignments[id] === assigned) {
-      return;
-    }
+    if (!this.project.importedMeshes.some((mesh) => mesh.id === id)) return;
+    if (this.project.meshAssignments[id] === assigned) return;
     this.commit();
     this.project.meshAssignments[id] = assigned;
     this.emit('mesh');
@@ -499,12 +468,8 @@ export class AppState {
 
   public setEnvironment(environment: EnvironmentPreset, assetName: string | null = null): void {
     const normalized = normalizeEnvironment(environment);
-    const normalizedAssetName = normalized === 'custom' && assetName !== null
-      ? normalizeImportedAssetName(assetName)
-      : null;
-    if (this.project.environment === normalized && this.project.environmentAssetName === normalizedAssetName) {
-      return;
-    }
+    const normalizedAssetName = normalized === 'custom' && assetName !== null ? normalizeImportedAssetName(assetName) : null;
+    if (this.project.environment === normalized && this.project.environmentAssetName === normalizedAssetName) return;
     this.commit();
     this.project.environment = normalized;
     this.project.environmentAssetName = normalizedAssetName;
@@ -513,21 +478,15 @@ export class AppState {
 
   public setBackground(color: string): void {
     const normalizedColor = normalizeBackgroundColor(color);
-    if (this.project.background === normalizedColor) {
-      return;
-    }
+    if (this.project.background === normalizedColor) return;
     this.commit('viewport:background');
     this.project.background = normalizedColor;
     this.emit('background');
   }
 
   public setWireframe(enabled: boolean): void {
-    if (typeof enabled !== 'boolean') {
-      throw new Error('Wireframe must be a boolean.');
-    }
-    if (this.project.wireframe === enabled) {
-      return;
-    }
+    if (typeof enabled !== 'boolean') throw new Error('Wireframe must be a boolean.');
+    if (this.project.wireframe === enabled) return;
     this.commit();
     this.project.wireframe = enabled;
     this.emit('wireframe');
@@ -535,9 +494,7 @@ export class AppState {
 
   public setPhysical(patch: Partial<PhysicalSettings>): void {
     const next = normalizePhysicalSettings({ ...this.project.physical, ...patch });
-    if (!patchChanges(this.project.physical, next)) {
-      return;
-    }
+    if (!patchChanges(this.project.physical, next)) return;
     this.commit(patchKey('physical', patch));
     this.project.physical = next;
     this.emit('physical');
@@ -566,22 +523,15 @@ export class AppState {
   }
 
   public mutateMaterial(seed = Math.floor(Math.random() * 0x7fffffff)): void {
-    const genome = mutateGenome(
-      this.project.layers,
-      this.project.synthesis,
-      this.project.genomeLocks,
-      seed
-    );
-    const next = normalizeProject({ ...this.project, layers: genome.layers, synthesis: genome.synthesis });
+    const genome = mutateGenome(this.project.layers, this.project.synthesis, this.project.genomeLocks, seed);
+    const next = normalizeProject({ ...this.project, surfaceGraph: null, layers: genome.layers, synthesis: genome.synthesis });
     this.commit();
     this.project = next;
     this.emit('synthesis');
   }
 
   public mutateMaterialVariant(variant: number): void {
-    if (!Number.isInteger(variant) || variant < 0 || variant > 5) {
-      throw new Error('Material evolution variant must be between 0 and 5.');
-    }
+    if (!Number.isInteger(variant) || variant < 0 || variant > 5) throw new Error('Material evolution variant must be between 0 and 5.');
     const fingerprint = JSON.stringify({ layers: this.project.layers, synthesis: this.project.synthesis });
     let seed = 2166136261;
     for (let index = 0; index < fingerprint.length; index += 1) {
@@ -591,9 +541,7 @@ export class AppState {
     this.mutateMaterial((seed + Math.imul(variant + 1, 0x9e3779b1)) >>> 0);
   }
 
-  public toggleWireframe(): void {
-    this.setWireframe(!this.project.wireframe);
-  }
+  public toggleWireframe(): void { this.setWireframe(!this.project.wireframe); }
 
   public replaceProject(project: unknown): void {
     const normalized = normalizeProject(project);
@@ -604,9 +552,7 @@ export class AppState {
 
   public undo(): boolean {
     const previous = this.undoStack.pop();
-    if (previous === undefined) {
-      return false;
-    }
+    if (previous === undefined) return false;
     this.redoStack.push(cloneProject(this.project));
     this.project = previous;
     this.resetCoalescing();
@@ -616,9 +562,7 @@ export class AppState {
 
   public redo(): boolean {
     const next = this.redoStack.pop();
-    if (next === undefined) {
-      return false;
-    }
+    if (next === undefined) return false;
     this.undoStack.push(cloneProject(this.project));
     this.project = next;
     this.resetCoalescing();
@@ -626,16 +570,16 @@ export class AppState {
     return true;
   }
 
+  private invalidateSurfaceGraph(): void {
+    this.project.surfaceGraph = null;
+  }
+
   private commit(coalesceKey?: string): void {
     const now = Date.now();
-    const canCoalesce = coalesceKey !== undefined &&
-      this.lastCommitKey === coalesceKey &&
-      now - this.lastCommitAt <= HISTORY_COALESCE_MS;
+    const canCoalesce = coalesceKey !== undefined && this.lastCommitKey === coalesceKey && now - this.lastCommitAt <= HISTORY_COALESCE_MS;
     if (!canCoalesce) {
       this.undoStack.push(cloneProject(this.project));
-      if (this.undoStack.length > HISTORY_LIMIT) {
-        this.undoStack.shift();
-      }
+      if (this.undoStack.length > HISTORY_LIMIT) this.undoStack.shift();
     }
     this.redoStack.length = 0;
     this.lastCommitKey = coalesceKey ?? null;
@@ -648,8 +592,6 @@ export class AppState {
   }
 
   private emit(reason: StateChangeReason): void {
-    for (const listener of this.listeners) {
-      listener(this.project, reason);
-    }
+    for (const listener of this.listeners) listener(this.project, reason);
   }
 }

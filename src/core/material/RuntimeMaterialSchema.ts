@@ -8,6 +8,7 @@ import type {
   PhysicalSettings,
   SynthesisSettings
 } from '../../materials/types';
+import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from './PatternSettings';
 import {
   PTL_DEFAULT_PHYSICAL,
   PTL_DEFAULT_SYNTHESIS,
@@ -26,7 +27,7 @@ const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const LAYER_KINDS = new Set<LayerKind>([
   'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient', 'vessels', 'wet-film', 'sss',
-  'reaction-diffusion', 'erosion', 'sdf'
+  'reaction-diffusion', 'erosion', 'sdf', 'pattern'
 ]);
 const BLEND_MODES = new Set<BlendMode>(['normal', 'multiply', 'add', 'screen', 'overlay']);
 const CHANNELS = new Set<LayerChannel>([
@@ -41,9 +42,7 @@ interface MaterialDefinition {
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    throw new Error(`${label} must be an object.`);
-  }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${label} must be an object.`);
   return value as Record<string, unknown>;
 }
 
@@ -56,9 +55,7 @@ function asArray(value: unknown, label: string, maxLength: number, allowEmpty: b
 }
 
 function string(value: unknown, label: string, maxLength: number): string {
-  if (typeof value !== 'string' || value.length > maxLength) {
-    throw new Error(`${label} must be a string up to ${maxLength} characters.`);
-  }
+  if (typeof value !== 'string' || value.length > maxLength) throw new Error(`${label} must be a string up to ${maxLength} characters.`);
   return value;
 }
 
@@ -97,10 +94,11 @@ function enumValue<T extends string>(value: unknown, values: ReadonlySet<T>, lab
 
 function normalizeLayer(value: unknown, index: number): MaterialLayer {
   const input = asRecord(value, `Layer ${index + 1}`);
+  const kind = enumValue(input.kind, LAYER_KINDS, `Layer ${index + 1} generator`);
   return {
     id: id(input.id, `Layer ${index + 1} id`),
     name: string(input.name, `Layer ${index + 1} name`, PTL_MAX_LAYER_NAME_LENGTH),
-    kind: enumValue(input.kind, LAYER_KINDS, `Layer ${index + 1} generator`),
+    kind,
     enabled: boolean(input.enabled, `Layer ${index + 1} enabled`),
     blendMode: enumValue(input.blendMode, BLEND_MODES, `Layer ${index + 1} blend mode`),
     channel: enumValue(input.channel ?? 'surface', CHANNELS, `Layer ${index + 1} output channel`),
@@ -111,24 +109,17 @@ function normalizeLayer(value: unknown, index: number): MaterialLayer {
     colorA: color(input.colorA, `Layer ${index + 1} low color`),
     colorB: color(input.colorB, `Layer ${index + 1} high color`),
     roughness: finite(input.roughness, `Layer ${index + 1} roughness`, PTL_LAYER_LIMITS.roughness.min, PTL_LAYER_LIMITS.roughness.max),
-    displacement: finite(
-      input.displacement,
-      `Layer ${index + 1} displacement`,
-      PTL_LAYER_LIMITS.displacement.min,
-      PTL_LAYER_LIMITS.displacement.max
-    ),
+    displacement: finite(input.displacement, `Layer ${index + 1} displacement`, PTL_LAYER_LIMITS.displacement.min, PTL_LAYER_LIMITS.displacement.max),
     groupId: nullableId(input.groupId, `Layer ${index + 1} group id`),
     maskSourceLayerId: nullableId(input.maskSourceLayerId, `Layer ${index + 1} mask source id`),
     structureSourceLayerId: nullableId(input.structureSourceLayerId, `Layer ${index + 1} structure source id`),
     maskInvert: input.maskInvert === undefined ? false : boolean(input.maskInvert, `Layer ${index + 1} mask invert`),
     maskStrength: input.maskStrength === undefined
       ? 1
-      : finite(
-          input.maskStrength,
-          `Layer ${index + 1} mask strength`,
-          PTL_LAYER_LIMITS.maskStrength.min,
-          PTL_LAYER_LIMITS.maskStrength.max
-        )
+      : finite(input.maskStrength, `Layer ${index + 1} mask strength`, PTL_LAYER_LIMITS.maskStrength.min, PTL_LAYER_LIMITS.maskStrength.max),
+    pattern: kind === 'pattern'
+      ? normalizePatternSettings(input.pattern ?? DEFAULT_PATTERN_SETTINGS)
+      : null
   };
 }
 
@@ -191,18 +182,13 @@ function normalizeSynthesis(value: unknown): SynthesisSettings {
 export function normalizeRuntimeMaterialDefinition(value: unknown): MaterialDefinition {
   const input = asRecord(value, 'Material definition');
   const layerValues = asArray(input.layers, 'Material layers', PTL_MAX_LAYERS, false);
-  const groupValues = input.groups === undefined
-    ? []
-    : asArray(input.groups, 'Material groups', PTL_MAX_GROUPS, true);
-
+  const groupValues = input.groups === undefined ? [] : asArray(input.groups, 'Material groups', PTL_MAX_GROUPS, true);
   const groups = groupValues.map(normalizeGroup);
   const groupIds = new Set(groups.map((group) => group.id));
   if (groupIds.size !== groups.length) throw new Error('Material contains duplicate group ids.');
   const groupsById = new Map(groups.map((group) => [group.id, group]));
   for (const group of groups) {
-    if (group.parentId !== null && !groupsById.has(group.parentId)) {
-      throw new Error(`Group ${group.name} references a missing parent group.`);
-    }
+    if (group.parentId !== null && !groupsById.has(group.parentId)) throw new Error(`Group ${group.name} references a missing parent group.`);
     let current: MaterialGroup | undefined = group;
     const seen = new Set<string>();
     let depth = 0;
@@ -211,9 +197,7 @@ export function normalizeRuntimeMaterialDefinition(value: unknown): MaterialDefi
       seen.add(current.id);
       current = groupsById.get(current.parentId);
       depth += 1;
-      if (depth > PTL_MAX_GROUP_DEPTH) {
-        throw new Error(`Material groups can be nested at most ${PTL_MAX_GROUP_DEPTH} levels.`);
-      }
+      if (depth > PTL_MAX_GROUP_DEPTH) throw new Error(`Material groups can be nested at most ${PTL_MAX_GROUP_DEPTH} levels.`);
     }
   }
 
@@ -221,30 +205,16 @@ export function normalizeRuntimeMaterialDefinition(value: unknown): MaterialDefi
   const layerIds = new Set(layers.map((layer) => layer.id));
   if (layerIds.size !== layers.length) throw new Error('Material contains duplicate layer ids.');
   for (const layer of layers) {
-    if (layer.groupId !== null && !groupIds.has(layer.groupId)) {
-      throw new Error(`Layer ${layer.name} references a missing group.`);
-    }
+    if (layer.groupId !== null && !groupIds.has(layer.groupId)) throw new Error(`Layer ${layer.name} references a missing group.`);
     if (layer.maskSourceLayerId !== null) {
       if (layer.maskSourceLayerId === layer.id) throw new Error(`Layer ${layer.name} cannot mask itself.`);
       if (!layerIds.has(layer.maskSourceLayerId)) throw new Error(`Layer ${layer.name} references a missing mask source.`);
     }
     if (layer.structureSourceLayerId !== null) {
-      if (layer.structureSourceLayerId === layer.id) {
-        throw new Error(`Layer ${layer.name} cannot use itself as a structure source.`);
-      }
-      if (!layerIds.has(layer.structureSourceLayerId)) {
-        throw new Error(`Layer ${layer.name} references a missing structure source.`);
-      }
+      if (layer.structureSourceLayerId === layer.id) throw new Error(`Layer ${layer.name} cannot use itself as a structure source.`);
+      if (!layerIds.has(layer.structureSourceLayerId)) throw new Error(`Layer ${layer.name} references a missing structure source.`);
     }
   }
-  if (materialGraphHasCycle(compileMaterialGraph(layers))) {
-    throw new Error('Material contains a cyclic material graph.');
-  }
-
-  return {
-    physical: normalizePhysical(input.physical),
-    synthesis: normalizeSynthesis(input.synthesis),
-    groups,
-    layers
-  };
+  if (materialGraphHasCycle(compileMaterialGraph(layers))) throw new Error('Material contains a cyclic material graph.');
+  return { physical: normalizePhysical(input.physical), synthesis: normalizeSynthesis(input.synthesis), groups, layers };
 }

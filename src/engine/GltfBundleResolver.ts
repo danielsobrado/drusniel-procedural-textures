@@ -1,5 +1,6 @@
 const DATA_URI = /^data:/i;
-const REMOTE_URI = /^(?:https?:|file:|blob:|\/\/)/i;
+const URI_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+const PROTOCOL_RELATIVE_URI = /^\/\//;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -48,7 +49,8 @@ function canonicalLocalPath(value: string): string {
 }
 
 export function isRemoteResourceUri(value: string): boolean {
-  return REMOTE_URI.test(decodeResourcePath(value));
+  const decoded = decodeResourcePath(value);
+  return PROTOCOL_RELATIVE_URI.test(decoded) || URI_SCHEME.test(decoded);
 }
 
 function collectResourceSectionUris(

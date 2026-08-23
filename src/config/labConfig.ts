@@ -130,7 +130,20 @@ export interface LabConfig {
   renderer: RendererConfig;
 }
 
-const OBJECT_IDS: readonly ObjectPreset[] = ['sphere', 'icosphere', 'cube', 'rounded-cube', 'torus', 'plane'];
+const OBJECT_IDS: readonly ObjectPreset[] = [
+  'sphere',
+  'icosphere',
+  'cube',
+  'rounded-cube',
+  'torus',
+  'plane',
+  'cylinder',
+  'cone',
+  'capsule',
+  'octahedron',
+  'dodecahedron',
+  'torus-knot'
+];
 const LAYER_KIND_IDS: readonly LayerKind[] = [
   'base', 'fbm', 'cellular', 'ridges', 'spots', 'veins', 'gradient', 'vessels', 'wet-film', 'sss',
   'reaction-diffusion', 'erosion', 'sdf'

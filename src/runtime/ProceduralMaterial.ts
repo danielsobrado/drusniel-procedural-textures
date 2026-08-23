@@ -29,6 +29,12 @@ function variantLayers(
   }));
 }
 
+function requiresSimulation(layers: readonly MaterialLayer[]): boolean {
+  return layers.some((layer) =>
+    layer.enabled && (layer.kind === 'reaction-diffusion' || layer.kind === 'erosion')
+  );
+}
+
 /**
  * Lightweight Three.js runtime for a portable PTL material recipe.
  * Call `prepare()` to hydrate reaction-diffusion and erosion fields before use.
@@ -77,10 +83,15 @@ export class ProceduralMaterial {
   }
 
   public async prepare(): Promise<void> {
-    if (this.disposed) throw new Error('Procedural material has been disposed.');
+    this.assertAvailable();
     const sequence = ++this.preparationSequence;
-    await this.compute.initialize();
     const layers = variantLayers(this.recipeValue.layers, this.recipeValue.seed);
+    if (!requiresSimulation(layers)) {
+      this.compiler.setSimulationAtlas(null);
+      return;
+    }
+
+    await this.compute.initialize();
     const atlas = await buildMaterialSimulationAtlas(
       this.compute,
       layers,
@@ -98,18 +109,21 @@ export class ProceduralMaterial {
   }
 
   public setRecipe(recipe: unknown): void {
+    this.assertAvailable();
     this.recipeValue = parseMaterialRecipe(recipe);
     this.invalidateSimulation();
     this.sync();
   }
 
   public setSeed(seed: number): void {
+    this.assertAvailable();
     this.recipeValue = parseMaterialRecipe({ ...this.recipeValue, seed });
     this.invalidateSimulation();
     this.sync();
   }
 
   public setCoordinateSpace(coordinateSpace: MaterialCoordinateSpace | null): void {
+    this.assertAvailable();
     if (coordinateSpace !== null && coordinateSpace !== 'object' && coordinateSpace !== 'world') {
       throw new Error(`Unsupported material coordinate space: ${String(coordinateSpace)}.`);
     }
@@ -118,12 +132,14 @@ export class ProceduralMaterial {
   }
 
   public setWireframe(enabled: boolean): void {
+    this.assertAvailable();
     if (typeof enabled !== 'boolean') throw new Error('Wireframe must be a boolean.');
     this.wireframeValue = enabled;
     this.sync();
   }
 
   public applyTo(mesh: THREE.Mesh): void {
+    this.assertAvailable();
     mesh.material = this.material;
     mesh.customDepthMaterial = this.depthMaterial;
     mesh.customDistanceMaterial = this.distanceMaterial;
@@ -134,6 +150,10 @@ export class ProceduralMaterial {
     this.disposed = true;
     this.preparationSequence += 1;
     this.compiler.dispose();
+  }
+
+  private assertAvailable(): void {
+    if (this.disposed) throw new Error('Procedural material has been disposed.');
   }
 
   private invalidateSimulation(): void {

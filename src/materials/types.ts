@@ -1,3 +1,6 @@
+import type { SurfaceGraphDefinition } from '../core/graph/SurfaceGraph';
+import type { PatternSettings } from '../core/material/PatternSettings';
+
 export type LayerKind =
   | 'base'
   | 'fbm'
@@ -11,7 +14,8 @@ export type LayerKind =
   | 'sss'
   | 'reaction-diffusion'
   | 'erosion'
-  | 'sdf';
+  | 'sdf'
+  | 'pattern';
 
 export type BlendMode =
   | 'normal'
@@ -44,7 +48,13 @@ export type ObjectPreset =
   | 'cube'
   | 'rounded-cube'
   | 'torus'
-  | 'plane';
+  | 'plane'
+  | 'cylinder'
+  | 'cone'
+  | 'capsule'
+  | 'octahedron'
+  | 'dodecahedron'
+  | 'torus-knot';
 
 export interface MaterialLayer {
   id: string;
@@ -66,6 +76,7 @@ export interface MaterialLayer {
   structureSourceLayerId: string | null;
   maskInvert: boolean;
   maskStrength: number;
+  pattern?: PatternSettings | null;
 }
 
 export interface SynthesisSettings {
@@ -132,6 +143,7 @@ export interface ProjectState {
   synthesis: SynthesisSettings;
   genomeLocks: GenomeLocks;
   graphMode: boolean;
+  surfaceGraph?: SurfaceGraphDefinition | null;
   groups: MaterialGroup[];
   layers: MaterialLayer[];
 }
@@ -145,4 +157,5 @@ export interface MaterialPreset {
   synthesis?: Partial<SynthesisSettings>;
   groups?: MaterialGroup[];
   layers: MaterialLayer[];
+  graph?: SurfaceGraphDefinition;
 }

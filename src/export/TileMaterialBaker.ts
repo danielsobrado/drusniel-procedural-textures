@@ -1,6 +1,10 @@
 import * as THREE from 'three';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
+import {
+  createOptionalWebGlRenderer,
+  WEBGL2_UNAVAILABLE_MESSAGE
+} from '../engine/WebGlRenderer';
 import { rememberTextureSetDisplacementExtent } from './SeamlessTexture';
 import { TextureBaker, type BakedTextureSet } from './TextureBaker';
 
@@ -23,11 +27,12 @@ export class TileMaterialBaker {
     }
 
     const displacementExtent = this.compiler.displacementExtent;
-    const renderer = new THREE.WebGLRenderer({
+    const renderer = createOptionalWebGlRenderer({
       antialias: false,
       alpha: true,
       powerPreference: 'high-performance'
     });
+    if (renderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
     renderer.setPixelRatio(1);
     renderer.setSize(1, 1, false);
 

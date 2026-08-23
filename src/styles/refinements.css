@@ -140,6 +140,34 @@
   opacity: 1;
 }
 
+.renderer-fallback {
+  position: absolute;
+  z-index: 5;
+  inset: 50% auto auto 50%;
+  display: grid;
+  width: min(440px, calc(100% - 48px));
+  gap: 8px;
+  padding: 22px 24px;
+  border: 1px solid rgba(216, 225, 255, 0.2);
+  border-radius: 16px;
+  background: rgba(12, 15, 22, 0.88);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.36);
+  color: rgba(225, 231, 246, 0.72);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  backdrop-filter: blur(18px);
+}
+
+.renderer-fallback strong {
+  color: #f3f6ff;
+  font-size: 15px;
+}
+
+.renderer-fallback span {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 .preset-tags {
   display: flex;
   gap: 5px;

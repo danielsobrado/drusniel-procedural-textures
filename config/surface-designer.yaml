@@ -1,0 +1,31 @@
+version: 1
+
+patterns:
+  - id: brick
+    label: Brick
+  - id: tile
+    label: Tile
+  - id: plank
+    label: Plank
+  - id: grass
+    label: Grass blades
+  - id: pebble
+    label: Pebble scatter
+  - id: roof-tile
+    label: Roof tile
+  - id: fabric
+    label: Woven fabric
+
+graph:
+  maxVisibleNodes: 96
+  maxVisibleEdges: 192
+
+microGeometry:
+  enabled: false
+  maxEdgeLength: 0.08
+  iterations: 2
+  maxVertices: 250000
+  limits:
+    maxEdgeLength: { min: 0.01, max: 0.5, step: 0.01 }
+    iterations: { min: 0, max: 4, step: 1 }
+    maxVertices: { min: 10000, max: 1000000, step: 10000 }

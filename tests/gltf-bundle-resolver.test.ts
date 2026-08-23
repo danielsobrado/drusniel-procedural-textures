@@ -33,11 +33,17 @@ describe('GLTF bundle resolver', () => {
     expect(() => resolveBundleFile('albedo.png', index, primaryBundlePath(primary, index))).toThrow(/ambiguous/i);
   });
 
-  it('rejects remote core resources', () => {
-    expect(() => collectExternalUris({
-      buffers: [{ uri: 'mesh.bin' }],
-      images: [{ uri: 'https://example.com/a.png' }]
-    })).toThrow(/remote/i);
+  it('rejects absolute and remote core resource schemes', () => {
+    for (const uri of [
+      'https://example.com/a.png',
+      'ftp://example.com/a.png',
+      'ipfs://asset/a.png',
+      'custom:asset.png',
+      '//example.com/a.png',
+      'https%3A%2F%2Fexample.com%2Fa.png'
+    ]) {
+      expect(() => collectExternalUris({ images: [{ uri }] })).toThrow(/remote/i);
+    }
   });
 
   it('ignores uri-shaped metadata that the loader will not fetch', () => {

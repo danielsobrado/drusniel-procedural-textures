@@ -39,8 +39,10 @@ export const PERFORMANCE_CONFIG: PerformanceConfig = labConfig.performance;
 
 export const OBJECT_PRESETS: ReadonlyArray<{ id: ObjectPreset; label: string; glyph: string }> =
   labConfig.objects;
-export const LAYER_KINDS: ReadonlyArray<{ id: LayerKind; label: string }> =
-  labConfig.layerKinds;
+export const LAYER_KINDS: ReadonlyArray<{ id: LayerKind; label: string }> = [
+  ...labConfig.layerKinds,
+  { id: 'pattern', label: 'Pattern / sampler' }
+];
 export const LAYER_CHANNELS: ReadonlyArray<{ id: LayerChannel; label: string }> =
   labConfig.channels;
 export const ENVIRONMENTS: ReadonlyArray<{ id: EnvironmentPreset; label: string }> =

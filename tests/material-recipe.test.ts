@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createDefaultProject } from '../src/app/AppState';
+import { AppState, createDefaultProject } from '../src/app/AppState';
 import { PTL_ALGORITHM_VERSION } from '../src/core/material/MaterialAlgorithms';
+import { SURFACE_DESIGNER_CATALOG } from '../src/materials/surfaceDesignerCatalog';
 import {
   createMaterialRecipe,
   parseMaterialRecipe,
@@ -29,6 +30,7 @@ describe('portable material recipes', () => {
     expect(recipe.physical.roughness).toBe(0.37);
     expect(recipe.synthesis.age).toBe(0.62);
     expect(recipe.layers[1]!.scale).toBe(8.25);
+    expect(recipe.surfaceGraph).toBeNull();
   });
 
   it('supports object-space recipes for moving game objects', () => {
@@ -39,14 +41,34 @@ describe('portable material recipes', () => {
 
   it('migrates legacy version-one recipes with portable defaults', () => {
     const recipe = createMaterialRecipe(createDefaultProject(), 42);
-    const legacy = { ...recipe } as Record<string, unknown>;
+    const legacy = { ...recipe, version: 1 } as Record<string, unknown>;
     delete legacy.coordinateSpace;
     delete legacy.algorithms;
+    delete legacy.surfaceGraph;
 
     const parsed = parseMaterialRecipe(legacy);
+    expect(parsed.version).toBe(PTL_MATERIAL_VERSION);
     expect(parsed.coordinateSpace).toBe('world');
     expect(parsed.algorithms.version).toBe(PTL_ALGORITHM_VERSION);
     expect(parsed.algorithms.reactionDiffusion.iterations).toBeGreaterThan(0);
+    expect(parsed.surfaceGraph).toBeNull();
+  });
+
+  it('exports graph-backed presets and regenerates canonical runtime layers', () => {
+    const preset = SURFACE_DESIGNER_CATALOG.find((item) => item.id === 'designer-old-brick-wall');
+    expect(preset?.graph).toBeDefined();
+    if (preset === undefined) throw new Error('Brick designer preset is missing.');
+
+    const state = new AppState(createDefaultProject());
+    state.applyPreset(preset);
+    const recipe = createMaterialRecipe(state.snapshot, 73, 'object');
+    const parsed = parseMaterialRecipe(JSON.parse(serializeMaterialRecipe(recipe)) as unknown);
+
+    expect(parsed.version).toBe(PTL_MATERIAL_VERSION);
+    expect(parsed.surfaceGraph?.id).toBe('designer-old-brick-wall');
+    expect(parsed.layers.some((layer) => layer.kind === 'pattern')).toBe(true);
+    expect(parsed.layers.every((layer) => layer.kind !== 'pattern' || layer.pattern !== null)).toBe(true);
+    expect(parsed.groups).toEqual(recipe.groups);
   });
 
   it('creates a detached recipe snapshot', () => {
@@ -60,7 +82,7 @@ describe('portable material recipes', () => {
   it('rejects unsupported formats, versions, algorithms and non-portable seeds', () => {
     const recipe = createMaterialRecipe(createDefaultProject());
     expect(() => parseMaterialRecipe({ ...recipe, format: 'other' })).toThrow(/not a Procedural Texture Lab/u);
-    expect(() => parseMaterialRecipe({ ...recipe, version: 2 })).toThrow(/unsupported material recipe version/iu);
+    expect(() => parseMaterialRecipe({ ...recipe, version: 3 })).toThrow(/unsupported material recipe version/iu);
     expect(() => parseMaterialRecipe({ ...recipe, seed: -1 })).toThrow(/seed must be an integer/u);
     expect(() => parseMaterialRecipe({ ...recipe, seed: 1.5 })).toThrow(/seed must be an integer/u);
     expect(() => parseMaterialRecipe({

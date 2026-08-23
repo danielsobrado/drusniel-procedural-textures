@@ -18,12 +18,14 @@ export interface LibraryCallbacks {
   onObject: (preset: ObjectPreset) => void;
   onPreset: (preset: MaterialPreset) => void;
   onImport: () => void;
+  onThumbnailRequested: (preset: MaterialPreset) => void;
 }
 
 const PRESET_TAGS = [...new Set(MATERIAL_PRESETS.flatMap((preset) => preset.tags))]
   .sort((left, right) => left.localeCompare(right));
 const PRESET_FILE_SUFFIX = '.ptlpreset.json';
 const PRESET_AUTOSAVE_SETTLE_MS = AUTOSAVE_DELAY_MS + 60;
+const PRESET_THUMBNAIL_PREFETCH_MARGIN = '240px 0px';
 const BYTES_PER_MIB = 1024 * 1024;
 
 function presetFileStem(name: string): string {
@@ -44,11 +46,18 @@ export class LibraryPanel {
   private filter = '';
   private activeTag = 'all';
   private readonly thumbnails = new Map<string, string>();
+  private readonly thumbnailObserver: IntersectionObserver | null;
 
   public constructor(
     private readonly container: HTMLElement,
     private readonly callbacks: LibraryCallbacks
   ) {
+    this.thumbnailObserver = typeof IntersectionObserver === 'undefined'
+      ? null
+      : new IntersectionObserver(
+        (entries) => this.handleThumbnailIntersections(entries),
+        { rootMargin: PRESET_THUMBNAIL_PREFETCH_MARGIN }
+      );
     this.container.addEventListener('click', (event) => this.handleClick(event));
     this.container.addEventListener('input', (event) => this.handleInput(event));
     this.container.addEventListener('change', (event) => this.handleChange(event));
@@ -129,20 +138,17 @@ export class LibraryPanel {
     this.applyFilter();
   }
 
-  public setThumbnails(thumbnails: ReadonlyMap<string, string>): void {
-    this.thumbnails.clear();
-    for (const [id, url] of thumbnails) this.thumbnails.set(id, url);
+  public setThumbnail(id: string, thumbnail: string): void {
+    this.thumbnails.set(id, thumbnail);
+    const card = Array.from(this.container.querySelectorAll<HTMLElement>('[data-preset]'))
+      .find((item) => item.dataset.preset === id);
+    if (card === undefined) return;
 
-    const cards = this.container.querySelectorAll<HTMLElement>('[data-preset]');
-    for (const card of cards) {
-      const id = card.dataset.preset;
-      if (id === undefined) continue;
-      const thumbnail = this.thumbnails.get(id);
-      const host = card.querySelector<HTMLElement>('[data-role="preset-thumb"]');
-      if (thumbnail === undefined || host === null) continue;
-      host.innerHTML = `<img src="${escapeHtml(thumbnail)}" alt="" aria-hidden="true">`;
-      host.classList.add('has-thumbnail');
-    }
+    this.thumbnailObserver?.unobserve(card);
+    const host = card.querySelector<HTMLElement>('[data-role="preset-thumb"]');
+    if (host === null) return;
+    host.innerHTML = `<img src="${escapeHtml(thumbnail)}" alt="" aria-hidden="true">`;
+    host.classList.add('has-thumbnail');
   }
 
   private presetCard(preset: MaterialPreset): string {
@@ -172,6 +178,29 @@ export class LibraryPanel {
         <span class="preset-arrow" aria-hidden="true">›</span>
       </button>
     `;
+  }
+
+  private handleThumbnailIntersections(entries: readonly IntersectionObserverEntry[]): void {
+    for (const entry of entries) {
+      if (!entry.isIntersecting || !(entry.target instanceof HTMLElement)) continue;
+      const card = entry.target;
+      this.thumbnailObserver?.unobserve(card);
+      const id = card.dataset.preset;
+      if (id === undefined || this.thumbnails.has(id)) continue;
+      const preset = MATERIAL_PRESETS.find((item) => item.id === id);
+      if (preset !== undefined) this.callbacks.onThumbnailRequested(preset);
+    }
+  }
+
+  private observePresetThumbnails(): void {
+    if (this.thumbnailObserver === null) return;
+    this.thumbnailObserver.disconnect();
+    const cards = this.container.querySelectorAll<HTMLElement>('[data-preset]');
+    for (const card of cards) {
+      const id = card.dataset.preset;
+      if (id === undefined || card.hidden || this.thumbnails.has(id)) continue;
+      this.thumbnailObserver.observe(card);
+    }
   }
 
   private handleClick(event: Event): void {
@@ -301,5 +330,6 @@ export class LibraryPanel {
 
     const empty = this.container.querySelector<HTMLElement>('[data-role="filter-empty"]');
     if (empty !== null) empty.hidden = visibleCount !== 0;
+    this.observePresetThumbnails();
   }
 }

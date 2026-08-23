@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { clone as cloneSkeletonSafe } from 'three/addons/utils/SkeletonUtils.js';
 import { EXPORT_CONFIG } from '../app/constants';
+import { DEFAULT_MICRO_GEOMETRY } from '../config/surfaceDesignerConfig';
+import type { MicroGeometrySettings } from '../core/material/MicroGeometry';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
 import {
@@ -171,7 +173,8 @@ export class GlbExporter {
     previewRoot: THREE.Object3D,
     settings: Readonly<PhysicalSettings>,
     bakeResolution: number,
-    maxTextureSize: number
+    maxTextureSize: number,
+    microGeometry: Readonly<MicroGeometrySettings> = DEFAULT_MICRO_GEOMETRY
   ): Promise<Blob> {
     previewRoot.updateMatrixWorld(true);
     const sourceRoot = sourceForExport(previewRoot);
@@ -257,7 +260,8 @@ export class GlbExporter {
             baked.snapshot.geometry,
             baked.maps.height,
             baked.snapshot.matrixWorld,
-            displacementExtent
+            displacementExtent,
+            microGeometry
           );
         } else if (baked.snapshot.generatedUvAtlas) {
           exportGeometry = baked.snapshot.geometry.clone();

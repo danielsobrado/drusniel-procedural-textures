@@ -24,7 +24,7 @@ import {
   buildWebGpuSurfaceNodes,
   webGpuTopologyFingerprint,
   type WebGpuSimulationState
-} from './WebGpuProceduralNodes';
+} from './WebGpuSurfaceDesignerNodes';
 import { WebGpuMaterialUniforms } from './WebGpuMaterialUniforms';
 import type {
   MaterialGroup,

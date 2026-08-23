@@ -7,18 +7,33 @@ import {
   MAX_GROUP_DEPTH
 } from '../app/constants';
 import { MAX_GROUP_NAME_LENGTH, MAX_LAYER_NAME_LENGTH } from '../app/ProjectFile';
+import { SURFACE_GRAPH_NODE_SPEC_BY_KIND } from '../core/graph/SurfaceGraphCatalog';
+import {
+  surfaceGraphExposedValue,
+  type SurfaceGraphExposedValue
+} from '../core/graph/SurfaceGraphParameters';
+import type {
+  SurfaceGraphDefinition,
+  SurfaceGraphExposedParameter
+} from '../core/graph/SurfaceGraph';
+import {
+  DEFAULT_PATTERN_SETTINGS,
+  PATTERN_LIMITS,
+  type PatternSettings
+} from '../core/material/PatternSettings';
+import { SURFACE_DESIGNER_CONFIG } from '../config/surfaceDesignerConfig';
 import { canReparentGroup } from '../materials/GroupHierarchy';
+import { compileMaterialGraph } from '../materials/MaterialGraph';
 import type {
   EnvironmentPreset,
+  GenomeLocks,
   MaterialGroup,
   MaterialLayer,
-  GenomeLocks,
   PhysicalSettings,
   ProjectState,
   SynthesisSettings
 } from '../materials/types';
 import { escapeHtml } from '../utils/html';
-import { compileMaterialGraph } from '../materials/MaterialGraph';
 
 export interface InspectorCallbacks {
   onLayerPatch: (id: string, patch: Partial<MaterialLayer>) => void;
@@ -34,6 +49,7 @@ export interface InspectorCallbacks {
   onGenomeLock: (key: keyof GenomeLocks, enabled: boolean) => void;
   onMutate: (variant: number) => void;
   onGraphMode: (enabled: boolean) => void;
+  onGraphParameter: (id: string, value: SurfaceGraphExposedValue) => void;
   onEnvironment: (environment: EnvironmentPreset) => void;
   onEnvironmentImport: () => void;
   onMeshSelect: (id: string | null) => void;
@@ -44,25 +60,34 @@ type NumericLayerKey = keyof Pick<
   MaterialLayer,
   'opacity' | 'scale' | 'strength' | 'seed' | 'roughness' | 'displacement' | 'maskStrength'
 >;
+type PatternNumericKey = Exclude<keyof PatternSettings, 'kind'>;
 
-interface NumericField {
+type NumericField = {
   key: NumericLayerKey;
   label: string;
   min: number;
   max: number;
   step: number;
-}
+};
+
+type PatternField = {
+  key: PatternNumericKey;
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+};
 
 type NumericPhysicalKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
 type ColorPhysicalKey = Extract<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
 
-interface PhysicalField {
+type PhysicalField = {
   key: NumericPhysicalKey;
   label: string;
   min: number;
   max: number;
   step: number;
-}
+};
 
 const NUMERIC_FIELDS: readonly NumericField[] = [
   { key: 'opacity', label: 'Opacity', ...CONTROL_RANGES.layer.opacity },
@@ -71,6 +96,17 @@ const NUMERIC_FIELDS: readonly NumericField[] = [
   { key: 'seed', label: 'Seed', ...CONTROL_RANGES.layer.seed },
   { key: 'roughness', label: 'Roughness Δ', ...CONTROL_RANGES.layer.roughness },
   { key: 'displacement', label: 'Displace', ...CONTROL_RANGES.layer.displacement }
+];
+
+const PATTERN_FIELDS: readonly PatternField[] = [
+  { key: 'aspect', label: 'Aspect', ...PATTERN_LIMITS.aspect, step: 0.05 },
+  { key: 'gap', label: 'Gap', ...PATTERN_LIMITS.gap, step: 0.005 },
+  { key: 'roundness', label: 'Roundness', ...PATTERN_LIMITS.roundness, step: 0.01 },
+  { key: 'jitter', label: 'Jitter', ...PATTERN_LIMITS.jitter, step: 0.01 },
+  { key: 'rotation', label: 'Rotation', ...PATTERN_LIMITS.rotation, step: 0.01 },
+  { key: 'offset', label: 'Row offset', ...PATTERN_LIMITS.offset, step: 0.01 },
+  { key: 'density', label: 'Density', ...PATTERN_LIMITS.density, step: 0.05 },
+  { key: 'edgeWear', label: 'Edge wear', ...PATTERN_LIMITS.edgeWear, step: 0.01 }
 ];
 
 const PHYSICAL_FIELDS: readonly PhysicalField[] = [
@@ -116,15 +152,41 @@ function canUseGroupAsParent(
   return canReparentGroup(groupId, candidateId, groups, MAX_GROUP_DEPTH);
 }
 
-function syncOptionLabels(
-  select: HTMLSelectElement | null,
-  labels: ReadonlyMap<string, string>
-): void {
+function syncOptionLabels(select: HTMLSelectElement | null, labels: ReadonlyMap<string, string>): void {
   if (select === null) return;
   for (const item of Array.from(select.options)) {
     const label = labels.get(item.value);
     if (label !== undefined) item.textContent = label;
   }
+}
+
+function surfaceGraphStructureKey(graph: Readonly<SurfaceGraphDefinition> | null | undefined): string {
+  if (graph === null || graph === undefined) return '';
+  return JSON.stringify({
+    id: graph.id,
+    name: graph.name,
+    nodes: graph.nodes.map((node) => ({
+      id: node.id,
+      kind: node.kind,
+      label: node.label,
+      position: node.position,
+      runtimeKind: node.runtime?.kind ?? null
+    })),
+    edges: graph.edges,
+    exposed: graph.exposed,
+    subgraphs: graph.subgraphs.map((subgraph) => ({
+      id: subgraph.id,
+      name: subgraph.name,
+      nodeCount: subgraph.nodes.length,
+      edgeCount: subgraph.edges.length
+    }))
+  });
+}
+
+function isSimulationLayer(
+  layer: Readonly<MaterialLayer> | undefined
+): layer is Readonly<MaterialLayer> {
+  return layer?.kind === 'reaction-diffusion' || layer?.kind === 'erosion';
 }
 
 export class Inspector {
@@ -145,13 +207,12 @@ export class Inspector {
     this.currentState = state;
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
     const nextStructureKey = [
-      `${layer?.id ?? ''}:${layer?.groupId ?? ''}`,
+      `${layer?.id ?? ''}:${layer?.groupId ?? ''}:${layer?.kind ?? ''}`,
       state.layers.map((item) => `${item.id}:${item.structureSourceLayerId ?? ''}:${item.maskSourceLayerId ?? ''}`).join('|'),
       state.groups.map((item) => `${item.id}:${item.parentId ?? ''}`).join('|'),
       state.importedMeshes.map((item) => item.id).join('|'),
       state.environmentAssetName ?? '',
-      JSON.stringify(state.synthesis),
-      JSON.stringify(state.genomeLocks),
+      surfaceGraphStructureKey(state.surfaceGraph),
       String(state.graphMode)
     ].join('::');
 
@@ -161,7 +222,6 @@ export class Inspector {
       this.build(layer, state);
       return;
     }
-
     this.sync(layer, state);
   }
 
@@ -183,7 +243,6 @@ export class Inspector {
           </div>
         `}
       </div>
-
       ${layer === null ? '<div class="empty-state">Select a layer to edit procedural routing and parameters.</div>' : this.layerSections(layer, selectedGroup, state)}
       ${this.synthesisSection(state)}
       ${this.physicalSection(state)}
@@ -191,11 +250,7 @@ export class Inspector {
     `;
   }
 
-  private layerSections(
-    layer: MaterialLayer,
-    group: MaterialGroup | null,
-    state: Readonly<ProjectState>
-  ): string {
+  private layerSections(layer: MaterialLayer, group: MaterialGroup | null, state: Readonly<ProjectState>): string {
     const maskOptions = state.layers
       .filter((item) => item.id !== layer.id)
       .map((item) => option(item.id, item.name, item.id === layer.maskSourceLayerId))
@@ -214,7 +269,6 @@ export class Inspector {
           <span>Name</span>
           <input data-field="name" type="text" maxlength="${MAX_LAYER_NAME_LENGTH}" value="${escapeHtml(layer.name)}">
         </label>
-
         <div class="field-columns">
           <label class="field-stack">
             <span>Generator</span>
@@ -229,25 +283,22 @@ export class Inspector {
             </select>
           </label>
         </div>
-
         <label class="field-stack routing-field">
           <span>Output channel</span>
           <select data-field="channel">
             ${LAYER_CHANNELS.map((item) => option(item.id, item.label, item.id === layer.channel)).join('')}
           </select>
         </label>
-
         <div class="color-pair">
           <label class="color-field"><input data-field="colorA" type="color" value="${layer.colorA}"><span>Low</span></label>
           <label class="color-field"><input data-field="colorB" type="color" value="${layer.colorB}"><span>High</span></label>
         </div>
       </section>
-
       <section class="inspector-section parameter-section">
         <div class="section-heading"><span>Layer parameters</span></div>
         ${NUMERIC_FIELDS.map((field) => this.numericRow(field, layer[field.key])).join('')}
       </section>
-
+      ${layer.kind === 'pattern' ? this.patternSection(layer) : ''}
       <details class="inspector-section advanced-section" open>
         <summary>Mask & group routing</summary>
         <label class="field-stack routing-field">
@@ -282,8 +333,24 @@ export class Inspector {
     `;
   }
 
+  private patternSection(layer: Readonly<MaterialLayer>): string {
+    const pattern = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
+    return `
+      <details class="inspector-section advanced-section pattern-editor" open>
+        <summary>Pattern sampler</summary>
+        <label class="field-stack routing-field">
+          <span>Pattern type</span>
+          <select data-pattern-field="kind">
+            ${SURFACE_DESIGNER_CONFIG.patterns.map((item) => option(item.id, item.label, item.id === pattern.kind)).join('')}
+          </select>
+        </label>
+        ${PATTERN_FIELDS.map((field) => this.patternRow(field, pattern[field.key])).join('')}
+      </details>
+    `;
+  }
+
   private synthesisSection(state: Readonly<ProjectState>): string {
-    const graph = compileMaterialGraph(state.layers);
+    const legacyGraph = compileMaterialGraph(state.layers);
     const locks: Array<[keyof GenomeLocks, string]> = [
       ['color', 'Color'], ['structure', 'Structure'], ['roughness', 'Roughness'], ['scale', 'Scale'], ['damage', 'Damage']
     ];
@@ -307,13 +374,85 @@ export class Inspector {
             <input class="number-input" data-synthesis-field="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${state.synthesis[field.key]}">
           </div>
         `).join('')}
-        ${state.graphMode ? `
-          <div class="material-graph" aria-label="Compiled material graph">
-            ${graph.nodes.map((node) => `<div class="graph-node graph-node-${node.kind}"><strong>${escapeHtml(node.label)}</strong><small>${node.kind}</small></div>`).join('')}
-            <div class="graph-summary">${graph.edges.length} routed connections · ${graph.nodes.length} nodes</div>
-          </div>
-        ` : ''}
+        ${state.surfaceGraph === null || state.surfaceGraph === undefined ? '' : this.exposedGraphParameters(state.surfaceGraph)}
+        ${state.graphMode
+          ? state.surfaceGraph === null || state.surfaceGraph === undefined
+            ? `<div class="material-graph" aria-label="Compiled material graph">
+                ${legacyGraph.nodes.map((node) => `<div class="graph-node graph-node-${node.kind}"><strong>${escapeHtml(node.label)}</strong><small>${node.kind}</small></div>`).join('')}
+                <div class="graph-summary">${legacyGraph.edges.length} routed connections · ${legacyGraph.nodes.length} nodes</div>
+              </div>`
+            : this.authoredGraph(state.surfaceGraph)
+          : ''}
       </details>
+    `;
+  }
+
+  private exposedGraphParameters(graph: Readonly<SurfaceGraphDefinition>): string {
+    if (graph.exposed.length === 0) return '';
+    return `
+      <div class="graph-exposed-panel">
+        <div class="section-heading"><span>Exposed graph parameters</span><small>${escapeHtml(graph.name)}</small></div>
+        <div class="graph-exposed-grid">
+          ${graph.exposed.map((binding) => this.graphExposedControl(graph, binding)).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  private graphExposedControl(
+    graph: Readonly<SurfaceGraphDefinition>,
+    binding: Readonly<SurfaceGraphExposedParameter>
+  ): string {
+    const value = surfaceGraphExposedValue(graph, binding.id);
+    if (binding.type === 'boolean') {
+      return `<label class="toggle-row graph-exposed-control"><span>${escapeHtml(binding.label)}</span><input data-graph-exposed="${binding.id}" type="checkbox" ${value === true ? 'checked' : ''}></label>`;
+    }
+    if (binding.type === 'color') {
+      return `<label class="field-row compact-field graph-exposed-control"><span>${escapeHtml(binding.label)}</span><input data-graph-exposed="${binding.id}" type="color" value="${escapeHtml(String(value))}"></label>`;
+    }
+    if (binding.type === 'enum') {
+      return `<label class="field-stack graph-exposed-control"><span>${escapeHtml(binding.label)}</span><select data-graph-exposed="${binding.id}">${(binding.options ?? []).map((item) => option(item, item, item === value)).join('')}</select></label>`;
+    }
+    const min = binding.min ?? 0;
+    const max = binding.max ?? 1;
+    const step = binding.step ?? 0.01;
+    return `
+      <div class="parameter-row graph-exposed-control">
+        <span>${escapeHtml(binding.label)}</span>
+        <input data-graph-exposed="${binding.id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}">
+        <input class="number-input" data-graph-exposed="${binding.id}" type="number" min="${min}" max="${max}" step="${step}" value="${value}">
+      </div>
+    `;
+  }
+
+  private authoredGraph(graph: Readonly<SurfaceGraphDefinition>): string {
+    const nodes = graph.nodes
+      .slice()
+      .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+      .slice(0, SURFACE_DESIGNER_CONFIG.graph.maxVisibleNodes);
+    const edges = graph.edges.slice(0, SURFACE_DESIGNER_CONFIG.graph.maxVisibleEdges);
+    return `
+      <div class="surface-graph-editor" aria-label="Authored surface graph">
+        <div class="surface-graph-header">
+          <div><strong>${escapeHtml(graph.name)}</strong><small>Surface Designer graph</small></div>
+          <span>${graph.nodes.length} nodes · ${graph.edges.length} edges · ${graph.subgraphs.length} subgraphs</span>
+        </div>
+        <div class="surface-graph-nodes">
+          ${nodes.map((node) => {
+            const spec = SURFACE_GRAPH_NODE_SPEC_BY_KIND.get(node.kind);
+            return `<article class="surface-graph-node" data-category="${spec?.category ?? 'graph'}">
+              <div class="surface-graph-node-heading"><strong>${escapeHtml(node.label)}</strong><span>${escapeHtml(spec?.category ?? 'graph')}</span></div>
+              <small>${escapeHtml(node.kind)}${node.runtime === undefined ? '' : ` → ${escapeHtml(node.runtime.kind)}`}</small>
+              <div class="surface-graph-ports">
+                <span>in · ${escapeHtml(spec?.inputs.map((port) => port.name).join(', ') || '—')}</span>
+                <span>out · ${escapeHtml(spec?.outputs.map((port) => port.name).join(', ') || '—')}</span>
+              </div>
+            </article>`;
+          }).join('')}
+        </div>
+        ${edges.length === 0 ? '' : `<div class="surface-graph-routes">${edges.map((edge) => `<div class="surface-graph-edge"><span>${escapeHtml(edge.from.nodeId)}.${escapeHtml(edge.from.port)}</span><b>→</b><span>${escapeHtml(edge.to.nodeId)}.${escapeHtml(edge.to.port)}</span></div>`).join('')}</div>`}
+        ${graph.subgraphs.length === 0 ? '' : `<div class="surface-subgraph-list">${graph.subgraphs.map((subgraph) => `<span>${escapeHtml(subgraph.name)} · ${subgraph.nodes.length} nodes</span>`).join('')}</div>`}
+      </div>
     `;
   }
 
@@ -330,8 +469,8 @@ export class Inspector {
         <label class="toggle-row"><span>Enabled</span><input data-group-field="enabled" type="checkbox" ${group.enabled ? 'checked' : ''}></label>
         <div class="parameter-row">
           <span>Opacity</span>
-          <input data-group-field="opacity" data-group-peer="range" type="range" min="${range.min}" max="${range.max}" step="${range.step}" value="${group.opacity}">
-          <input class="number-input" data-group-field="opacity" data-group-peer="number" type="number" min="${range.min}" max="${range.max}" step="${range.step}" value="${group.opacity}">
+          <input data-group-field="opacity" type="range" min="${range.min}" max="${range.max}" step="${range.step}" value="${group.opacity}">
+          <input class="number-input" data-group-field="opacity" type="number" min="${range.min}" max="${range.max}" step="${range.step}" value="${group.opacity}">
         </div>
         <label class="field-stack routing-field">
           <span>Parent group</span>
@@ -405,30 +544,27 @@ export class Inspector {
         const key = field.dataset.field as keyof MaterialLayer | undefined;
         if (key === undefined) continue;
         const value = layer[key];
-        if (typeof value === 'boolean' && field instanceof HTMLInputElement) {
-          field.checked = value;
-        } else if (value === null) {
-          field.value = '';
-        } else if (typeof value === 'string' || typeof value === 'number') {
-          field.value = String(value);
-        }
+        if (typeof value === 'boolean' && field instanceof HTMLInputElement) field.checked = value;
+        else if (value === null) field.value = '';
+        else if (typeof value === 'string' || typeof value === 'number') field.value = String(value);
+      }
+      const pattern = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
+      for (const field of this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-pattern-field]')) {
+        if (field === document.activeElement) continue;
+        const key = field.dataset.patternField as keyof PatternSettings | undefined;
+        if (key !== undefined) field.value = String(pattern[key]);
       }
 
       const group = layer.groupId === null ? null : state.groups.find((item) => item.id === layer.groupId) ?? null;
       if (group !== null) {
-        const groupFields = this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-group-field]');
-        for (const field of groupFields) {
+        for (const field of this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-group-field]')) {
           if (field === document.activeElement) continue;
           const key = field.dataset.groupField as keyof MaterialGroup | undefined;
           if (key === undefined) continue;
           const value = group[key];
-          if (typeof value === 'boolean' && field instanceof HTMLInputElement) {
-            field.checked = value;
-          } else if (value === null) {
-            field.value = '';
-          } else if (typeof value === 'string' || typeof value === 'number') {
-            field.value = String(value);
-          }
+          if (typeof value === 'boolean' && field instanceof HTMLInputElement) field.checked = value;
+          else if (value === null) field.value = '';
+          else if (typeof value === 'string' || typeof value === 'number') field.value = String(value);
         }
       }
     }
@@ -436,36 +572,44 @@ export class Inspector {
     const layerLabels = new Map(state.layers.map((item) => [item.id, item.name]));
     const groupLabels = new Map(state.groups.map((item) => [item.id, item.name]));
     const meshLabels = new Map(state.importedMeshes.map((item) => [item.id, item.label]));
-    syncOptionLabels(
-      this.container.querySelector<HTMLSelectElement>('[data-field="maskSourceLayerId"]'),
-      layerLabels
-    );
-    syncOptionLabels(
-      this.container.querySelector<HTMLSelectElement>('[data-field="groupId"]'),
-      groupLabels
-    );
-    syncOptionLabels(
-      this.container.querySelector<HTMLSelectElement>('[data-group-field="parentId"]'),
-      groupLabels
-    );
-    syncOptionLabels(
-      this.container.querySelector<HTMLSelectElement>('[data-viewport-field="mesh"]'),
-      meshLabels
-    );
+    syncOptionLabels(this.container.querySelector<HTMLSelectElement>('[data-field="maskSourceLayerId"]'), layerLabels);
+    syncOptionLabels(this.container.querySelector<HTMLSelectElement>('[data-field="groupId"]'), groupLabels);
+    syncOptionLabels(this.container.querySelector<HTMLSelectElement>('[data-group-field="parentId"]'), groupLabels);
+    syncOptionLabels(this.container.querySelector<HTMLSelectElement>('[data-viewport-field="mesh"]'), meshLabels);
 
-    const physicalFields = this.container.querySelectorAll<HTMLInputElement>('[data-physical-field]');
-    for (const field of physicalFields) {
+    for (const field of this.container.querySelectorAll<HTMLInputElement>('[data-synthesis-field]')) {
+      if (field === document.activeElement) continue;
+      const key = field.dataset.synthesisField as keyof SynthesisSettings | undefined;
+      if (key !== undefined) field.value = String(state.synthesis[key]);
+    }
+    for (const field of this.container.querySelectorAll<HTMLInputElement>('[data-genome-lock]')) {
+      const key = field.dataset.genomeLock as keyof GenomeLocks | undefined;
+      if (key !== undefined) field.checked = state.genomeLocks[key];
+    }
+    const graphMode = this.container.querySelector<HTMLInputElement>('[data-synthesis-action="graphMode"]');
+    if (graphMode !== null) graphMode.checked = state.graphMode;
+
+    if (state.surfaceGraph !== null && state.surfaceGraph !== undefined) {
+      for (const field of this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-graph-exposed]')) {
+        if (field === document.activeElement) continue;
+        const id = field.dataset.graphExposed;
+        if (id === undefined) continue;
+        const value = surfaceGraphExposedValue(state.surfaceGraph, id);
+        if (field instanceof HTMLInputElement && field.type === 'checkbox') field.checked = value === true;
+        else field.value = String(value);
+      }
+    }
+
+    for (const field of this.container.querySelectorAll<HTMLInputElement>('[data-physical-field]')) {
       if (field === document.activeElement) continue;
       const key = field.dataset.physicalField as NumericPhysicalKey | undefined;
       if (key !== undefined) field.value = String(state.physical[key]);
     }
-    const physicalColors = this.container.querySelectorAll<HTMLInputElement>('[data-physical-color]');
-    for (const field of physicalColors) {
+    for (const field of this.container.querySelectorAll<HTMLInputElement>('[data-physical-color]')) {
       if (field === document.activeElement) continue;
       const key = field.dataset.physicalColor as ColorPhysicalKey | undefined;
       if (key !== undefined) field.value = state.physical[key];
     }
-
     this.syncViewport(state);
   }
 
@@ -479,17 +623,25 @@ export class Inspector {
     const mesh = this.container.querySelector<HTMLSelectElement>('[data-viewport-field="mesh"]');
     if (mesh !== null && mesh !== document.activeElement) mesh.value = state.selectedMeshId ?? '';
     const assigned = this.container.querySelector<HTMLInputElement>('[data-viewport-field="mesh-assigned"]');
-    if (assigned !== null && state.selectedMeshId !== null) {
-      assigned.checked = state.meshAssignments[state.selectedMeshId] ?? true;
-    }
+    if (assigned !== null && state.selectedMeshId !== null) assigned.checked = state.meshAssignments[state.selectedMeshId] ?? true;
   }
 
   private numericRow(field: NumericField, value: number): string {
     return `
       <div class="parameter-row">
         <span>${field.label}</span>
-        <input data-field="${field.key}" data-peer="range" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
-        <input class="number-input" data-field="${field.key}" data-peer="number" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input data-field="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input class="number-input" data-field="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+      </div>
+    `;
+  }
+
+  private patternRow(field: PatternField, value: number): string {
+    return `
+      <div class="parameter-row">
+        <span>${field.label}</span>
+        <input data-pattern-field="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input class="number-input" data-pattern-field="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
       </div>
     `;
   }
@@ -498,8 +650,8 @@ export class Inspector {
     return `
       <div class="parameter-row">
         <span>${field.label}</span>
-        <input data-physical-field="${field.key}" data-physical-peer="range" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
-        <input class="number-input" data-physical-field="${field.key}" data-physical-peer="number" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input data-physical-field="${field.key}" type="range" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
+        <input class="number-input" data-physical-field="${field.key}" type="number" min="${field.min}" max="${field.max}" step="${field.step}" value="${value}">
       </div>
     `;
   }
@@ -522,6 +674,23 @@ export class Inspector {
   private handleInput(event: Event): void {
     const target = event.target;
     if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) return;
+
+    const graphExposed = target.dataset.graphExposed;
+    if (graphExposed !== undefined) {
+      if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+        this.callbacks.onGraphParameter(graphExposed, target.checked);
+      } else if (target instanceof HTMLInputElement && (target.type === 'number' || target.type === 'range')) {
+        const value = this.readBoundedNumber(target);
+        if (value !== null) {
+          this.syncNumberPeers(`[data-graph-exposed="${graphExposed}"]`, target, value);
+          if (target.type === 'range') return;
+          this.callbacks.onGraphParameter(graphExposed, value);
+        }
+      } else {
+        this.callbacks.onGraphParameter(graphExposed, target.value);
+      }
+      return;
+    }
 
     const physicalColor = target.dataset.physicalColor as ColorPhysicalKey | undefined;
     if (physicalColor !== undefined) {
@@ -565,6 +734,25 @@ export class Inspector {
     const layerId = this.currentLayerId;
     if (layerId === null) return;
 
+    const patternField = target.dataset.patternField as keyof PatternSettings | undefined;
+    if (patternField !== undefined) {
+      const layer = this.currentState?.layers.find((item) => item.id === layerId);
+      if (layer === undefined) return;
+      const pattern = { ...(layer.pattern ?? DEFAULT_PATTERN_SETTINGS) };
+      if (patternField === 'kind') {
+        pattern.kind = target.value as PatternSettings['kind'];
+      } else {
+        if (!(target instanceof HTMLInputElement)) return;
+        const value = this.readBoundedNumber(target);
+        if (value === null) return;
+        pattern[patternField] = value;
+        this.syncNumberPeers(`[data-pattern-field="${patternField}"]`, target, value);
+        if (target.type === 'range') return;
+      }
+      this.callbacks.onLayerPatch(layerId, { pattern });
+      return;
+    }
+
     const groupField = target.dataset.groupField as keyof MaterialGroup | undefined;
     if (groupField !== undefined) {
       const groupId = this.currentState?.layers.find((item) => item.id === layerId)?.groupId ?? null;
@@ -600,25 +788,20 @@ export class Inspector {
       const value = this.readBoundedNumber(target);
       if (value === null) return;
       this.syncNumberPeers(`[data-field="${field}"]`, target, value);
+      const layer = this.currentState?.layers.find((item) => item.id === layerId);
+      if (field === 'seed' && target.type === 'range' && isSimulationLayer(layer)) return;
       this.callbacks.onLayerPatch(layerId, { [field]: value });
       return;
     }
     this.callbacks.onLayerPatch(layerId, { [field]: target.value });
   }
 
-  private handleViewportInput(
-    field: string,
-    target: HTMLInputElement | HTMLSelectElement
-  ): void {
-    if (field === 'background' && target instanceof HTMLInputElement) {
-      this.callbacks.onBackground(target.value);
-    } else if (field === 'wireframe' && target instanceof HTMLInputElement) {
-      this.callbacks.onWireframe(target.checked);
-    } else if (field === 'environment') {
-      this.callbacks.onEnvironment(target.value as EnvironmentPreset);
-    } else if (field === 'mesh') {
-      this.callbacks.onMeshSelect(target.value === '' ? null : target.value);
-    } else if (field === 'mesh-assigned' && target instanceof HTMLInputElement) {
+  private handleViewportInput(field: string, target: HTMLInputElement | HTMLSelectElement): void {
+    if (field === 'background' && target instanceof HTMLInputElement) this.callbacks.onBackground(target.value);
+    else if (field === 'wireframe' && target instanceof HTMLInputElement) this.callbacks.onWireframe(target.checked);
+    else if (field === 'environment') this.callbacks.onEnvironment(target.value as EnvironmentPreset);
+    else if (field === 'mesh') this.callbacks.onMeshSelect(target.value === '' ? null : target.value);
+    else if (field === 'mesh-assigned' && target instanceof HTMLInputElement) {
       const id = this.currentState?.selectedMeshId;
       if (id !== null && id !== undefined) this.callbacks.onMeshAssigned(id, target.checked);
     }
@@ -626,11 +809,60 @@ export class Inspector {
 
   private handleChange(event: Event): void {
     const target = event.target;
-    if (!(target instanceof HTMLInputElement) || target.type !== 'number') return;
+    if (!(target instanceof HTMLInputElement)) return;
+
+    if (target.type === 'range') {
+      const value = this.readBoundedNumber(target);
+      if (value === null) return;
+
+      const graphExposed = target.dataset.graphExposed;
+      if (graphExposed !== undefined) {
+        this.syncNumberPeers(`[data-graph-exposed="${graphExposed}"]`, target, value);
+        this.callbacks.onGraphParameter(graphExposed, value);
+        return;
+      }
+
+      const patternField = target.dataset.patternField as PatternNumericKey | undefined;
+      if (patternField !== undefined && this.currentLayerId !== null) {
+        const state = this.currentState;
+        if (state === null) return;
+        const layer = state.layers.find((item) => item.id === this.currentLayerId);
+        if (layer === undefined) return;
+        const pattern = { ...(layer.pattern ?? DEFAULT_PATTERN_SETTINGS), [patternField]: value };
+        this.syncNumberPeers(`[data-pattern-field="${patternField}"]`, target, value);
+        this.callbacks.onLayerPatch(layer.id, { pattern });
+        return;
+      }
+
+      const field = target.dataset.field as NumericLayerKey | undefined;
+      if (field === 'seed' && this.currentLayerId !== null) {
+        const layer = this.currentState?.layers.find((item) => item.id === this.currentLayerId);
+        if (isSimulationLayer(layer)) {
+          this.syncNumberPeers('[data-field="seed"]', target, value);
+          this.callbacks.onLayerPatch(layer.id, { seed: value });
+        }
+      }
+      return;
+    }
+
+    if (target.type !== 'number') return;
     if (target.value.trim() !== '' && Number.isFinite(Number(target.value))) return;
     const state = this.currentState;
     if (state === null) return;
 
+    const graphExposed = target.dataset.graphExposed;
+    if (graphExposed !== undefined && state.surfaceGraph !== null && state.surfaceGraph !== undefined) {
+      const value = surfaceGraphExposedValue(state.surfaceGraph, graphExposed);
+      if (typeof value === 'number') this.restoreNumberPeers(`[data-graph-exposed="${graphExposed}"]`, value);
+      return;
+    }
+    const patternField = target.dataset.patternField as PatternNumericKey | undefined;
+    if (patternField !== undefined && this.currentLayerId !== null) {
+      const layer = state.layers.find((item) => item.id === this.currentLayerId);
+      const value = (layer?.pattern ?? DEFAULT_PATTERN_SETTINGS)[patternField];
+      this.restoreNumberPeers(`[data-pattern-field="${patternField}"]`, value);
+      return;
+    }
     const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;
     if (physicalField !== undefined) {
       this.restoreNumberPeers(`[data-physical-field="${physicalField}"]`, state.physical[physicalField]);
@@ -649,13 +881,9 @@ export class Inspector {
       return;
     }
     const field = target.dataset.field as NumericLayerKey | undefined;
-    const layer = this.currentLayerId === null
-      ? null
-      : state.layers.find((item) => item.id === this.currentLayerId) ?? null;
+    const layer = this.currentLayerId === null ? null : state.layers.find((item) => item.id === this.currentLayerId) ?? null;
     const value = field === undefined || layer === null ? undefined : layer[field];
-    if (field !== undefined && typeof value === 'number') {
-      this.restoreNumberPeers(`[data-field="${field}"]`, value);
-    }
+    if (field !== undefined && typeof value === 'number') this.restoreNumberPeers(`[data-field="${field}"]`, value);
   }
 
   private syncNumberPeers(selector: string, source: HTMLInputElement, value: number): void {
@@ -666,15 +894,12 @@ export class Inspector {
   }
 
   private restoreNumberPeers(selector: string, value: number): void {
-    for (const peer of this.container.querySelectorAll<HTMLInputElement>(selector)) {
-      peer.value = String(value);
-    }
+    for (const peer of this.container.querySelectorAll<HTMLInputElement>(selector)) peer.value = String(value);
   }
 
   private handleClick(event: Event): void {
     const target = event.target instanceof Element ? event.target : null;
     if (target === null) return;
-
     if (target.closest('[data-action="load-hdr"]') !== null) {
       this.callbacks.onEnvironmentImport();
       return;
@@ -687,13 +912,10 @@ export class Inspector {
 
     const layerId = this.currentLayerId;
     if (layerId === null) return;
-    if (target.closest('[data-action="duplicate"]') !== null) {
-      this.callbacks.onDuplicate(layerId);
-    } else if (target.closest('[data-action="remove"]') !== null) {
-      this.callbacks.onRemove(layerId);
-    } else if (target.closest('[data-action="add-group"]') !== null) {
-      this.callbacks.onGroupAdd(layerId);
-    } else if (target.closest('[data-action="remove-group"]') !== null) {
+    if (target.closest('[data-action="duplicate"]') !== null) this.callbacks.onDuplicate(layerId);
+    else if (target.closest('[data-action="remove"]') !== null) this.callbacks.onRemove(layerId);
+    else if (target.closest('[data-action="add-group"]') !== null) this.callbacks.onGroupAdd(layerId);
+    else if (target.closest('[data-action="remove-group"]') !== null) {
       const groupId = this.currentState?.layers.find((item) => item.id === layerId)?.groupId ?? null;
       if (groupId !== null) this.callbacks.onGroupRemove(groupId);
     }

@@ -1,4 +1,7 @@
 import * as THREE from 'three';
+import { DEFAULT_MICRO_GEOMETRY } from '../config/surfaceDesignerConfig';
+import type { MicroGeometrySettings } from '../core/material/MicroGeometry';
+import { tessellateForMicroGeometry } from './MicroGeometry';
 import type { BakedPbrTextureSet, BakedTexture, BakedTextureSet } from './TextureBaker';
 
 export interface SharedAtlasLayout {
@@ -153,10 +156,11 @@ export function applyStaticDisplacement(
   source: THREE.BufferGeometry,
   height: BakedTextureSet['height'],
   matrixWorld: THREE.Matrix4,
-  displacementExtent: number
+  displacementExtent: number,
+  microGeometry: Readonly<MicroGeometrySettings> = DEFAULT_MICRO_GEOMETRY
 ): THREE.BufferGeometry {
   if (displacementExtent <= 1e-8) return source.clone();
-  const geometry = source.clone();
+  const geometry = tessellateForMicroGeometry(source, microGeometry);
   const position = geometry.getAttribute('position');
   const normal = geometry.getAttribute('normal');
   const uv = geometry.getAttribute('uv');
@@ -167,12 +171,12 @@ export function applyStaticDisplacement(
 
   const image = heightPixels(height.canvas);
   const worldLinear = new THREE.Matrix3().setFromMatrix4(matrixWorld);
-  const inverseWorldLinear = worldLinear.clone().invert();
-  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrixWorld);
   if (Math.abs(worldLinear.determinant()) < 1e-10) {
     geometry.dispose();
     throw new Error('Cannot bake displacement into geometry with a singular world transform.');
   }
+  const inverseWorldLinear = worldLinear.clone().invert();
+  const normalMatrix = new THREE.Matrix3().getNormalMatrix(matrixWorld);
 
   const localNormal = new THREE.Vector3();
   const worldNormal = new THREE.Vector3();

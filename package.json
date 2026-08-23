@@ -1,6 +1,6 @@
 {
   "name": "procedural-texture-lab",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -16,7 +16,8 @@
     "preview": "vite preview",
     "test": "npm run test:unit && npm run test:browser",
     "test:unit": "vitest run",
-    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs && node scripts/renderer-fallback-smoke.mjs",
+    "test:renderer-fallback": "node scripts/renderer-fallback-smoke.mjs",
     "test:production-export": "node scripts/production-export-smoke.mjs",
     "test:cross-browser": "node scripts/cross-browser-smoke.mjs",
     "test:runtime-package": "npm run build:runtime && node scripts/runtime-consumer-smoke.mjs",

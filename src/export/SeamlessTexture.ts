@@ -1,3 +1,4 @@
+import { canvasToPngBlob } from '../utils/canvas';
 import type { BakedTexture, BakedTextureSet } from './TextureBaker';
 
 export interface SeamlessTextureOptions {
@@ -9,6 +10,8 @@ export interface SeamlessTextureOptions {
 const CHANNEL_COUNT = 4;
 const NORMAL_Z = 1;
 const INNER_EDGE_OFFSET = 1;
+const NORMAL_REBUILD_YIELD_ROWS = 16;
+const NORMALIZE_YIELD_PIXELS = 262_144;
 const DISPLACEMENT_EXTENT = Symbol('seamless-displacement-extent');
 
 type TextureSetWithMetadata = BakedTextureSet & {
@@ -39,6 +42,10 @@ function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     throw new Error('Browser does not provide the 2D canvas required for seamless texture export.');
   }
   return context;
+}
+
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function smootherStep(value: number): number {
@@ -215,25 +222,38 @@ export function stabilizePixelSeamSlopes(
   lockOuterEdges(pixels, width, height);
 }
 
+function normalizeNormalPixel(pixels: Uint8ClampedArray, offset: number): void {
+  let x = pixels[offset]! / 127.5 - 1;
+  let y = pixels[offset + 1]! / 127.5 - 1;
+  let z = pixels[offset + 2]! / 127.5 - 1;
+  const length = Math.hypot(x, y, z);
+  if (length <= 1e-8) {
+    x = 0;
+    y = 0;
+    z = 1;
+  } else {
+    x /= length;
+    y /= length;
+    z /= length;
+  }
+  pixels[offset] = Math.round((x * 0.5 + 0.5) * 255);
+  pixels[offset + 1] = Math.round((y * 0.5 + 0.5) * 255);
+  pixels[offset + 2] = Math.round((z * 0.5 + 0.5) * 255);
+  pixels[offset + 3] = 255;
+}
+
 function normalizeNormalPixels(pixels: Uint8ClampedArray): void {
   for (let offset = 0; offset < pixels.length; offset += CHANNEL_COUNT) {
-    let x = pixels[offset]! / 127.5 - 1;
-    let y = pixels[offset + 1]! / 127.5 - 1;
-    let z = pixels[offset + 2]! / 127.5 - 1;
-    const length = Math.hypot(x, y, z);
-    if (length <= 1e-8) {
-      x = 0;
-      y = 0;
-      z = 1;
-    } else {
-      x /= length;
-      y /= length;
-      z /= length;
-    }
-    pixels[offset] = Math.round((x * 0.5 + 0.5) * 255);
-    pixels[offset + 1] = Math.round((y * 0.5 + 0.5) * 255);
-    pixels[offset + 2] = Math.round((z * 0.5 + 0.5) * 255);
-    pixels[offset + 3] = 255;
+    normalizeNormalPixel(pixels, offset);
+  }
+}
+
+async function normalizeNormalPixelsAsync(pixels: Uint8ClampedArray): Promise<void> {
+  let processed = 0;
+  for (let offset = 0; offset < pixels.length; offset += CHANNEL_COUNT) {
+    normalizeNormalPixel(pixels, offset);
+    processed += 1;
+    if (processed % NORMALIZE_YIELD_PIXELS === 0) await yieldToMainThread();
   }
 }
 
@@ -258,13 +278,13 @@ function heightAt(
   return (value - 0.5) * displacementExtent * 2;
 }
 
-export function rebuildNormalPixelsFromHeight(
+function validateNormalRebuildInput(
   heightPixels: Uint8ClampedArray,
   width: number,
   height: number,
   worldSize: number,
   displacementExtent: number
-): Uint8ClampedArray<ArrayBuffer> {
+): void {
   if (!Number.isInteger(width) || width < 2 || !Number.isInteger(height) || height < 2) {
     throw new Error('Normal reconstruction requires texture dimensions of at least 2×2 pixels.');
   }
@@ -277,36 +297,67 @@ export function rebuildNormalPixelsFromHeight(
   if (!Number.isFinite(displacementExtent) || displacementExtent < 0) {
     throw new Error('Displacement extent cannot be negative.');
   }
+}
 
+function rebuildNormalRow(
+  heightPixels: Uint8ClampedArray,
+  output: Uint8ClampedArray,
+  width: number,
+  height: number,
+  y: number,
+  pixelWorldX: number,
+  pixelWorldY: number,
+  displacementExtent: number
+): void {
+  for (let x = 0; x < width; x += 1) {
+    const slopeX = (
+      heightAt(heightPixels, width, height, x + 1, y, displacementExtent) -
+      heightAt(heightPixels, width, height, x - 1, y, displacementExtent)
+    ) / (2 * pixelWorldX);
+    const slopeCanvasY = (
+      heightAt(heightPixels, width, height, x, y + 1, displacementExtent) -
+      heightAt(heightPixels, width, height, x, y - 1, displacementExtent)
+    ) / (2 * pixelWorldY);
+
+    let normalX = -slopeX;
+    let normalY = slopeCanvasY;
+    let normalZ = NORMAL_Z;
+    const length = Math.hypot(normalX, normalY, normalZ);
+    normalX /= length;
+    normalY /= length;
+    normalZ /= length;
+
+    const offset = (y * width + x) * CHANNEL_COUNT;
+    output[offset] = Math.round((normalX * 0.5 + 0.5) * 255);
+    output[offset + 1] = Math.round((normalY * 0.5 + 0.5) * 255);
+    output[offset + 2] = Math.round((normalZ * 0.5 + 0.5) * 255);
+    output[offset + 3] = 255;
+  }
+}
+
+export function rebuildNormalPixelsFromHeight(
+  heightPixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  worldSize: number,
+  displacementExtent: number
+): Uint8ClampedArray<ArrayBuffer> {
+  validateNormalRebuildInput(heightPixels, width, height, worldSize, displacementExtent);
   const output = new Uint8ClampedArray(new ArrayBuffer(heightPixels.length));
   const pixelWorldX = worldSize / Math.max(width - 1, 1);
   const pixelWorldY = worldSize / Math.max(height - 1, 1);
 
   for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const slopeX = (
-        heightAt(heightPixels, width, height, x + 1, y, displacementExtent) -
-        heightAt(heightPixels, width, height, x - 1, y, displacementExtent)
-      ) / (2 * pixelWorldX);
-      const slopeCanvasY = (
-        heightAt(heightPixels, width, height, x, y + 1, displacementExtent) -
-        heightAt(heightPixels, width, height, x, y - 1, displacementExtent)
-      ) / (2 * pixelWorldY);
-
-      let normalX = -slopeX;
-      let normalY = slopeCanvasY;
-      let normalZ = NORMAL_Z;
-      const length = Math.hypot(normalX, normalY, normalZ);
-      normalX /= length;
-      normalY /= length;
-      normalZ /= length;
-
-      const offset = (y * width + x) * CHANNEL_COUNT;
-      output[offset] = Math.round((normalX * 0.5 + 0.5) * 255);
-      output[offset + 1] = Math.round((normalY * 0.5 + 0.5) * 255);
-      output[offset + 2] = Math.round((normalZ * 0.5 + 0.5) * 255);
-      output[offset + 3] = 255;
-    }
+    rebuildNormalRow(
+      heightPixels,
+      output,
+      width,
+      height,
+      y,
+      pixelWorldX,
+      pixelWorldY,
+      displacementExtent
+    );
   }
 
   normalizeNormalPixels(output);
@@ -314,12 +365,43 @@ export function rebuildNormalPixelsFromHeight(
   return output;
 }
 
-function rebuildNormalFromHeight(
+async function rebuildNormalPixelsFromHeightAsync(
+  heightPixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  worldSize: number,
+  displacementExtent: number
+): Promise<Uint8ClampedArray<ArrayBuffer>> {
+  validateNormalRebuildInput(heightPixels, width, height, worldSize, displacementExtent);
+  const output = new Uint8ClampedArray(new ArrayBuffer(heightPixels.length));
+  const pixelWorldX = worldSize / Math.max(width - 1, 1);
+  const pixelWorldY = worldSize / Math.max(height - 1, 1);
+
+  for (let y = 0; y < height; y += 1) {
+    rebuildNormalRow(
+      heightPixels,
+      output,
+      width,
+      height,
+      y,
+      pixelWorldX,
+      pixelWorldY,
+      displacementExtent
+    );
+    if ((y + 1) % NORMAL_REBUILD_YIELD_ROWS === 0) await yieldToMainThread();
+  }
+
+  await normalizeNormalPixelsAsync(output);
+  stabilizePixelSeamSlopes(output, width, height);
+  return output;
+}
+
+async function rebuildNormalFromHeight(
   normal: BakedTexture,
   height: BakedTexture,
   worldSize: number,
   displacementExtent: number
-): void {
+): Promise<void> {
   const width = height.canvas.width;
   const canvasHeight = height.canvas.height;
   if (normal.canvas.width !== width || normal.canvas.height !== canvasHeight) {
@@ -327,30 +409,14 @@ function rebuildNormalFromHeight(
   }
 
   const heightPixels = canvasContext(height.canvas).getImageData(0, 0, width, canvasHeight).data;
-  const output = new ImageData(
-    rebuildNormalPixelsFromHeight(
-      heightPixels,
-      width,
-      canvasHeight,
-      worldSize,
-      displacementExtent
-    ),
+  const pixels = await rebuildNormalPixelsFromHeightAsync(
+    heightPixels,
     width,
-    canvasHeight
+    canvasHeight,
+    worldSize,
+    displacementExtent
   );
-  canvasContext(normal.canvas).putImageData(output, 0, 0);
-}
-
-function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob === null) {
-        reject(new Error('Browser failed to encode the seamless PNG texture.'));
-        return;
-      }
-      resolve(blob);
-    }, 'image/png');
-  });
+  canvasContext(normal.canvas).putImageData(new ImageData(pixels, width, canvasHeight), 0, 0);
 }
 
 async function seamTexture(texture: BakedTexture, blendFraction: number): Promise<void> {
@@ -365,10 +431,12 @@ async function seamTexture(texture: BakedTexture, blendFraction: number): Promis
   );
 
   blendHorizontalEdges(image.data, width, height, blendPixels);
+  await yieldToMainThread();
   blendVerticalEdges(image.data, width, height, blendPixels);
+  await yieldToMainThread();
   stabilizePixelSeamSlopes(image.data, width, height);
   context.putImageData(image, 0, 0);
-  texture.blob = await canvasToPng(texture.canvas);
+  texture.blob = await canvasToPngBlob(texture.canvas);
 }
 
 export async function makeTextureSetSeamless(
@@ -395,13 +463,13 @@ export async function makeTextureSetSeamless(
   await seamTexture(textures.ao, options.blendFraction);
   await seamTexture(textures.emissive, options.blendFraction);
 
-  rebuildNormalFromHeight(
+  await rebuildNormalFromHeight(
     textures.normal,
     textures.height,
     options.worldSize,
     displacementExtent
   );
-  textures.normal.blob = await canvasToPng(textures.normal.canvas);
+  textures.normal.blob = await canvasToPngBlob(textures.normal.canvas);
   return textures;
 }
 

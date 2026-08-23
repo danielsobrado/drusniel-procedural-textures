@@ -94,6 +94,37 @@ describe('shared texture atlas', () => {
     displaced.dispose();
   });
 
+  it('rejects singular transforms before attempting displacement', () => {
+    const source = new THREE.BufferGeometry();
+    source.setAttribute('position', new THREE.Float32BufferAttribute([
+      0, 0, 0,
+      1, 0, 0,
+      0, 1, 0
+    ], 3));
+    source.setAttribute('normal', new THREE.Float32BufferAttribute([
+      0, 0, 1,
+      0, 0, 1,
+      0, 0, 1
+    ], 3));
+    source.setAttribute('uv', new THREE.Float32BufferAttribute([
+      0.5, 0.5,
+      0.5, 0.5,
+      0.5, 0.5
+    ], 2));
+    source.setIndex([0, 1, 2]);
+
+    try {
+      expect(() => applyStaticDisplacement(
+        source,
+        solidHeight(255),
+        new THREE.Matrix4().makeScale(1, 0, 1),
+        0.2
+      )).toThrow(/singular world transform/iu);
+    } finally {
+      source.dispose();
+    }
+  });
+
   it('rejects slots outside the allocated atlas grid', () => {
     const source = new THREE.BufferGeometry();
     source.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));

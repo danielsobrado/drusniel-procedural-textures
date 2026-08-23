@@ -3,6 +3,7 @@ import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { applyPhysicalSettings } from '../materials/PhysicalMaterial';
 import type { MaterialPreset, PhysicalSettings } from '../materials/types';
+import { canvasToPngDataUrl } from '../utils/canvas';
 
 function flipRows(source: Uint8Array, size: number): Uint8ClampedArray<ArrayBuffer> {
   const rowBytes = size * 4;
@@ -14,15 +15,14 @@ function flipRows(source: Uint8Array, size: number): Uint8ClampedArray<ArrayBuff
   return result;
 }
 
-function physicalVariantKey(settings: Readonly<PhysicalSettings>): string {
-  return `${settings.sheen > 0 ? 'sheen' : 'no-sheen'}:${settings.transmission > 0 ? 'transmission' : 'opaque'}`;
-}
-
 export class PresetThumbnailRenderer {
-  private readonly compilers = new Map<string, MaterialCompiler>();
+  private readonly compiler = new MaterialCompiler();
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(32, 1, 0.05, 20);
-  private readonly mesh: THREE.Mesh;
+  private readonly mesh = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 72, 54),
+    this.compiler.material
+  );
   private readonly target = new THREE.WebGLRenderTarget(
     EXPORT_CONFIG.thumbnailSize,
     EXPORT_CONFIG.thumbnailSize,
@@ -33,11 +33,6 @@ export class PresetThumbnailRenderer {
     private readonly renderer: THREE.WebGLRenderer,
     private readonly defaultPhysical: Readonly<PhysicalSettings>
   ) {
-    const compiler = this.compilerFor(defaultPhysical);
-    this.mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 72, 54),
-      compiler.material
-    );
     this.target.texture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color('#171a21');
     this.camera.position.set(0, 0.05, 3.25);
@@ -55,34 +50,18 @@ export class PresetThumbnailRenderer {
     this.scene.add(hemisphere, key, fill, rim);
   }
 
-  public render(preset: MaterialPreset): string {
-    this.prepare(preset);
-    return this.capture();
-  }
-
   public async renderAsync(preset: MaterialPreset): Promise<string> {
     this.prepare(preset);
+    await this.compiler.ensureSimulationReady();
     await this.renderer.compileAsync(this.scene, this.camera);
-    return this.capture();
+    return this.captureAsync();
   }
 
   public dispose(): void {
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.target.dispose();
-    for (const compiler of this.compilers.values()) compiler.dispose();
-    this.compilers.clear();
-  }
-
-  private compilerFor(settings: Readonly<PhysicalSettings>): MaterialCompiler {
-    const key = physicalVariantKey(settings);
-    const cached = this.compilers.get(key);
-    if (cached !== undefined) return cached;
-
-    const compiler = new MaterialCompiler();
-    applyPhysicalSettings(compiler.material, settings);
-    this.compilers.set(key, compiler);
-    return compiler;
+    this.compiler.dispose();
   }
 
   private prepare(preset: MaterialPreset): void {
@@ -90,13 +69,11 @@ export class PresetThumbnailRenderer {
       ...this.defaultPhysical,
       ...(preset.physical ?? {})
     };
-    const compiler = this.compilerFor(physical);
-    compiler.sync(preset.layers, preset.groups ?? [], false);
-    applyPhysicalSettings(compiler.material, physical);
-    this.mesh.material = compiler.material;
+    this.compiler.sync(preset.layers, preset.groups ?? [], false);
+    applyPhysicalSettings(this.compiler.material, physical);
   }
 
-  private capture(): string {
+  private async captureAsync(): Promise<string> {
     const size = EXPORT_CONFIG.thumbnailSize;
     const pixels = new Uint8Array(size * size * 4);
     const previousTarget = this.renderer.getRenderTarget();
@@ -108,7 +85,7 @@ export class PresetThumbnailRenderer {
       this.renderer.setClearColor('#171a21', 1);
       this.renderer.clear(true, true, true);
       this.renderer.render(this.scene, this.camera);
-      this.renderer.readRenderTargetPixels(this.target, 0, 0, size, size, pixels);
+      await this.renderer.readRenderTargetPixelsAsync(this.target, 0, 0, size, size, pixels);
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       this.renderer.setClearColor(previousClearColor, previousClearAlpha);
@@ -122,6 +99,6 @@ export class PresetThumbnailRenderer {
       throw new Error('Browser does not provide a 2D canvas for material thumbnails.');
     }
     context.putImageData(new ImageData(flipRows(pixels, size), size, size), 0, 0);
-    return canvas.toDataURL('image/png');
+    return canvasToPngDataUrl(canvas);
   }
 }

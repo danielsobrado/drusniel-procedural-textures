@@ -7,6 +7,7 @@ import {
   SHARED_GLSL as BASE_SHARED_GLSL,
   SURFACE_VERTEX_DISPLACEMENT_GLSL as BASE_SURFACE_VERTEX_DISPLACEMENT_GLSL
 } from './ProceduralShader';
+import { PATTERN_GLSL_HELPERS, PATTERN_GLSL_UNIFORMS } from './PatternShader';
 
 const EXTRA_UNIFORMS = `uniform float uLabStochasticTiling;
 uniform int uLabCoordinateSpace;
@@ -16,7 +17,8 @@ uniform vec2 uLabSimulationGrid;
 uniform float uLabSimulationCellSize;
 uniform float uLabSdfRadius;
 uniform float uLabSdfBoxSize;
-uniform float uLabSdfEdgeSoftness;`;
+uniform float uLabSdfEdgeSoftness;
+${PATTERN_GLSL_UNIFORMS}`;
 
 const SIMULATION_HELPERS = `
 vec2 labSimulationAtlasUv(int layerIndex, vec2 uv) {
@@ -45,7 +47,7 @@ function extendSharedShader(source: string): string {
     )
     .replace(
       'float labLayerField(int kind, vec3 position, float scale, float seed) {',
-      `${SIMULATION_HELPERS}\nfloat labLayerField(int layerIndex, int kind, vec3 position, float scale, float seed) {`
+      `${SIMULATION_HELPERS}\n${PATTERN_GLSL_HELPERS}\nfloat labLayerField(int layerIndex, int kind, vec3 position, float scale, float seed) {`
     )
     .replace(
       `  if (kind == 10) {\n    vec3 q = p + (labFbm3(p * 0.21) - 0.5) * 2.1;\n    float activator = sin(q.x * 1.7 + sin(q.y * 1.3)) * cos(q.z * 1.1 - q.y * 0.7);\n    float inhibitor = labFbm3(q * 0.38 + 19.0);\n    return smoothstep(-0.28, 0.38, activator * 0.62 + inhibitor - 0.5);\n  }`,
@@ -57,11 +59,19 @@ function extendSharedShader(source: string): string {
     )
     .replace(
       `  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - 0.31;\n  float box = length(max(abs(cell) - vec3(0.25), 0.0)) - 0.055;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-0.06, 0.18, sdf);`,
-      `  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - uLabSdfRadius;\n  float box = length(max(abs(cell) - vec3(uLabSdfBoxSize), 0.0)) - uLabSdfEdgeSoftness;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-uLabSdfEdgeSoftness, uLabSdfEdgeSoftness * 3.0, sdf);`
+      `  if (kind == 13) return labPatternField(layerIndex, p, seed);\n  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - uLabSdfRadius;\n  float box = length(max(abs(cell) - vec3(uLabSdfBoxSize), 0.0)) - uLabSdfEdgeSoftness;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-uLabSdfEdgeSoftness, uLabSdfEdgeSoftness * 3.0, sdf);`
     )
     .replace(
       `  float mesoField = labLayerField(\n    uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`,
       `  float mesoField = labLayerField(\n    fieldIndex, uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`
+    )
+    .replace(
+      `  if (kind == 4 || kind == 5 || kind == 7) {\n    return smoothstep(0.03, 0.92, shaped);\n  }`,
+      `  if (kind == 4 || kind == 5 || kind == 7) {\n    return smoothstep(0.03, 0.92, shaped);\n  }\n  if (kind == 13) return smoothstep(0.04, 0.92, shaped);`
+    )
+    .replace(
+      '  if (kind == 4 || kind == 5 || kind == 7) return shaped;',
+      '  if (kind == 4 || kind == 5 || kind == 7 || kind == 13) return shaped;'
     );
 }
 

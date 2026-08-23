@@ -1,0 +1,37 @@
+resolution: 256
+worldSize: 512
+heightScale: 84
+meshSegments: 128
+materialRepeat: 24
+mountains:
+  coverage: 0.72
+  height: 0.82
+  ridgeSharpness: 2.4
+  detail: 0.34
+hydrology:
+  riverDensity: 0.52
+  riverDepth: 0.045
+  wetnessRadius: 5
+painting:
+  radius: 0.035
+  hardness: 0.65
+  strength: 0.8
+materials:
+  presetBakeResolution: 256
+player:
+  eyeHeightMeters: 1.72
+  walkSpeedMetersPerSecond: 5.5
+  sprintMultiplier: 2.1
+  mouseSensitivity: 0.0022
+  maxPitchDegrees: 85
+  nearClipMeters: 0.15
+  tileRadius: 1
+  fogStartMeters: 280
+  fogEndMeters: 520
+compute:
+  cpuYieldRows: 8
+imports:
+  maxFileBytes: 33554432
+  maxDimension: 4096
+preview:
+  maxPixels: 1500000

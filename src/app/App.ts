@@ -26,8 +26,7 @@ import { makeTextureSetSeamless } from '../export/SeamlessTexture';
 import { TileMaterialBaker } from '../export/TileMaterialBaker';
 import type { BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import { MATERIAL_PRESETS } from '../materials/presets';
-import type { EnvironmentPreset, LayerKind, ProjectState } from '../materials/types';
+import type { EnvironmentPreset, LayerKind, MaterialPreset, ProjectState } from '../materials/types';
 import { serializeMaterialRecipe } from '../runtime/MaterialRecipe';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
@@ -81,13 +80,13 @@ function waitForNextPaint(): Promise<void> {
   return new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
 }
 
-function waitForIdleTurn(): Promise<void> {
+function waitForBackgroundIdle(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(() => resolve(), { timeout: UI_CONFIG.idleWorkTimeoutMs });
+      window.requestIdleCallback(() => resolve());
       return;
     }
-    window.setTimeout(resolve, 0);
+    window.setTimeout(resolve, UI_CONFIG.idleWorkTimeoutMs);
   });
 }
 
@@ -127,6 +126,8 @@ export class App {
   private readonly radial: RadialMenu;
   private readonly tilePreview: TilePreviewPanel;
   private readonly importedFiles = new ImportedFileCache(IMPORT_CACHE_ENTRY_LIMIT, MAX_MODEL_FILE_BYTES);
+  private readonly pendingPresetThumbnails = new Map<string, MaterialPreset>();
+  private readonly completedPresetThumbnailIds = new Set<string>();
   private autosaveTimer: number | null = null;
   private autosaveFailureShown = false;
   private activeImportedName: string | null = null;
@@ -137,7 +138,7 @@ export class App {
   private tilePreviewMaps: BakedTextureSet | null = null;
   private tilePreviewStale = true;
   private tilePreviewRevision = 0;
-  private presetThumbnailGenerationStarted = false;
+  private presetThumbnailGenerationActive = false;
 
   public constructor(root: HTMLElement) {
     this.shell = new Shell(root);
@@ -151,7 +152,8 @@ export class App {
     this.library = new LibraryPanel(this.shell.elements.library, {
       onObject: (preset) => this.runSafely(() => this.state.setObjectPreset(preset)),
       onPreset: (preset) => this.runSafely(() => this.state.applyPreset(preset)),
-      onImport: () => this.shell.elements.modelInput.click()
+      onImport: () => this.shell.elements.modelInput.click(),
+      onThumbnailRequested: (preset) => this.queuePresetThumbnail(preset)
     });
 
     this.inspector = new Inspector(this.shell.elements.inspector, {
@@ -168,6 +170,7 @@ export class App {
       onGenomeLock: (key, enabled) => this.runSafely(() => this.state.setGenomeLock(key, enabled)),
       onMutate: (variant) => this.runSafely(() => this.state.mutateMaterialVariant(variant)),
       onGraphMode: (enabled) => this.state.setGraphMode(enabled),
+      onGraphParameter: (id, value) => this.runSafely(() => this.state.setSurfaceGraphParameter(id, value)),
       onEnvironment: (environment) => this.selectEnvironment(environment),
       onEnvironmentImport: () => this.shell.elements.environmentInput.click(),
       onMeshSelect: (id) => this.state.selectMesh(id),
@@ -186,7 +189,8 @@ export class App {
     this.tilePreview = new TilePreviewPanel(this.tileWorkspace.host, {
       onClose: () => this.tileWorkspace.setActive(false),
       onRefresh: () => { void this.refreshTilePreview(); },
-      onSave: () => { void this.saveSeamlessTextures(); }
+      onSave: () => { void this.saveSeamlessTextures(); },
+      onTextureRequested: () => { void this.ensureTileTexturePreview(); }
     });
     this.radial = new RadialMenu(this.shell.elements.radial, (command) => this.handleRadialCommand(command));
     this.state.subscribe((state, reason) => this.handleStateChange(state, reason));
@@ -196,7 +200,6 @@ export class App {
     this.bindKeyboard();
     this.syncAll(this.state.snapshot);
     void this.initializeCompute();
-    this.schedulePresetThumbnails();
   }
 
   private handleStateChange(state: Readonly<ProjectState>, reason: StateChangeReason): void {
@@ -584,6 +587,10 @@ export class App {
 
   private async openTilePreview(): Promise<void> {
     this.tileWorkspace.setActive(true);
+    if (this.tilePreview.textureModeActive) await this.ensureTileTexturePreview();
+  }
+
+  private async ensureTileTexturePreview(): Promise<void> {
     if (this.tilePreviewMaps !== null && !this.tilePreviewStale) {
       this.tilePreview.setMaps(this.tilePreviewMaps);
       return;
@@ -718,27 +725,47 @@ export class App {
     });
   }
 
-  private schedulePresetThumbnails(): void {
-    if (this.presetThumbnailGenerationStarted) return;
-    this.presetThumbnailGenerationStarted = true;
-    void this.generatePresetThumbnailsProgressively();
+  private queuePresetThumbnail(preset: MaterialPreset): void {
+    if (!this.renderer.supportsTextureBaking()) return;
+    if (
+      this.completedPresetThumbnailIds.has(preset.id) ||
+      this.pendingPresetThumbnails.has(preset.id)
+    ) return;
+
+    this.pendingPresetThumbnails.set(preset.id, preset);
+    if (!this.presetThumbnailGenerationActive) void this.processPresetThumbnailQueue();
   }
 
-  private async generatePresetThumbnailsProgressively(): Promise<void> {
-    const thumbnails = new Map<string, string>();
-    await waitForNextPaint();
+  private async processPresetThumbnailQueue(): Promise<void> {
+    if (this.presetThumbnailGenerationActive) return;
+    this.presetThumbnailGenerationActive = true;
 
-    for (const preset of MATERIAL_PRESETS) {
-      while (this.productionOperation !== null) await waitForNextPaint();
-      await waitForIdleTurn();
-      try {
-        const thumbnail = await this.renderer.generatePresetThumbnail(preset);
-        thumbnails.set(preset.id, thumbnail);
-        this.library.setThumbnails(thumbnails);
-      } catch (error) {
-        console.warn(`Preset thumbnail generation failed for ${preset.id}.`, error);
+    try {
+      while (this.pendingPresetThumbnails.size > 0) {
+        while (this.productionOperation !== null) await waitForNextPaint();
+        await waitForBackgroundIdle();
+        if (this.productionOperation !== null) continue;
+
+        const next = this.pendingPresetThumbnails.entries().next().value as
+          | [string, MaterialPreset]
+          | undefined;
+        if (next === undefined) break;
+
+        const [id, preset] = next;
+        try {
+          const thumbnail = await this.renderer.generatePresetThumbnail(preset);
+          this.completedPresetThumbnailIds.add(id);
+          this.library.setThumbnail(id, thumbnail);
+        } catch (error) {
+          console.warn(`Preset thumbnail generation failed for ${id}.`, error);
+        } finally {
+          this.pendingPresetThumbnails.delete(id);
+        }
+        await waitForNextPaint();
       }
-      await waitForNextPaint();
+    } finally {
+      this.presetThumbnailGenerationActive = false;
+      if (this.pendingPresetThumbnails.size > 0) void this.processPresetThumbnailQueue();
     }
   }
 

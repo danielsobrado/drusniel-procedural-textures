@@ -2,12 +2,14 @@ import * as THREE from 'three';
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
 import { DEFAULT_MATERIAL_ALGORITHMS } from '../core/material/MaterialAlgorithms';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
+import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
 import {
   PTL_CELLULAR_DEFAULTS,
   PTL_MAX_LAYERS,
   PTL_SHADER_DEFAULTS
 } from '../core/material/runtimeDefaults';
 import { BIOLOGICAL_SSS_LIGHT_GLSL, BIOLOGICAL_SSS_PARS_GLSL } from './BiologicalScattering';
+import { PATTERN_KIND_CODE } from './PatternShader';
 import type {
   BlendMode,
   LayerChannel,
@@ -39,7 +41,8 @@ const LAYER_KIND_CODE: Record<LayerKind, number> = {
   sss: 9,
   'reaction-diffusion': 10,
   erosion: 11,
-  sdf: 12
+  sdf: 12,
+  pattern: 13
 };
 
 const BLEND_MODE_CODE: Record<BlendMode, number> = {
@@ -91,7 +94,7 @@ function routesHeight(channel: LayerChannel): boolean {
 
 function displacementSignalExtent(kind: LayerKind): number {
   if (kind === 'base') return 0;
-  if (kind === 'spots' || kind === 'veins' || kind === 'vessels') return 1;
+  if (kind === 'spots' || kind === 'veins' || kind === 'vessels' || kind === 'pattern') return 1;
   if (kind === 'cellular') return PTL_CELLULAR_DEFAULTS.displacement.gain * 0.5;
   return 0.5;
 }
@@ -123,6 +126,15 @@ export class SurfaceMaterialCompiler {
     uLabMaskInvert: { value: new Array<number>(PTL_MAX_LAYERS).fill(0) },
     uLabMaskStrength: { value: new Array<number>(PTL_MAX_LAYERS).fill(1) },
     uLabStructureIndex: { value: new Array<number>(PTL_MAX_LAYERS).fill(-1) },
+    uLabPatternKind: { value: new Array<number>(PTL_MAX_LAYERS).fill(PATTERN_KIND_CODE.brick) },
+    uLabPatternAspect: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.aspect) },
+    uLabPatternGap: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.gap) },
+    uLabPatternRoundness: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.roundness) },
+    uLabPatternJitter: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.jitter) },
+    uLabPatternRotation: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.rotation) },
+    uLabPatternOffset: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.offset) },
+    uLabPatternDensity: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.density) },
+    uLabPatternEdgeWear: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.edgeWear) },
     uLabAge: { value: 0 },
     uLabWeathering: { value: 0 },
     uLabGravity: { value: -1 },
@@ -185,6 +197,7 @@ export class SurfaceMaterialCompiler {
     for (let index = 0; index < PTL_MAX_LAYERS; index += 1) {
       const layer = layers[index];
       const active = layer !== undefined;
+      const pattern = active ? layer.pattern ?? DEFAULT_PATTERN_SETTINGS : DEFAULT_PATTERN_SETTINGS;
       const groupOpacity = active ? effectiveGroupOpacity(layer.groupId, groupById) : 1;
       const maskIndex = active && layer.maskSourceLayerId !== null
         ? layerIndexById.get(layer.maskSourceLayerId) ?? -1
@@ -208,6 +221,15 @@ export class SurfaceMaterialCompiler {
       this.uniforms.uLabMaskInvert.value[index] = active && layer.maskInvert ? 1 : 0;
       this.uniforms.uLabMaskStrength.value[index] = active ? layer.maskStrength : 1;
       this.uniforms.uLabStructureIndex.value[index] = structureIndex;
+      this.uniforms.uLabPatternKind.value[index] = PATTERN_KIND_CODE[pattern.kind];
+      this.uniforms.uLabPatternAspect.value[index] = pattern.aspect;
+      this.uniforms.uLabPatternGap.value[index] = pattern.gap;
+      this.uniforms.uLabPatternRoundness.value[index] = pattern.roundness;
+      this.uniforms.uLabPatternJitter.value[index] = pattern.jitter;
+      this.uniforms.uLabPatternRotation.value[index] = pattern.rotation;
+      this.uniforms.uLabPatternOffset.value[index] = pattern.offset;
+      this.uniforms.uLabPatternDensity.value[index] = pattern.density;
+      this.uniforms.uLabPatternEdgeWear.value[index] = pattern.edgeWear;
       this.uniforms.uLabColorA.value[index]?.set(active ? layer.colorA : '#000000');
       this.uniforms.uLabColorB.value[index]?.set(active ? layer.colorB : '#000000');
 
@@ -217,10 +239,7 @@ export class SurfaceMaterialCompiler {
       ) {
         hasDisplacement = true;
         this.displacementExtentValue +=
-          Math.abs(layer.displacement) *
-          layer.opacity *
-          groupOpacity *
-          displacementSignalExtent(layer.kind);
+          Math.abs(layer.displacement) * layer.opacity * groupOpacity * displacementSignalExtent(layer.kind);
       }
     }
 
@@ -244,11 +263,7 @@ export class SurfaceMaterialCompiler {
     this.uniforms.uLabSdfEdgeSoftness.value = settings.sdf.edgeSoftness;
   }
 
-  public setSimulationAtlas(
-    texture: THREE.Texture | null,
-    readyLayers: readonly boolean[] = [],
-    cellSize = 1
-  ): void {
+  public setSimulationAtlas(texture: THREE.Texture | null, readyLayers: readonly boolean[] = [], cellSize = 1): void {
     if (this.simulationAtlas !== null && this.simulationAtlas !== texture) this.simulationAtlas.dispose();
     this.simulationAtlas = texture;
     this.uniforms.uLabSimulationAtlas.value = texture;
@@ -269,53 +284,25 @@ export class SurfaceMaterialCompiler {
   private configureSurfaceShader(): void {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
-
-      const varyings = [
-        'varying vec3 vLabPosition;',
-        'varying vec3 vLabSurfacePosition;'
-      ].join('\n');
-
+      const varyings = ['varying vec3 vLabPosition;', 'varying vec3 vLabSurfacePosition;'].join('\n');
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${varyings}`)
         .replace('#include <skinning_vertex>', SURFACE_VERTEX_DISPLACEMENT_GLSL);
-
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\n${BIOLOGICAL_SSS_PARS_GLSL}\n${varyings}`)
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>\nLabSurface labSurface = labEvaluateSurface(vLabPosition);\ndiffuseColor.rgb = labSurface.color;`
-        )
-        .replace(
-          '#include <roughnessmap_fragment>',
-          `#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + labSurface.roughness, 0.045, 1.0);`
-        )
-        .replace(
-          '#include <metalnessmap_fragment>',
-          `#include <metalnessmap_fragment>\nmetalnessFactor = clamp(metalnessFactor + labSurface.metallic, 0.0, 1.0);`
-        )
-        .replace(
-          '#include <emissivemap_fragment>',
-          `#include <emissivemap_fragment>\ntotalEmissiveRadiance += labSurface.emissive;`
-        )
+        .replace('#include <color_fragment>', `#include <color_fragment>\nLabSurface labSurface = labEvaluateSurface(vLabPosition);\ndiffuseColor.rgb = labSurface.color;`)
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + labSurface.roughness, 0.045, 1.0);`)
+        .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>\nmetalnessFactor = clamp(metalnessFactor + labSurface.metallic, 0.0, 1.0);`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\ntotalEmissiveRadiance += labSurface.emissive;`)
         .replace('#include <normal_fragment_begin>', DISPLACED_NORMAL_GLSL)
-        .replace(
-          '#include <clearcoat_normal_fragment_maps>',
-          `#include <clearcoat_normal_fragment_maps>\n#ifdef USE_CLEARCOAT\n  clearcoatNormal = normalize(normal);\n#endif`
-        )
+        .replace('#include <clearcoat_normal_fragment_maps>', `#include <clearcoat_normal_fragment_maps>\n#ifdef USE_CLEARCOAT\n  clearcoatNormal = normalize(normal);\n#endif`)
         .replace('#include <lights_physical_fragment>', PHYSICAL_LAYER_GLSL)
-        .replace(
-          '#include <lights_fragment_end>',
-          `${BIOLOGICAL_SSS_LIGHT_GLSL}\nreflectedLight.indirectDiffuse *= labSurface.ao;`
-        );
+        .replace('#include <lights_fragment_end>', `${BIOLOGICAL_SSS_LIGHT_GLSL}\nreflectedLight.indirectDiffuse *= labSurface.ao;`);
     };
-
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v21';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v22';
   }
 
-  private configureShadowShader(
-    material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial,
-    pass: 'depth' | 'distance'
-  ): void {
+  private configureShadowShader(material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial, pass: 'depth' | 'distance'): void {
     material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
       shader.vertexShader = shader.vertexShader
@@ -323,6 +310,6 @@ export class SurfaceMaterialCompiler {
         .replace('#include <begin_vertex>', SHADOW_NORMAL_GLSL)
         .replace('#include <skinning_vertex>', SHADOW_VERTEX_DISPLACEMENT_GLSL);
     };
-    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v8`;
+    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v9`;
   }
 }

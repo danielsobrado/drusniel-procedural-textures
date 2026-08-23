@@ -25,3 +25,40 @@ export {
   normalizeMaterialCoordinateSpace,
   type MaterialCoordinateSpace
 } from '../core/material/MaterialCoordinates';
+export {
+  DEFAULT_PATTERN_SETTINGS,
+  PATTERN_LIMITS,
+  normalizePatternSettings,
+  type PatternKind,
+  type PatternSettings
+} from '../core/material/PatternSettings';
+export {
+  SURFACE_GRAPH_NODE_SPECS,
+  SURFACE_GRAPH_NODE_SPEC_BY_KIND,
+  type SurfaceGraphNodeCategory,
+  type SurfaceGraphNodeSpec,
+  type SurfaceGraphPortSpec
+} from '../core/graph/SurfaceGraphCatalog';
+export { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
+export {
+  setSurfaceGraphExposedValue,
+  surfaceGraphExposedValue,
+  type SurfaceGraphExposedValue
+} from '../core/graph/SurfaceGraphParameters';
+export { lowerSurfaceGraphRuntimeNodes } from '../core/graph/SurfaceGraphRuntimeLowering';
+export {
+  compileSurfaceGraph,
+  type SurfaceGraphCompilation
+} from '../materials/SurfaceGraphCompiler';
+export type {
+  SurfaceGraphDefinition,
+  SurfaceGraphEdge,
+  SurfaceGraphExposedParameter,
+  SurfaceGraphNode,
+  SurfaceGraphNodeKind,
+  SurfaceGraphOutput,
+  SurfaceGraphParameterValue,
+  SurfaceGraphPortRef,
+  SurfaceGraphRuntimeLayer,
+  SurfaceGraphValueType
+} from '../core/graph/SurfaceGraph';

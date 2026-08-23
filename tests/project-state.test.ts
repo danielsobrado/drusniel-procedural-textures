@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { AppState, createDefaultLayer, createDefaultProject } from '../src/app/AppState';
 import { normalizeProject } from '../src/app/ProjectFile';
+import { compileSurfaceGraph } from '../src/materials/SurfaceGraphCompiler';
+import { SURFACE_DESIGNER_CATALOG } from '../src/materials/surfaceDesignerCatalog';
 
 describe('project normalization', () => {
   it('migrates version 1 projects to version 2 defaults', () => {
@@ -18,6 +20,23 @@ describe('project normalization', () => {
     expect(normalized.groups).toEqual([]);
     expect(normalized.importedAssetName).toBeNull();
     expect(normalized.physical.roughness).toBeGreaterThan(0);
+  });
+
+  it('uses the graph as the canonical material state for graph-backed projects', () => {
+    const preset = SURFACE_DESIGNER_CATALOG.find((item) => item.id === 'designer-old-brick-wall');
+    if (preset?.graph === undefined) throw new Error('Brick designer graph is missing.');
+    const state = new AppState(createDefaultProject());
+    state.applyPreset(preset);
+    const stored = structuredClone(state.snapshot);
+    stored.layers[0]!.colorA = '#ffffff';
+    stored.layers[0]!.opacity = 0.01;
+
+    const normalized = normalizeProject(stored);
+    const compiled = compileSurfaceGraph(preset.graph);
+
+    expect(normalized.layers).toEqual(compiled.layers);
+    expect(normalized.groups).toEqual(compiled.groups);
+    expect(normalized.surfaceGraph).toEqual(compiled.graph);
   });
 
   it('rejects cyclic group hierarchies', () => {

@@ -25,10 +25,12 @@ export function materialSimulationFingerprint(
   layers: readonly MaterialLayer[],
   algorithms: Readonly<MaterialAlgorithmSettings>
 ): string {
-  const inputs = layers.slice(0, PTL_MAX_LAYERS).map((layer) => ({
-    kind: simulationKind(layer),
-    seed: layer.seed
-  }));
+  const inputs = layers
+    .slice(0, PTL_MAX_LAYERS)
+    .map((layer, index) => ({ index, kind: simulationKind(layer), seed: layer.seed }))
+    .filter((input): input is { index: number; kind: 'reaction-diffusion' | 'thermal-erosion'; seed: number } =>
+      input.kind !== null
+    );
   return JSON.stringify({ inputs, algorithms });
 }
 

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
+import { canvasToPngBlob } from '../utils/canvas';
 import { createTriangleAtlas, validateBakeUv } from './UvValidation';
 
 export type BakeChannel =
@@ -61,6 +62,8 @@ const CHANNEL_MODE: Record<BakeChannel, number> = {
   ao: 7,
   emissive: 8
 };
+const DILATION_UNVISITED = 255;
+const PIXEL_WORK_YIELD_INTERVAL = 262_144;
 
 function hasMorphTargets(mesh: THREE.Mesh): boolean {
   return Object.values(mesh.geometry.morphAttributes).some((attributes) => attributes.length > 0);
@@ -139,48 +142,94 @@ function flipRows(source: Uint8Array, width: number, height: number): Uint8Clamp
   return flipped;
 }
 
-function dilateTransparentPixels(
+function yieldToMainThread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function copyPixel(pixels: Uint8ClampedArray<ArrayBuffer>, sourceIndex: number, targetIndex: number): void {
+  const sourceOffset = sourceIndex * 4;
+  const targetOffset = targetIndex * 4;
+  pixels[targetOffset] = pixels[sourceOffset] ?? 0;
+  pixels[targetOffset + 1] = pixels[sourceOffset + 1] ?? 0;
+  pixels[targetOffset + 2] = pixels[sourceOffset + 2] ?? 0;
+  pixels[targetOffset + 3] = 255;
+}
+
+async function dilateTransparentPixels(
   pixels: Uint8ClampedArray<ArrayBuffer>,
   width: number,
   height: number,
   iterations: number
-): Uint8ClampedArray<ArrayBuffer> {
-  let current = pixels;
-  for (let iteration = 0; iteration < iterations; iteration += 1) {
-    const next = new Uint8ClampedArray(new ArrayBuffer(current.byteLength));
-    next.set(current);
-    let changed = false;
-    for (let y = 0; y < height; y += 1) {
-      for (let x = 0; x < width; x += 1) {
-        const offset = (y * width + x) * 4;
-        if ((current[offset + 3] ?? 0) !== 0) continue;
-        const neighbors = [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const;
-        for (const [neighborX, neighborY] of neighbors) {
-          if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) continue;
-          const neighborOffset = (neighborY * width + neighborX) * 4;
-          if ((current[neighborOffset + 3] ?? 0) === 0) continue;
-          next[offset] = current[neighborOffset] ?? 0;
-          next[offset + 1] = current[neighborOffset + 1] ?? 0;
-          next[offset + 2] = current[neighborOffset + 2] ?? 0;
-          next[offset + 3] = 255;
-          changed = true;
-          break;
-        }
-      }
-    }
-    current = next;
-    if (!changed) break;
-  }
-  return current;
-}
+): Promise<Uint8ClampedArray<ArrayBuffer>> {
+  if (iterations <= 0) return pixels;
 
-function canvasToPng(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => {
-      if (blob === null) reject(new Error('Browser failed to encode the baked PNG texture.'));
-      else resolve(blob);
-    }, 'image/png');
-  });
+  const pixelCount = width * height;
+  const distance = new Uint8Array(pixelCount);
+  distance.fill(DILATION_UNVISITED);
+  let transparentPixels = 0;
+
+  for (let index = 0; index < pixelCount; index += 1) {
+    if ((pixels[index * 4 + 3] ?? 0) === 0) transparentPixels += 1;
+    else distance[index] = 0;
+    if (index > 0 && index % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
+  }
+  if (transparentPixels === 0) return pixels;
+
+  const queue = new Int32Array(pixelCount);
+  let queueHead = 0;
+  let queueTail = 0;
+  let scanned = 0;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = y * width + x;
+      if (distance[index] !== DILATION_UNVISITED) continue;
+
+      let sourceIndex = -1;
+      if (x > 0 && distance[index - 1] === 0) sourceIndex = index - 1;
+      else if (x + 1 < width && distance[index + 1] === 0) sourceIndex = index + 1;
+      else if (y > 0 && distance[index - width] === 0) sourceIndex = index - width;
+      else if (y + 1 < height && distance[index + width] === 0) sourceIndex = index + width;
+
+      if (sourceIndex >= 0) {
+        copyPixel(pixels, sourceIndex, index);
+        distance[index] = 1;
+        queue[queueTail] = index;
+        queueTail += 1;
+      }
+
+      scanned += 1;
+      if (scanned % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
+    }
+  }
+
+  while (queueHead < queueTail) {
+    const index = queue[queueHead] ?? -1;
+    queueHead += 1;
+    if (index < 0) continue;
+    const nextDistance = (distance[index] ?? DILATION_UNVISITED) + 1;
+    if (nextDistance > iterations) continue;
+
+    const x = index % width;
+    const y = Math.floor(index / width);
+    const neighbors = [
+      x > 0 ? index - 1 : -1,
+      x + 1 < width ? index + 1 : -1,
+      y > 0 ? index - width : -1,
+      y + 1 < height ? index + width : -1
+    ];
+    for (const neighbor of neighbors) {
+      if (neighbor < 0 || distance[neighbor] !== DILATION_UNVISITED) continue;
+      copyPixel(pixels, index, neighbor);
+      distance[neighbor] = nextDistance;
+      queue[queueTail] = neighbor;
+      queueTail += 1;
+    }
+
+    if (queueHead % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
+  }
+
+  return pixels;
 }
 
 export class TextureBaker {
@@ -351,20 +400,32 @@ export class TextureBaker {
       this.renderer.setClearColor(0x000000, 0);
       this.renderer.clear(true, true, true);
       this.renderer.render(context.scene, this.camera);
-      this.renderer.readRenderTargetPixels(context.target, 0, 0, resolution, resolution, pixels);
+      await this.renderer.readRenderTargetPixelsAsync(
+        context.target,
+        0,
+        0,
+        resolution,
+        resolution,
+        pixels
+      );
     } finally {
       this.renderer.setRenderTarget(previousTarget);
       this.renderer.setClearColor(previousClearColor, previousClearAlpha);
     }
 
     const flipped = flipRows(pixels, resolution, resolution);
-    const padded = dilateTransparentPixels(flipped, resolution, resolution, EXPORT_CONFIG.texturePaddingPx);
+    const padded = await dilateTransparentPixels(
+      flipped,
+      resolution,
+      resolution,
+      EXPORT_CONFIG.texturePaddingPx
+    );
     const canvas = document.createElement('canvas');
     canvas.width = resolution;
     canvas.height = resolution;
     const canvasContext = canvas.getContext('2d');
     if (canvasContext === null) throw new Error('Browser does not provide a 2D canvas required for texture baking.');
     canvasContext.putImageData(new ImageData(padded, resolution, resolution), 0, 0);
-    return { canvas, blob: await canvasToPng(canvas) };
+    return { canvas, blob: await canvasToPngBlob(canvas) };
   }
 }

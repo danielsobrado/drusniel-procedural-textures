@@ -2,8 +2,14 @@ import './styles/app.css';
 import './styles/refinements.css';
 import './styles/library-compact.css';
 import './styles/tile-preview.css';
+import './styles/terrain-tile-lab.css';
+import './styles/terrain-player.css';
+import './styles/terrain-player-toolbar.css';
 import './styles/brand.css';
-import './styles/loading-progress.css';
+import './styles/marble-glass.css';
+import './styles/status-badge.css';
+import './styles/surface-depth.css';
+import './styles/surface-designer.css';
 import { App } from './app/App';
 import { TouchRadialTrigger } from './ui/TouchRadialTrigger';
 

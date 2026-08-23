@@ -107,6 +107,24 @@ objects:
   - id: plane
     label: Plane
     glyph: '▱'
+  - id: cylinder
+    label: Cylinder
+    glyph: '◫'
+  - id: cone
+    label: Cone
+    glyph: '▲'
+  - id: capsule
+    label: Capsule
+    glyph: '⬭'
+  - id: octahedron
+    label: Octahedron
+    glyph: '◆'
+  - id: dodecahedron
+    label: Dodecahedron
+    glyph: '⬟'
+  - id: torus-knot
+    label: Torus knot
+    glyph: '∞'
 
 layerKinds:
   - id: base

@@ -75,4 +75,25 @@ describe('ProceduralMaterial runtime', () => {
       runtime.dispose();
     }
   });
+
+  it('rejects mutations and attachment after disposal', async () => {
+    const recipe = createMaterialRecipe(createDefaultProject(), 7);
+    const runtime = new ProceduralMaterial(recipe);
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
+    const originalMaterial = mesh.material;
+    runtime.dispose();
+
+    try {
+      expect(() => runtime.setRecipe(recipe)).toThrow(/disposed/iu);
+      expect(() => runtime.setSeed(8)).toThrow(/disposed/iu);
+      expect(() => runtime.setCoordinateSpace('object')).toThrow(/disposed/iu);
+      expect(() => runtime.setWireframe(true)).toThrow(/disposed/iu);
+      expect(() => runtime.applyTo(mesh)).toThrow(/disposed/iu);
+      await expect(runtime.prepare()).rejects.toThrow(/disposed/iu);
+      expect(mesh.material).toBe(originalMaterial);
+    } finally {
+      originalMaterial.dispose();
+      mesh.geometry.dispose();
+    }
+  });
 });

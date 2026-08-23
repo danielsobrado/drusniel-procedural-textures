@@ -1,0 +1,177 @@
+.terrain-player-overlay {
+  position: absolute;
+  z-index: 6;
+  inset: 0;
+  pointer-events: none;
+}
+
+.terrain-canvas-stack canvas[data-role="terrain-mesh"][hidden] + .terrain-player-overlay {
+  display: none;
+}
+
+.terrain-canvas-stack canvas.is-player-placement {
+  cursor: crosshair;
+}
+
+.terrain-canvas-stack canvas.is-player-active {
+  cursor: none;
+}
+
+.terrain-player-overlay[data-state="idle"] .terrain-player-toggle {
+  display: none;
+}
+
+.terrain-player-toggle {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  border: 1px solid rgba(225, 233, 255, 0.14);
+  border-radius: 9px;
+  background:
+    linear-gradient(148deg, rgba(255, 255, 255, 0.09), rgba(146, 162, 238, 0.025) 42%, rgba(4, 7, 11, 0.16)),
+    rgba(17, 22, 30, 0.82);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.11),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.35),
+    0 8px 20px rgba(0, 0, 0, 0.22);
+  color: #cbd3df;
+  font: inherit;
+  font-size: 9px;
+  font-weight: 680;
+  pointer-events: auto;
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(16px) saturate(120%);
+  backdrop-filter: blur(16px) saturate(120%);
+}
+
+.terrain-player-toggle:hover,
+.terrain-player-toggle.is-active {
+  border-color: rgba(184, 198, 255, 0.42);
+  background:
+    linear-gradient(148deg, rgba(255, 255, 255, 0.14), rgba(129, 148, 255, 0.08) 45%, rgba(4, 7, 11, 0.18)),
+    rgba(25, 31, 43, 0.9);
+  color: #f0f3ff;
+}
+
+.terrain-player-toggle.is-active {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 0 20px rgba(118, 139, 255, 0.08),
+    0 0 0 1px rgba(126, 145, 255, 0.05),
+    0 8px 22px rgba(0, 0, 0, 0.24);
+}
+
+.terrain-player-toggle-icon {
+  color: #b9c4ff;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.terrain-player-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.terrain-player-hud[hidden] {
+  display: none;
+}
+
+.terrain-player-reticle {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(238, 242, 255, 0.82);
+  border-radius: 50%;
+  box-shadow:
+    0 0 0 2px rgba(0, 0, 0, 0.32),
+    0 0 12px rgba(174, 189, 255, 0.26);
+  transform: translate(-50%, -50%);
+}
+
+.terrain-player-reticle::before,
+.terrain-player-reticle::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: rgba(238, 242, 255, 0.78);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.6);
+  transform: translate(-50%, -50%);
+}
+
+.terrain-player-reticle::before {
+  width: 4px;
+  height: 1px;
+}
+
+.terrain-player-reticle::after {
+  width: 1px;
+  height: 4px;
+}
+
+.terrain-player-instructions {
+  position: absolute;
+  left: 50%;
+  bottom: 42px;
+  display: flex;
+  min-width: min(390px, calc(100% - 32px));
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 1px solid rgba(226, 233, 255, 0.13);
+  border-radius: 10px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.055), transparent 48%),
+    rgba(8, 12, 18, 0.72);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 10px 26px rgba(0, 0, 0, 0.22);
+  transform: translateX(-50%);
+  -webkit-backdrop-filter: blur(18px) saturate(116%);
+  backdrop-filter: blur(18px) saturate(116%);
+}
+
+.terrain-player-instructions strong {
+  color: #edf1fa;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.terrain-player-instructions small {
+  color: #8f9bad;
+  font-size: 7px;
+}
+
+.terrain-player-overlay[data-state="placing"] .terrain-player-reticle {
+  display: none;
+}
+
+.terrain-player-overlay[data-state="placing"] ~ .terrain-status,
+.terrain-player-overlay[data-state="playing"] ~ .terrain-status,
+.terrain-player-overlay[data-state="paused"] ~ .terrain-status {
+  opacity: 0;
+}
+
+@media (max-width: 760px) {
+  .terrain-player-toggle {
+    top: 8px;
+    left: 8px;
+    min-height: 29px;
+    padding: 0 9px;
+    font-size: 8px;
+  }
+
+  .terrain-player-instructions {
+    bottom: 30px;
+    min-width: calc(100% - 24px);
+  }
+}
