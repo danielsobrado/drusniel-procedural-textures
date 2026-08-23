@@ -4,7 +4,7 @@ A realtime Three.js material playground for building layered procedural surfaces
 
 **Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/procedural-texture-lab/)
 
-## V0.3 — Surface Designer
+## V0.3 — Surface Designer (WIP)
 
 V0.3 adds a Substance-style authored surface graph on top of the existing portable PTL material runtime. Graph-backed materials keep their node structure, reusable subgraphs, routing, and exposed controls while still compiling to the same WebGPU-first preview, portable GLSL bake/export, and `.ptl.json` runtime representation.
 
@@ -14,7 +14,7 @@ Native pattern layers support brick, tile, plank, grass blades, pebble scatter, 
 
 Flagship v0.3 materials include old brick wall, dense grass, river gravel, clay roof tiles, weathered wood planks, ceramic tiles, woven fabric, weathered concrete, aged plaster, road asphalt, and cobblestone.
 
-Static GLB displacement can optionally use bounded pre-displacement tessellation for finer geometric relief. It is disabled by default and configured in `config/surface-designer.yaml` with edge-length, iteration, and vertex-budget limits. See [Surface Designer v0.3](docs/surface-designer-v0.3.md) for architecture and runtime details.
+Static GLB displacement can optionally use bounded pre-displacement tessellation for finer geometric relief. It is disabled by default and configured in `config/surface-designer.yaml` with edge-length, iteration, and vertex-budget limits. 
 
 ## V0.2 — Structure, Simulation & Evolution
 
@@ -60,16 +60,16 @@ npm run preview
 
 ## Controls
 
-| Action | Control |
-| --- | --- |
-| Orbit | Left drag |
-| Pan | Right drag |
-| Zoom | Wheel or pinch |
-| Frame selection | `F` |
-| Wireframe | `W` |
-| Radial menu | Right click, `Space`, or touch and hold |
-| Undo | `Ctrl/Cmd + Z` |
-| Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
+| Action          | Control                                      |
+| --------------- | -------------------------------------------- |
+| Orbit           | Left drag                                    |
+| Pan             | Right drag                                   |
+| Zoom            | Wheel or pinch                               |
+| Frame selection | `F`                                        |
+| Wireframe       | `W`                                        |
+| Radial menu     | Right click,`Space`, or touch and hold     |
+| Undo            | `Ctrl/Cmd + Z`                             |
+| Redo            | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
 ## Surface Designer
 
