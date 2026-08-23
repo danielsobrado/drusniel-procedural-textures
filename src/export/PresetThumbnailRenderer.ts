@@ -14,14 +14,15 @@ function flipRows(source: Uint8Array, size: number): Uint8ClampedArray<ArrayBuff
   return result;
 }
 
+function physicalVariantKey(settings: Readonly<PhysicalSettings>): string {
+  return `${settings.sheen > 0 ? 'sheen' : 'no-sheen'}:${settings.transmission > 0 ? 'transmission' : 'opaque'}`;
+}
+
 export class PresetThumbnailRenderer {
-  private readonly compiler = new MaterialCompiler();
+  private readonly compilers = new Map<string, MaterialCompiler>();
   private readonly scene = new THREE.Scene();
   private readonly camera = new THREE.PerspectiveCamera(32, 1, 0.05, 20);
-  private readonly mesh = new THREE.Mesh(
-    new THREE.SphereGeometry(1, 72, 54),
-    this.compiler.material
-  );
+  private readonly mesh: THREE.Mesh;
   private readonly target = new THREE.WebGLRenderTarget(
     EXPORT_CONFIG.thumbnailSize,
     EXPORT_CONFIG.thumbnailSize,
@@ -32,6 +33,11 @@ export class PresetThumbnailRenderer {
     private readonly renderer: THREE.WebGLRenderer,
     private readonly defaultPhysical: Readonly<PhysicalSettings>
   ) {
+    const compiler = this.compilerFor(defaultPhysical);
+    this.mesh = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 72, 54),
+      compiler.material
+    );
     this.target.texture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color('#171a21');
     this.camera.position.set(0, 0.05, 3.25);
@@ -64,7 +70,19 @@ export class PresetThumbnailRenderer {
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     this.target.dispose();
-    this.compiler.dispose();
+    for (const compiler of this.compilers.values()) compiler.dispose();
+    this.compilers.clear();
+  }
+
+  private compilerFor(settings: Readonly<PhysicalSettings>): MaterialCompiler {
+    const key = physicalVariantKey(settings);
+    const cached = this.compilers.get(key);
+    if (cached !== undefined) return cached;
+
+    const compiler = new MaterialCompiler();
+    applyPhysicalSettings(compiler.material, settings);
+    this.compilers.set(key, compiler);
+    return compiler;
   }
 
   private prepare(preset: MaterialPreset): void {
@@ -72,8 +90,10 @@ export class PresetThumbnailRenderer {
       ...this.defaultPhysical,
       ...(preset.physical ?? {})
     };
-    this.compiler.sync(preset.layers, preset.groups ?? [], false);
-    applyPhysicalSettings(this.compiler.material, physical);
+    const compiler = this.compilerFor(physical);
+    compiler.sync(preset.layers, preset.groups ?? [], false);
+    applyPhysicalSettings(compiler.material, physical);
+    this.mesh.material = compiler.material;
   }
 
   private capture(): string {

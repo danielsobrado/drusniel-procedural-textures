@@ -3,6 +3,7 @@ import './styles/refinements.css';
 import './styles/library-compact.css';
 import './styles/tile-preview.css';
 import './styles/brand.css';
+import './styles/loading-progress.css';
 import { App } from './app/App';
 import { TouchRadialTrigger } from './ui/TouchRadialTrigger';
 
