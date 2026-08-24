@@ -27,6 +27,7 @@ import {
   disposeObjectResources
 } from './ObjectResources';
 import { PerformanceProfiler } from './PerformanceProfiler';
+import { SmoothOrbitZoom } from './SmoothOrbitZoom';
 import {
   createOptionalWebGlRenderer,
   WEBGL2_UNAVAILABLE_MESSAGE
@@ -92,6 +93,7 @@ export class LabRenderer {
   private bakeRendererResolved = false;
   private readonly rendererReady: Promise<void>;
   private readonly controls: OrbitControls;
+  private readonly smoothZoom: SmoothOrbitZoom;
   private readonly resizeObserver: ResizeObserver;
   private readonly compiler: MaterialCompiler;
   private readonly environments: EnvironmentLibrary;
@@ -158,6 +160,7 @@ export class LabRenderer {
     this.controls.enablePan = true;
     this.controls.minDistance = RENDERER_CONFIG.minDistance;
     this.controls.maxDistance = RENDERER_CONFIG.maxDistance;
+    this.smoothZoom = new SmoothOrbitZoom(this.camera, this.controls, this.canvas);
 
     this.addStudioLighting();
     this.setQualityTier(PERFORMANCE_CONFIG.defaultTier);
@@ -222,9 +225,16 @@ export class LabRenderer {
   }
 
   public setPrimitive(preset: ObjectPreset): void {
+    const canReuseCompiledMaterial = this.currentRoot instanceof THREE.Mesh &&
+      this.currentRoot.userData.labProceduralPreview === true &&
+      this.compiler.isProceduralMaterial(this.currentRoot.material);
     const mesh = createProceduralMesh(preset, this.compiler.renderMaterial);
     this.applyProceduralMeshSettings(mesh);
-    this.replaceRoot(mesh, new Map(), new Map());
+    this.replaceRoot(mesh, new Map(), new Map(), !canReuseCompiledMaterial);
+  }
+
+  public async waitForMaterialReady(): Promise<void> {
+    await this.ensureMaterialReady();
   }
 
   public setImported(root: THREE.Object3D, assignments: Readonly<Record<string, boolean>> = {}): void {
@@ -322,6 +332,7 @@ export class LabRenderer {
     const target = selected ?? this.currentRoot;
     if (target === null) return;
 
+    this.smoothZoom.cancel();
     const bounds = new THREE.Box3().setFromObject(target);
     if (bounds.isEmpty()) return;
     const sphere = bounds.getBoundingSphere(new THREE.Sphere());
@@ -344,6 +355,7 @@ export class LabRenderer {
   }
 
   public resetView(): void {
+    this.smoothZoom.cancel();
     this.camera.position.fromArray(RENDERER_CONFIG.cameraPosition);
     this.controls.target.set(0, 0, 0);
     this.camera.near = RENDERER_CONFIG.cameraNear;
@@ -388,6 +400,7 @@ export class LabRenderer {
     cancelAnimationFrame(this.animationFrame);
     this.interactionAbort.abort();
     this.resizeObserver.disconnect();
+    this.smoothZoom.dispose();
     this.controls.dispose();
     this.disposeCurrentRoot();
     this.scene.remove(this.selectionHelper);
@@ -545,7 +558,8 @@ export class LabRenderer {
   private replaceRoot(
     root: THREE.Object3D,
     originals: Map<string, OriginalMeshState>,
-    meshes: Map<string, THREE.Mesh>
+    meshes: Map<string, THREE.Mesh>,
+    recompileMaterial = true
   ): void {
     this.disposeCurrentRoot();
     this.currentRoot = root;
@@ -556,7 +570,7 @@ export class LabRenderer {
     this.selectedMeshId = null;
     this.selectionHelper.visible = false;
     this.scene.add(root);
-    this.sceneRevision += 1;
+    if (recompileMaterial) this.sceneRevision += 1;
     this.frameSelection();
   }
 
@@ -801,13 +815,17 @@ export class LabRenderer {
   }
 
   private start(): void {
-    const render = (): void => {
+    let previousFrameTime = performance.now();
+    const render = (frameTime: number): void => {
       if (this.disposed) return;
       this.animationFrame = requestAnimationFrame(render);
 
+      const deltaSeconds = Math.min(Math.max((frameTime - previousFrameTime) / 1000, 0), 0.05);
+      previousFrameTime = frameTime;
+      const zoomMoved = this.smoothZoom.update(deltaSeconds);
       // OrbitControls reports whether damping is still settling; while it is, every
       // frame is genuinely different and must be drawn.
-      const cameraMoved = this.controls.update();
+      const cameraMoved = this.controls.update() || zoomMoved;
 
       this.startMaterialCompilation();
       if (this.materialCompilePromise !== null) return;
@@ -836,6 +854,6 @@ export class LabRenderer {
       );
       if (stats !== null) this.performanceCallback?.(stats);
     };
-    render();
+    render(previousFrameTime);
   }
 }

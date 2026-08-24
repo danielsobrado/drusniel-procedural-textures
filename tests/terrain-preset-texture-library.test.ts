@@ -23,7 +23,7 @@ function texture(value: number): TerrainTextureSource {
 }
 
 describe('terrain preset texture library', () => {
-  it('does not let a cleared request overwrite or remove a newer pending bake', async () => {
+  it('serializes bakes without letting a cleared request replace a newer request', async () => {
     const presetId = MATERIAL_PRESETS[0]?.id;
     if (presetId === undefined) throw new Error('Terrain preset test requires at least one material preset.');
 
@@ -44,14 +44,18 @@ describe('terrain preset texture library', () => {
     };
 
     const staleLoad = library.load(presetId);
+    await Promise.resolve();
     expect(bakeCalls).toBe(1);
 
     library.clear();
     const activeLoad = library.load(presetId);
-    expect(bakeCalls).toBe(2);
+    await Promise.resolve();
+    expect(bakeCalls).toBe(1);
 
     stale.resolve(texture(32));
     await staleLoad;
+    await Promise.resolve();
+    expect(bakeCalls).toBe(2);
 
     const joinedLoad = library.load(presetId);
     expect(bakeCalls).toBe(2);

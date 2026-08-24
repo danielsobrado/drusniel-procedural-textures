@@ -18,7 +18,9 @@ import type {
 } from '../core/graph/SurfaceGraph';
 import {
   DEFAULT_PATTERN_SETTINGS,
+  GRASS_PATTERN_LIMITS,
   PATTERN_LIMITS,
+  TURF_PATTERN_LIMITS,
   type PatternSettings
 } from '../core/material/PatternSettings';
 import { SURFACE_DESIGNER_CONFIG } from '../config/surfaceDesignerConfig';
@@ -107,6 +109,39 @@ const PATTERN_FIELDS: readonly PatternField[] = [
   { key: 'offset', label: 'Row offset', ...PATTERN_LIMITS.offset, step: 0.01 },
   { key: 'density', label: 'Density', ...PATTERN_LIMITS.density, step: 0.05 },
   { key: 'edgeWear', label: 'Edge wear', ...PATTERN_LIMITS.edgeWear, step: 0.01 }
+];
+
+const VEGETATION_BASE_PATTERN_FIELDS = PATTERN_FIELDS.filter((field) =>
+  field.key === 'jitter' || field.key === 'rotation' || field.key === 'density' || field.key === 'edgeWear'
+);
+
+const GRASS_PATTERN_FIELDS: readonly PatternField[] = [
+  { key: 'bladeLength', label: 'Blade length', ...GRASS_PATTERN_LIMITS.bladeLength, step: 0.01 },
+  { key: 'bladeWidth', label: 'Blade width', ...GRASS_PATTERN_LIMITS.bladeWidth, step: 0.002 },
+  { key: 'bladeTaper', label: 'Taper', ...GRASS_PATTERN_LIMITS.bladeTaper, step: 0.05 },
+  { key: 'bladeBend', label: 'Bend', ...GRASS_PATTERN_LIMITS.bladeBend, step: 0.005 },
+  { key: 'bladeCurvature', label: 'Curvature', ...GRASS_PATTERN_LIMITS.bladeCurvature, step: 0.05 },
+  { key: 'clumpScale', label: 'Clump scale', ...GRASS_PATTERN_LIMITS.clumpScale, step: 0.05 },
+  { key: 'clumpStrength', label: 'Clumping', ...GRASS_PATTERN_LIMITS.clumpStrength, step: 0.01 },
+  { key: 'directionality', label: 'Direction', ...GRASS_PATTERN_LIMITS.directionality, step: 0.01 },
+  { key: 'dryness', label: 'Dryness', ...GRASS_PATTERN_LIMITS.dryness, step: 0.01 },
+  { key: 'tipFade', label: 'Tip fade', ...GRASS_PATTERN_LIMITS.tipFade, step: 0.01 },
+  { key: 'rootDarkening', label: 'Root darkening', ...GRASS_PATTERN_LIMITS.rootDarkening, step: 0.01 },
+  { key: 'heightJitter', label: 'Length variation', ...GRASS_PATTERN_LIMITS.heightJitter, step: 0.01 },
+  { key: 'widthJitter', label: 'Width variation', ...GRASS_PATTERN_LIMITS.widthJitter, step: 0.01 },
+  { key: 'leanJitter', label: 'Lean variation', ...GRASS_PATTERN_LIMITS.leanJitter, step: 0.01 }
+];
+
+const TURF_PATTERN_FIELDS: readonly PatternField[] = [
+  { key: 'fiberLength', label: 'Fiber length', ...TURF_PATTERN_LIMITS.fiberLength, step: 0.01 },
+  { key: 'fiberWidth', label: 'Fiber width', ...TURF_PATTERN_LIMITS.fiberWidth, step: 0.002 },
+  { key: 'fiberBreakup', label: 'Fiber breakup', ...TURF_PATTERN_LIMITS.fiberBreakup, step: 0.01 },
+  { key: 'fiberSoftness', label: 'Fiber softness', ...TURF_PATTERN_LIMITS.fiberSoftness, step: 0.01 },
+  { key: 'clumpScale', label: 'Tuft scale', ...GRASS_PATTERN_LIMITS.clumpScale, step: 0.05 },
+  { key: 'clumpStrength', label: 'Tuft strength', ...GRASS_PATTERN_LIMITS.clumpStrength, step: 0.01 },
+  { key: 'directionality', label: 'Direction', ...GRASS_PATTERN_LIMITS.directionality, step: 0.01 },
+  { key: 'dryness', label: 'Dryness', ...GRASS_PATTERN_LIMITS.dryness, step: 0.01 },
+  { key: 'rootDarkening', label: 'Root darkening', ...GRASS_PATTERN_LIMITS.rootDarkening, step: 0.01 }
 ];
 
 const PHYSICAL_FIELDS: readonly PhysicalField[] = [
@@ -207,7 +242,7 @@ export class Inspector {
     this.currentState = state;
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
     const nextStructureKey = [
-      `${layer?.id ?? ''}:${layer?.groupId ?? ''}:${layer?.kind ?? ''}`,
+      `${layer?.id ?? ''}:${layer?.groupId ?? ''}:${layer?.kind ?? ''}:${layer?.pattern?.kind ?? ''}`,
       state.layers.map((item) => `${item.id}:${item.structureSourceLayerId ?? ''}:${item.maskSourceLayerId ?? ''}`).join('|'),
       state.groups.map((item) => `${item.id}:${item.parentId ?? ''}`).join('|'),
       state.importedMeshes.map((item) => item.id).join('|'),
@@ -335,6 +370,13 @@ export class Inspector {
 
   private patternSection(layer: Readonly<MaterialLayer>): string {
     const pattern = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
+    const vegetation = pattern.kind === 'grass' || pattern.kind === 'turf';
+    const baseFields = vegetation ? VEGETATION_BASE_PATTERN_FIELDS : PATTERN_FIELDS;
+    const structureFields = pattern.kind === 'grass'
+      ? { title: 'Blade structure', fields: GRASS_PATTERN_FIELDS }
+      : pattern.kind === 'turf'
+        ? { title: 'Turf structure', fields: TURF_PATTERN_FIELDS }
+        : null;
     return `
       <details class="inspector-section advanced-section pattern-editor" open>
         <summary>Pattern sampler</summary>
@@ -344,9 +386,20 @@ export class Inspector {
             ${SURFACE_DESIGNER_CONFIG.patterns.map((item) => option(item.id, item.label, item.id === pattern.kind)).join('')}
           </select>
         </label>
-        ${PATTERN_FIELDS.map((field) => this.patternRow(field, pattern[field.key])).join('')}
+        ${baseFields.map((field) => this.patternRow(field, this.patternValue(pattern, field.key))).join('')}
+        ${structureFields === null ? '' : `
+          <div class="section-heading pattern-subheading"><span>${structureFields.title}</span></div>
+          ${structureFields.fields.map((field) => this.patternRow(field, this.patternValue(pattern, field.key))).join('')}
+        `}
       </details>
     `;
+  }
+
+  private patternValue(pattern: Readonly<PatternSettings>, key: PatternNumericKey): number {
+    const value = pattern[key];
+    if (typeof value === 'number') return value;
+    const fallback = DEFAULT_PATTERN_SETTINGS[key];
+    return typeof fallback === 'number' ? fallback : 0;
   }
 
   private synthesisSection(state: Readonly<ProjectState>): string {
@@ -552,7 +605,9 @@ export class Inspector {
       for (const field of this.container.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-pattern-field]')) {
         if (field === document.activeElement) continue;
         const key = field.dataset.patternField as keyof PatternSettings | undefined;
-        if (key !== undefined) field.value = String(pattern[key]);
+        if (key === undefined) continue;
+        const value = pattern[key] ?? DEFAULT_PATTERN_SETTINGS[key];
+        field.value = String(value);
       }
 
       const group = layer.groupId === null ? null : state.groups.find((item) => item.id === layer.groupId) ?? null;
@@ -859,8 +914,11 @@ export class Inspector {
     const patternField = target.dataset.patternField as PatternNumericKey | undefined;
     if (patternField !== undefined && this.currentLayerId !== null) {
       const layer = state.layers.find((item) => item.id === this.currentLayerId);
-      const value = (layer?.pattern ?? DEFAULT_PATTERN_SETTINGS)[patternField];
-      this.restoreNumberPeers(`[data-pattern-field="${patternField}"]`, value);
+      const pattern = layer?.pattern ?? DEFAULT_PATTERN_SETTINGS;
+      this.restoreNumberPeers(
+        `[data-pattern-field="${patternField}"]`,
+        this.patternValue(pattern, patternField)
+      );
       return;
     }
     const physicalField = target.dataset.physicalField as NumericPhysicalKey | undefined;

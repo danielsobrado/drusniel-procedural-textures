@@ -1,6 +1,18 @@
-import { FRAGMENT_GLSL, SHARED_GLSL } from '../materials/PortableProceduralShader';
+import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+import {
+  FRAGMENT_GLSL as COMPACT_FRAGMENT_GLSL,
+  SHARED_GLSL as COMPACT_SHARED_GLSL
+} from '../materials/ProceduralShader';
+import {
+  FRAGMENT_GLSL as PORTABLE_FRAGMENT_GLSL,
+  SHARED_GLSL as PORTABLE_SHARED_GLSL
+} from '../materials/PortableProceduralShader';
+
+export type BakeShaderProfile = 'compact' | 'portable';
 
 export const BAKE_VERTEX_GLSL = /* glsl */ `
+uniform int uLabCoordinateSpace;
+
 varying vec3 vBakePosition;
 varying vec3 vBakeWorldPosition;
 varying vec3 vBakeWorldNormal;
@@ -13,16 +25,17 @@ void main() {
     vec3(labViewRotation[0].y, labViewRotation[1].y, labViewRotation[2].y),
     vec3(labViewRotation[0].z, labViewRotation[1].z, labViewRotation[2].z)
   );
-  vBakePosition = worldPosition.xyz;
+  vBakePosition = uLabCoordinateSpace == 0 ? position : worldPosition.xyz;
   vBakeWorldPosition = worldPosition.xyz;
   vBakeWorldNormal = normalize(labInverseViewRotation * (normalMatrix * normal));
   gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
 
-export const BAKE_FRAGMENT_GLSL = /* glsl */ `
-${SHARED_GLSL}
-${FRAGMENT_GLSL}
+function buildBakeFragmentGlsl(shared: string, fragment: string): string {
+  return /* glsl */ `
+${shared}
+${fragment}
 
 uniform int uBakeMode;
 uniform float uBakeBaseRoughness;
@@ -114,3 +127,21 @@ void main() {
   gl_FragColor = vec4(outputColor, 1.0);
 }
 `;
+}
+
+function specializeLayerLimit(source: string, layerCount: number): string {
+  const count = Math.max(1, Math.min(PTL_MAX_LAYERS, Math.floor(layerCount)));
+  return source.replace(
+    `#define LAB_MAX_LAYERS ${PTL_MAX_LAYERS}`,
+    `#define LAB_MAX_LAYERS ${count}`
+  );
+}
+
+export function createBakeFragmentGlsl(profile: BakeShaderProfile, layerCount: number): string {
+  const source = profile === 'compact'
+    ? buildBakeFragmentGlsl(COMPACT_SHARED_GLSL, COMPACT_FRAGMENT_GLSL)
+    : buildBakeFragmentGlsl(PORTABLE_SHARED_GLSL, PORTABLE_FRAGMENT_GLSL);
+  return specializeLayerLimit(source, layerCount);
+}
+
+export const BAKE_FRAGMENT_GLSL = createBakeFragmentGlsl('portable', PTL_MAX_LAYERS);

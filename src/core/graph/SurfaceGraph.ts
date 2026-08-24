@@ -126,7 +126,7 @@ export type SurfaceRuntimeChannel =
 export type SurfaceRuntimeBlendMode = 'normal' | 'multiply' | 'add' | 'screen' | 'overlay';
 
 export interface SurfaceRuntimePattern {
-  kind: 'brick' | 'tile' | 'plank' | 'grass' | 'pebble' | 'roof-tile' | 'fabric';
+  kind: 'brick' | 'tile' | 'plank' | 'grass' | 'turf' | 'pebble' | 'roof-tile' | 'fabric';
   aspect?: number;
   gap?: number;
   roundness?: number;
@@ -135,6 +135,24 @@ export interface SurfaceRuntimePattern {
   offset?: number;
   density?: number;
   edgeWear?: number;
+  bladeLength?: number;
+  bladeWidth?: number;
+  bladeTaper?: number;
+  bladeBend?: number;
+  bladeCurvature?: number;
+  clumpScale?: number;
+  clumpStrength?: number;
+  directionality?: number;
+  dryness?: number;
+  tipFade?: number;
+  rootDarkening?: number;
+  heightJitter?: number;
+  widthJitter?: number;
+  leanJitter?: number;
+  fiberLength?: number;
+  fiberWidth?: number;
+  fiberBreakup?: number;
+  fiberSoftness?: number;
 }
 
 export interface SurfaceGraphRuntimeLayer {

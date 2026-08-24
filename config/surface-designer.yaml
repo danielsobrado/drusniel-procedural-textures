@@ -9,6 +9,8 @@ patterns:
     label: Plank
   - id: grass
     label: Grass blades
+  - id: turf
+    label: Turf fibers
   - id: pebble
     label: Pebble scatter
   - id: roof-tile

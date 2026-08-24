@@ -27,6 +27,9 @@ function textureFromCanvas(canvas: HTMLCanvasElement): TerrainTextureSource {
 export class TerrainPresetTextureLibrary {
   private readonly cache = new Map<string, TerrainTextureSource>();
   private readonly pending = new Map<string, Promise<TerrainTextureSource>>();
+  private readonly compiler = new MaterialCompiler();
+  private readonly baker = new TileMaterialBaker(this.compiler);
+  private bakeQueue: Promise<void> = Promise.resolve();
   private generation = 0;
 
   public async load(presetId: string): Promise<TerrainTextureSource> {
@@ -37,7 +40,7 @@ export class TerrainPresetTextureLibrary {
     if (pending !== undefined) return pending;
 
     const generation = this.generation;
-    const request = this.bake(findPreset(presetId));
+    const request = this.enqueueBake(findPreset(presetId));
     this.pending.set(presetId, request);
     try {
       const texture = await request;
@@ -56,29 +59,32 @@ export class TerrainPresetTextureLibrary {
     this.pending.clear();
   }
 
+  private enqueueBake(preset: Readonly<MaterialPreset>): Promise<TerrainTextureSource> {
+    const request = this.bakeQueue.then(() => this.bake(preset));
+    this.bakeQueue = request.then(
+      () => undefined,
+      () => undefined
+    );
+    return request;
+  }
+
   private async bake(preset: Readonly<MaterialPreset>): Promise<TerrainTextureSource> {
-    const compiler = new MaterialCompiler();
     const physical = { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) };
     const synthesis = { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) };
-    compiler.sync(preset.layers, preset.groups ?? [], false, synthesis);
-    compiler.applyPhysical(physical);
+    this.compiler.sync(preset.layers, preset.groups ?? [], false, synthesis);
+    this.compiler.applyPhysical(physical);
 
-    try {
-      await compiler.ensureSimulationReady();
-      const baker = new TileMaterialBaker(compiler);
-      const textures = await baker.bake(
-        physical,
-        TERRAIN_CONFIG.materials.presetBakeResolution,
-        TILE_CONFIG.worldSize
-      );
-      const seamless = await makeTextureSetSeamless(textures, {
-        blendFraction: TILE_CONFIG.blendFraction,
-        worldSize: TILE_CONFIG.worldSize,
-        displacementExtent: compiler.displacementExtent
-      });
-      return textureFromCanvas(seamless.albedo.canvas);
-    } finally {
-      compiler.dispose();
-    }
+    await this.compiler.ensureSimulationReady();
+    const textures = await this.baker.bake(
+      physical,
+      TERRAIN_CONFIG.materials.presetBakeResolution,
+      TILE_CONFIG.worldSize
+    );
+    const seamless = await makeTextureSetSeamless(textures, {
+      blendFraction: TILE_CONFIG.blendFraction,
+      worldSize: TILE_CONFIG.worldSize,
+      displacementExtent: this.compiler.displacementExtent
+    });
+    return textureFromCanvas(seamless.albedo.canvas);
   }
 }

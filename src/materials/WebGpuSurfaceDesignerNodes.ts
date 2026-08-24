@@ -1,9 +1,15 @@
 import type { Node } from 'three/webgpu';
 import { clamp, float, max, min, mix, smoothstep, step, vec3 } from 'three/tsl';
+import { grassPatternConfig } from '../config/grassPatternConfig';
+import {
+  isStructuredPatternKind,
+  structuredPatternConfig
+} from '../config/structuredPatternConfig';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
 import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
 import { buildWebGpuPatternField } from './WebGpuPatternNodes';
+import { buildWebGpuStructuredPatternField } from './WebGpuStructuredPatternNodes';
 import {
   buildWebGpuProceduralLayerRawField,
   buildWebGpuSurfaceNodes as buildLegacySurfaceNodes,
@@ -19,6 +25,16 @@ function withoutPatternLayers(layers: readonly MaterialLayer[]): MaterialLayer[]
     ? { ...layer, kind: 'base', enabled: false, pattern: null }
     : layer
   );
+}
+
+function patternDisplacementGain(layer: Readonly<MaterialLayer>): number {
+  const kind = layer.pattern?.kind;
+  if (kind === 'grass') return grassPatternConfig.rendering.geometryDisplacementGain;
+  if (kind === 'turf') return grassPatternConfig.rendering.turfGeometryDisplacementGain;
+  if (kind !== undefined && isStructuredPatternKind(kind)) {
+    return structuredPatternConfig.displacementGain[kind];
+  }
+  return 1;
 }
 
 function blendColor(
@@ -76,7 +92,11 @@ function designerFieldForLayer(
   const seed = uniforms.seed[index]!.add(17);
   const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
   const domain = position.mul(uniforms.scale[index]!).mul(max(uniforms.meso, 0.1)).add(seedOffset);
-  return buildWebGpuPatternField(domain, settings, uniforms.patternParams(index), seed);
+  const params = uniforms.patternParams(index);
+  if (isStructuredPatternKind(settings.kind)) {
+    return buildWebGpuStructuredPatternField(domain, settings, params, seed);
+  }
+  return buildWebGpuPatternField(domain, settings, params, seed);
 }
 
 function patternMaskForLayer(
@@ -154,7 +174,9 @@ export function buildWebGpuSurfaceNodes(
     const layerColor = mix(uniforms.colorA[index]!, uniforms.colorB[index]!, shaped);
 
     if (layer.channel === 'surface' || layer.channel === 'height') {
-      displacement = displacement.add(shaped.mul(uniforms.displacement[index]!).mul(opacity));
+      displacement = displacement.add(
+        shaped.mul(uniforms.displacement[index]!).mul(opacity).mul(patternDisplacementGain(layer))
+      );
     }
     if (layer.channel === 'surface' || layer.channel === 'color') {
       color = blendColor(color, layerColor, layer.blendMode, opacity);
@@ -184,8 +206,6 @@ export function webGpuTopologyFingerprint(
   coordinateSpace: MaterialCoordinateSpace,
   readyLayers: readonly boolean[]
 ): string {
-  // Only the pattern kind is structural now; the numeric parameters are uniforms, so
-  // including them here would rebuild the node tree for a value the shader reads at runtime.
   return `${legacyTopologyFingerprint(layers, coordinateSpace, readyLayers)}:${JSON.stringify(
     layers.slice(0, PTL_MAX_LAYERS).map((layer) => layer.pattern?.kind ?? null)
   )}`;

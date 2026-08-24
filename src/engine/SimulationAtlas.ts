@@ -14,11 +14,18 @@ export interface MaterialSimulationAtlas {
   cellSize: number;
 }
 
+const ATLAS_PACK_YIELD_MIN_SIZE = 512;
+const ATLAS_PACK_YIELD_ROWS = 16;
+
 function simulationKind(layer: Readonly<MaterialLayer>): 'reaction-diffusion' | 'thermal-erosion' | null {
   if (!layer.enabled) return null;
   if (layer.kind === 'reaction-diffusion') return 'reaction-diffusion';
   if (layer.kind === 'erosion') return 'thermal-erosion';
   return null;
+}
+
+function waitForTask(): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
 }
 
 export function materialSimulationFingerprint(
@@ -31,7 +38,15 @@ export function materialSimulationFingerprint(
     .filter((input): input is { index: number; kind: 'reaction-diffusion' | 'thermal-erosion'; seed: number } =>
       input.kind !== null
     );
-  return JSON.stringify({ inputs, algorithms });
+  const usesReactionDiffusion = inputs.some((input) => input.kind === 'reaction-diffusion');
+  const usesThermalErosion = inputs.some((input) => input.kind === 'thermal-erosion');
+  return JSON.stringify({
+    inputs,
+    version: algorithms.version,
+    simulationSize: algorithms.simulationSize,
+    reactionDiffusion: usesReactionDiffusion ? algorithms.reactionDiffusion : null,
+    thermalErosion: usesThermalErosion ? algorithms.thermalErosion : null
+  });
 }
 
 export async function buildMaterialSimulationAtlas(
@@ -76,6 +91,11 @@ export async function buildMaterialSimulationAtlas(
         const value = field.values[sourceOffset + x] ?? 0;
         bytes[targetOffset + x] = Math.round(THREE.MathUtils.clamp(value, 0, 1) * 255);
       }
+      if (
+        cellSize >= ATLAS_PACK_YIELD_MIN_SIZE &&
+        y > 0 &&
+        y % ATLAS_PACK_YIELD_ROWS === 0
+      ) await waitForTask();
     }
     readyLayers[item.index] = true;
   }

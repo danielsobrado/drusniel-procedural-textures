@@ -1,33 +1,34 @@
 import type { Node } from 'three/webgpu';
-import { abs, clamp, float, floor, fract, max, mix, smoothstep, vec2 } from 'three/tsl';
-import type { PatternSettings } from '../core/material/PatternSettings';
+import { abs, clamp, float, floor, fract, max, mix, pow, smoothstep, step, vec2 } from 'three/tsl';
+import { grassPatternConfig } from '../config/grassPatternConfig';
+import {
+  DEFAULT_PATTERN_SETTINGS,
+  type PatternSettings
+} from '../core/material/PatternSettings';
 
-/**
- * Pattern parameters as uniform nodes.
- *
- * These used to be baked into the graph as literals, which put every one of them in the
- * shader's topology fingerprint: nudging `gap` or `jitter` rebuilt the whole TSL tree and
- * forced a shader recompile. Only `kind` is structural - it selects genuinely different
- * geometry - so it stays a literal and everything else became a uniform.
- *
- * These are *derived* values, not the raw settings: everything the old code folded on
- * the CPU stays folded on the CPU, so the shader does a handful fewer multiplies per
- * pixel and per pattern axis.
- *
- * Be aware this does NOT reproduce the previous image bit-for-bit, and it cannot. A GPU
- * compiler optimises `x * 3.1` (a literal) differently from `x * u_density`, and
- * `hash21` runs its input through `sin(x * 43758.5453)`, which turns a 1-ULP difference
- * into a different cell hash. The measured effect on the live preview is a mean channel
- * delta below 1/255, concentrated at cell boundaries. Baked and exported textures are
- * unaffected - they come from the separate GLSL path in MaterialCompiler.
- */
 export interface PatternParamNodes {
   rotationRadians: Node<'float'>;
   density: Node<'float'>;
   grassJitterOffset: Node<'float'>;
-  grassJitterRotate: Node<'float'>;
-  grassRotationBias: Node<'float'>;
-  grassWidth: Node<'float'>;
+  grassBladeLength: Node<'float'>;
+  grassBladeWidth: Node<'float'>;
+  grassBladeTaper: Node<'float'>;
+  grassBladeBend: Node<'float'>;
+  grassBladeCurvature: Node<'float'>;
+  grassClumpScale: Node<'float'>;
+  grassClumpStrength: Node<'float'>;
+  grassDirectionality: Node<'float'>;
+  grassDryness: Node<'float'>;
+  grassTipFade: Node<'float'>;
+  grassRootDarkening: Node<'float'>;
+  grassHeightJitter: Node<'float'>;
+  grassWidthJitter: Node<'float'>;
+  grassLeanJitter: Node<'float'>;
+  grassEdgeWear: Node<'float'>;
+  turfFiberLength: Node<'float'>;
+  turfFiberWidth: Node<'float'>;
+  turfFiberBreakup: Node<'float'>;
+  turfFiberSoftness: Node<'float'>;
   pebbleJitterOffset: Node<'float'>;
   pebbleJitterRotate: Node<'float'>;
   pebbleRadiusScale: Node<'float'>;
@@ -45,7 +46,12 @@ export interface PatternParamNodes {
 
 export type PatternParamValues = Record<keyof PatternParamNodes, number>;
 
-/** The CPU-side folding, kept next to the shader code that consumes it. */
+function patternValue(settings: Readonly<PatternSettings>, key: keyof typeof DEFAULT_PATTERN_SETTINGS): number {
+  const value = settings[key];
+  const fallback = DEFAULT_PATTERN_SETTINGS[key];
+  return typeof value === 'number' ? value : typeof fallback === 'number' ? fallback : 0;
+}
+
 export function derivePatternParams(settings: Readonly<PatternSettings>): PatternParamValues {
   const inset = Math.min(settings.gap * 0.5, 0.225);
   const half = 0.5 - inset;
@@ -56,10 +62,26 @@ export function derivePatternParams(settings: Readonly<PatternSettings>): Patter
   return {
     rotationRadians: settings.rotation * Math.PI,
     density: settings.density,
-    grassJitterOffset: settings.jitter * 0.42,
-    grassJitterRotate: settings.jitter * 1.3,
-    grassRotationBias: settings.rotation * 1.2,
-    grassWidth: 0.045 + (0.13 - 0.045) * Math.min(Math.max(settings.aspect, 0), 1),
+    grassJitterOffset: settings.jitter * 0.26,
+    grassBladeLength: patternValue(settings, 'bladeLength'),
+    grassBladeWidth: patternValue(settings, 'bladeWidth'),
+    grassBladeTaper: patternValue(settings, 'bladeTaper'),
+    grassBladeBend: patternValue(settings, 'bladeBend'),
+    grassBladeCurvature: patternValue(settings, 'bladeCurvature'),
+    grassClumpScale: patternValue(settings, 'clumpScale'),
+    grassClumpStrength: patternValue(settings, 'clumpStrength'),
+    grassDirectionality: patternValue(settings, 'directionality'),
+    grassDryness: patternValue(settings, 'dryness'),
+    grassTipFade: patternValue(settings, 'tipFade'),
+    grassRootDarkening: patternValue(settings, 'rootDarkening'),
+    grassHeightJitter: patternValue(settings, 'heightJitter'),
+    grassWidthJitter: patternValue(settings, 'widthJitter'),
+    grassLeanJitter: patternValue(settings, 'leanJitter'),
+    grassEdgeWear: settings.edgeWear,
+    turfFiberLength: patternValue(settings, 'fiberLength'),
+    turfFiberWidth: patternValue(settings, 'fiberWidth'),
+    turfFiberBreakup: patternValue(settings, 'fiberBreakup'),
+    turfFiberSoftness: patternValue(settings, 'fiberSoftness'),
     pebbleJitterOffset: settings.jitter * 0.38,
     pebbleJitterRotate: Math.PI * settings.jitter,
     pebbleRadiusScale: 1 - settings.gap * 0.55,
@@ -82,6 +104,17 @@ function hash21(position: Node<'vec2'>, seed: Node<'float'>): Node<'float'> {
   );
 }
 
+function valueNoise2(position: Node<'vec2'>, seed: Node<'float'>): Node<'float'> {
+  const cell = floor(position);
+  const local = fract(position);
+  const smoothLocal = local.mul(local).mul(vec2(3).sub(local.mul(2)));
+  const a = hash21(cell, seed);
+  const b = hash21(cell.add(vec2(1, 0)), seed);
+  const c = hash21(cell.add(vec2(0, 1)), seed);
+  const d = hash21(cell.add(vec2(1, 1)), seed);
+  return mix(mix(a, b, smoothLocal.x), mix(c, d, smoothLocal.x), smoothLocal.y);
+}
+
 function rotate(position: Node<'vec2'>, angle: Node<'float'>): Node<'vec2'> {
   const cosine = angle.cos();
   const sine = angle.sin();
@@ -101,6 +134,123 @@ function roundedCell(
   return float(1).sub(smoothstep(-0.012, 0.035, q.length().sub(params.cellRadius).add(wear)));
 }
 
+function grassBlade2d(
+  coordinate: Node<'vec2'>,
+  params: PatternParamNodes,
+  seed: Node<'float'>
+): Node<'float'> {
+  const clumpNoise = valueNoise2(coordinate.mul(params.grassClumpScale).mul(0.46), seed.add(31));
+  const clumpMask = mix(1, smoothstep(0.24, 0.78, clumpNoise), params.grassClumpStrength);
+  const q = coordinate.mul(params.density);
+  const cell = floor(q);
+  let local = fract(q).sub(0.5);
+  const randomA = hash21(cell, seed);
+  const randomB = hash21(cell.add(17), seed.add(9));
+  const randomC = hash21(cell.add(37), seed.add(21));
+  const randomD = hash21(cell.add(71), seed.add(43));
+
+  local = local.sub(vec2(randomA, randomB).sub(0.5).mul(params.grassJitterOffset));
+  const directionNoise = valueNoise2(
+    cell.div(max(params.density, 0.1)).mul(max(params.grassClumpScale, 0.1)).mul(0.58),
+    seed.add(67)
+  );
+  const coherentAngle = directionNoise.sub(0.5).mul(Math.PI * 2);
+  const randomAngle = randomA.sub(0.5).mul(Math.PI * 2).mul(params.grassLeanJitter);
+  local = rotate(local, mix(randomAngle, coherentAngle, params.grassDirectionality));
+
+  const lengthScale = mix(
+    float(1).sub(params.grassHeightJitter),
+    float(1).add(params.grassHeightJitter),
+    randomB
+  );
+  const lengthValue = clamp(params.grassBladeLength.mul(lengthScale), 0.2, 0.98);
+  const along = local.y.add(0.5);
+  const t = clamp(along.div(max(lengthValue, 0.001)), 0, 1);
+  const bendSign = mix(-1, 1, step(0.5, randomC));
+  const centerline = bendSign.mul(params.grassBladeBend).mul(pow(t, params.grassBladeCurvature))
+    .add(randomD.sub(0.5).mul(params.grassLeanJitter).mul(0.08).mul(t));
+
+  const widthScale = mix(
+    float(1).sub(params.grassWidthJitter),
+    float(1).add(params.grassWidthJitter),
+    randomC
+  );
+  const taper = max(pow(max(float(1).sub(t), 0), params.grassBladeTaper), 0.035);
+  const widthAtHeight = params.grassBladeWidth.mul(widthScale).mul(taper);
+  const edgeNoise = randomD.sub(0.5).mul(params.grassEdgeWear).mul(params.grassBladeWidth).mul(0.55);
+  const bladeEdge = abs(local.x.sub(centerline)).add(edgeNoise);
+  const feather = max(0.004, params.grassBladeWidth.mul(0.22));
+  const blade = float(1).sub(smoothstep(widthAtHeight, widthAtHeight.add(feather), bladeEdge));
+
+  const rootMask = smoothstep(0, 0.035, along);
+  const tipMask = float(1).sub(smoothstep(max(lengthValue.sub(0.05), 0), lengthValue, along));
+  const presence = step(params.grassDryness.mul(0.72), randomD);
+  const rootTone = mix(float(1).sub(params.grassRootDarkening.mul(0.55)), 1, t);
+  const tipTone = float(1).sub(
+    params.grassTipFade.mul(smoothstep(0.72, 1, t)).mul(0.3)
+  );
+  const tone = rootTone.mul(tipTone).mul(mix(0.82, 1, randomB));
+
+  return clamp(blade.mul(rootMask).mul(tipMask).mul(clumpMask).mul(presence).mul(tone), 0, 1);
+}
+
+function turfFiber2d(
+  coordinate: Node<'vec2'>,
+  params: PatternParamNodes,
+  seed: Node<'float'>
+): Node<'float'> {
+  const density = max(params.density, 0.1).mul(2.2);
+  const tuftNoise = valueNoise2(coordinate.mul(params.grassClumpScale).mul(0.55), seed.add(103));
+  const tuftShape = smoothstep(0.16, 0.84, tuftNoise);
+  const tuftMask = mix(0.76, tuftShape, params.grassClumpStrength.mul(0.72));
+  const q = coordinate.mul(density);
+  const cell = floor(q);
+  let local = fract(q).sub(0.5);
+  const randomA = hash21(cell, seed.add(7));
+  const randomB = hash21(cell.add(19), seed.add(17));
+  const randomC = hash21(cell.add(43), seed.add(29));
+  const randomD = hash21(cell.add(73), seed.add(47));
+
+  local = local.sub(vec2(randomA, randomB).sub(0.5).mul(params.grassJitterOffset).mul(1.3));
+  const directionNoise = valueNoise2(
+    cell.div(max(density, 0.1)).mul(max(params.grassClumpScale, 0.1)).mul(0.72),
+    seed.add(79)
+  );
+  const coherentAngle = directionNoise.sub(0.5).mul(Math.PI * 2);
+  const randomAngle = randomA.sub(0.5).mul(Math.PI * 2);
+  local = rotate(local, mix(randomAngle, coherentAngle, params.grassDirectionality));
+
+  const lengthValue = params.turfFiberLength.mul(mix(0.72, 1.28, randomB));
+  const halfLength = lengthValue.mul(0.5);
+  const widthValue = params.turfFiberWidth.mul(mix(0.72, 1.28, randomC));
+  const feather = mix(0.0025, max(0.006, widthValue.mul(0.72)), params.turfFiberSoftness);
+  const lateral = float(1).sub(smoothstep(widthValue, widthValue.add(feather), abs(local.x)));
+  const axial = float(1).sub(
+    smoothstep(halfLength, halfLength.add(feather.mul(2)), abs(local.y))
+  );
+  const fragmentNoise = valueNoise2(
+    vec2(local.y.mul(13).add(randomD.mul(3)), local.x.mul(4).add(randomA.mul(5))),
+    seed.add(131)
+  );
+  const breakup = clamp(params.turfFiberBreakup.add(params.grassDryness.mul(0.22)), 0, 1);
+  const fragmentMask = mix(1, smoothstep(0.22, 0.76, fragmentNoise), breakup);
+  const fiber = lateral.mul(axial).mul(fragmentMask);
+
+  const carpetNoise = valueNoise2(coordinate.mul(density).mul(0.62), seed.add(151));
+  const carpet = smoothstep(0.28, 0.76, carpetNoise.mul(0.64).add(tuftNoise.mul(0.36)));
+  const fiberPresence = mix(1, step(params.grassDryness.mul(0.55), randomD), 0.32);
+  const fiberMass = max(carpet.mul(0.76), fiber.mul(fiberPresence));
+  const mass = mix(carpet.mul(0.82), fiberMass, 0.42);
+  const rootTone = mix(float(1).sub(params.grassRootDarkening.mul(0.24)), 1, tuftNoise);
+  const wearTone = float(1).sub(params.grassEdgeWear.mul(float(1).sub(fragmentMask)).mul(0.22));
+
+  return clamp(
+    mass.mul(tuftMask).mul(rootTone).mul(wearTone).mul(mix(0.9, 1, randomB)),
+    0,
+    1
+  );
+}
+
 function pattern2d(
   coordinate: Node<'vec2'>,
   settings: Readonly<PatternSettings>,
@@ -109,20 +259,8 @@ function pattern2d(
 ): Node<'float'> {
   let domain = rotate(coordinate, params.rotationRadians);
 
-  if (settings.kind === 'grass') {
-    domain = domain.mul(params.density);
-    const cell = floor(domain);
-    let local = fract(domain).sub(0.5);
-    const randomA = hash21(cell, seed);
-    const randomB = hash21(cell.add(17), seed.add(9));
-    local = local.sub(vec2(randomA, randomB).sub(0.5).mul(params.grassJitterOffset));
-    local = rotate(local, randomA.sub(0.5).mul(params.grassJitterRotate).add(params.grassRotationBias));
-    const width = params.grassWidth;
-    const taper = mix(0.35, 1, clamp(local.y.add(0.5), 0, 1));
-    const blade = float(1).sub(smoothstep(width.mul(taper), width.mul(taper).add(0.025), abs(local.x)));
-    const lengthMask = float(1).sub(smoothstep(0.36, 0.5, abs(local.y)));
-    return clamp(blade.mul(lengthMask).mul(mix(0.78, 1, randomB)), 0, 1);
-  }
+  if (settings.kind === 'grass') return grassBlade2d(domain, params, seed);
+  if (settings.kind === 'turf') return turfFiber2d(domain, params, seed);
 
   if (settings.kind === 'pebble') {
     domain = domain.mul(params.density);
@@ -184,5 +322,11 @@ export function buildWebGpuPatternField(
   const xy = pattern2d(position.xy, settings, params, seed);
   const xz = pattern2d(position.xz, settings, params, seed.add(11));
   const yz = pattern2d(position.yz, settings, params, seed.add(23));
-  return max(xy, max(xz, yz));
+  const peak = max(xy, max(xz, yz));
+  if (settings.kind !== 'grass' && settings.kind !== 'turf') return peak;
+  const average = xy.add(xz).add(yz).div(3);
+  const averageMix = settings.kind === 'grass'
+    ? grassPatternConfig.rendering.triplanarAverageMix
+    : grassPatternConfig.rendering.turfTriplanarAverageMix;
+  return clamp(mix(peak, average, averageMix), 0, 1);
 }

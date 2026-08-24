@@ -12,6 +12,8 @@ const MIN_TEXTURE_SIZE = 128;
 const MAX_TEXTURE_SIZE = 4096;
 
 export class TileMaterialBaker {
+  private renderer: THREE.WebGLRenderer | null = null;
+
   public constructor(private readonly compiler: MaterialCompiler) {}
 
   public async bake(
@@ -26,16 +28,8 @@ export class TileMaterialBaker {
       throw new Error('Tile world size must be greater than zero.');
     }
 
+    const renderer = this.getRenderer();
     const displacementExtent = this.compiler.displacementExtent;
-    const renderer = createOptionalWebGlRenderer({
-      antialias: false,
-      alpha: true,
-      powerPreference: 'high-performance'
-    });
-    if (renderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
-    renderer.setPixelRatio(1);
-    renderer.setSize(1, 1, false);
-
     const resolution = this.effectiveResolution(renderer, requestedResolution);
     const geometry = new THREE.PlaneGeometry(worldSize, worldSize, 1, 1);
     const mesh = new THREE.Mesh(geometry);
@@ -48,9 +42,28 @@ export class TileMaterialBaker {
       return textures;
     } finally {
       geometry.dispose();
-      renderer.dispose();
-      renderer.forceContextLoss();
     }
+  }
+
+  public dispose(): void {
+    this.renderer?.dispose();
+    this.renderer?.forceContextLoss();
+    this.renderer = null;
+  }
+
+  private getRenderer(): THREE.WebGLRenderer {
+    if (this.renderer !== null) return this.renderer;
+
+    const renderer = createOptionalWebGlRenderer({
+      antialias: false,
+      alpha: true,
+      powerPreference: 'high-performance'
+    });
+    if (renderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
+    renderer.setPixelRatio(1);
+    renderer.setSize(1, 1, false);
+    this.renderer = renderer;
+    return renderer;
   }
 
   private effectiveResolution(renderer: THREE.WebGLRenderer, requested: number): number {

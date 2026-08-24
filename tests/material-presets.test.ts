@@ -142,4 +142,31 @@ describe('material preset catalog', () => {
       expect(kinds.has('wet-film'), `${id} wet-film layer`).toBe(true);
     }
   });
+
+  it('keeps weathered flagstone physically layered and editable', () => {
+    const preset = MATERIAL_PRESETS.find((item) => item.id === 'weathered-flagstone');
+    expect(preset).toBeDefined();
+    if (preset === undefined) return;
+
+    expect(preset.layers.length).toBeLessThan(MAX_LAYERS);
+    expect(preset.physical?.clearcoat).toBe(0);
+    expect(preset.physical?.roughness).toBeGreaterThanOrEqual(0.68);
+    expect(preset.physical?.specularIntensity).toBeLessThanOrEqual(0.4);
+
+    const structure = preset.layers.find((item) => item.id === 'preset-stone-weathered-flagstone-structure');
+    const seams = preset.layers.find((item) => item.id === 'preset-stone-weathered-flagstone-seams');
+    const fractures = preset.layers.find((item) => item.id === 'preset-stone-weathered-flagstone-secondary-fractures');
+    const grain = preset.layers.find((item) => item.id === 'preset-stone-weathered-flagstone-grain');
+    const cavityAo = preset.layers.find((item) => item.id === 'preset-stone-weathered-flagstone-cavity-ao');
+
+    expect(structure?.channel).toBe('height');
+    expect(seams?.blendMode).toBe('multiply');
+    expect(fractures?.kind).toBe('veins');
+    expect(fractures?.displacement).toBeLessThan(0);
+    expect(grain?.scale).toBeGreaterThan(15);
+    expect(grain?.displacement).toBeLessThan(0);
+    expect(cavityAo?.channel).toBe('ao');
+    expect(cavityAo?.maskSourceLayerId).toBe(structure?.id);
+    expect(cavityAo?.maskInvert).toBe(true);
+  });
 });

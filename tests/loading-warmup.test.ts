@@ -6,6 +6,10 @@ const appSource = readFileSync(new URL('../src/app/App.ts', import.meta.url), 'u
 const environmentSource = readFileSync(new URL('../src/engine/EnvironmentLibrary.ts', import.meta.url), 'utf8');
 const profilerSource = readFileSync(new URL('../src/engine/PerformanceProfiler.ts', import.meta.url), 'utf8');
 const librarySource = readFileSync(new URL('../src/ui/LibraryPanel.ts', import.meta.url), 'utf8');
+const thumbnailGeneratorSource = readFileSync(
+  new URL('../scripts/generate-preset-thumbnails.mjs', import.meta.url),
+  'utf8'
+);
 const refinementStyles = readFileSync(new URL('../src/styles/refinements.css', import.meta.url), 'utf8');
 
 describe('nonblocking renderer warmup', () => {
@@ -46,5 +50,13 @@ describe('nonblocking renderer warmup', () => {
     expect(appSource).not.toContain('generatePresetThumbnail');
     expect(appSource).not.toContain('this.schedulePresetThumbnails();');
     expect(appSource).not.toContain('this.library.setThumbnails(thumbnails);');
+  });
+
+  it('regenerates static thumbnails by default so changed presets do not keep stale images', () => {
+    expect(thumbnailGeneratorSource).toContain("const MISSING_ONLY = process.argv.includes('--missing-only');");
+    expect(thumbnailGeneratorSource).toContain(
+      'if (!MISSING_ONLY || !(await hasCachedPng(outputPath))) pending.push({ id, outputPath });'
+    );
+    expect(thumbnailGeneratorSource).not.toContain('const FORCE =');
   });
 });

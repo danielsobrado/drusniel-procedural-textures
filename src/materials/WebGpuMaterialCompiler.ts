@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import type { Node } from 'three/webgpu';
 import {
   Fn,
   abs,
@@ -12,6 +13,8 @@ import {
   normalWorldGeometry,
   positionLocal,
   positionView,
+  sqrt,
+  step,
   varying,
   vec3,
   vec4
@@ -19,6 +22,7 @@ import {
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+import { rendererSafetyConfig } from '../config/rendererSafetyConfig';
 import { applyPhysicalSettings } from './PhysicalMaterial';
 import {
   buildWebGpuSurfaceNodes,
@@ -48,6 +52,12 @@ function createFallbackTexture(): THREE.DataTexture {
   texture.generateMipmaps = false;
   texture.needsUpdate = true;
   return texture;
+}
+
+function softLimitDisplacement(displacement: Node<'float'>, limitValue: number): Node<'float'> {
+  const limit = float(limitValue);
+  const scaled = displacement.div(limit);
+  return displacement.div(sqrt(float(1).add(scaled.mul(scaled))));
 }
 
 export class WebGpuMaterialCompiler {
@@ -150,7 +160,11 @@ export class WebGpuMaterialCompiler {
 
     this.material.positionNode = Fn(() => {
       samplePosition.assign(vertexSample);
-      const worldOffset = normalWorldGeometry.mul(vertexSurface.displacement);
+      const displacement = softLimitDisplacement(
+        vertexSurface.displacement,
+        rendererSafetyConfig.displacement.geometrySoftLimit
+      );
+      const worldOffset = normalWorldGeometry.mul(displacement);
       const localOffset = modelWorldMatrixInverse.mul(vec4(worldOffset, 0)).xyz;
       return localPosition.add(localOffset);
     })();
@@ -173,18 +187,38 @@ export class WebGpuMaterialCompiler {
     this.material.aoNode = surface.ao;
     this.material.emissiveNode = surface.emissive;
 
+    const safeDisplacement = softLimitDisplacement(
+      surface.displacement,
+      rendererSafetyConfig.displacement.normalSoftLimit
+    );
     const sigmaX = positionView.dFdx();
     const sigmaY = positionView.dFdy();
     const r1 = sigmaY.cross(normalView);
     const r2 = normalView.cross(sigmaX);
     const determinant = sigmaX.dot(r1);
-    const safeDeterminant = max(abs(determinant), 0.00000001);
-    const gradient = surface.displacement.dFdx().mul(r1)
-      .add(surface.displacement.dFdy().mul(r2))
+    const determinantMagnitude = abs(determinant);
+    const safeDeterminant = max(
+      determinantMagnitude,
+      float(rendererSafetyConfig.normal.determinantEpsilon)
+    );
+    const gradient = safeDisplacement.dFdx().mul(r1)
+      .add(safeDisplacement.dFdy().mul(r2))
       .mul(determinant.sign());
-    this.material.normalNode = safeDeterminant.mul(normalView)
-      .sub(gradient.mul(this.uniforms.normalStrength))
-      .normalize();
+    const normalCandidate = safeDeterminant.mul(normalView)
+      .sub(gradient.mul(this.uniforms.normalStrength));
+    const candidateLength = normalCandidate.length();
+    const safeNormal = normalCandidate.div(max(
+      candidateLength,
+      float(rendererSafetyConfig.normal.vectorEpsilon)
+    ));
+    const validNormal = step(
+      float(rendererSafetyConfig.normal.determinantEpsilon),
+      determinantMagnitude
+    ).mul(step(
+      float(rendererSafetyConfig.normal.vectorEpsilon),
+      candidateLength
+    ));
+    this.material.normalNode = mix(normalView, safeNormal, validNormal);
 
     this.material.thicknessColorNode = surface.sssColor.mul(surface.sss);
     this.material.thicknessDistortionNode = float(0.12);

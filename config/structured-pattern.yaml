@@ -1,0 +1,11 @@
+projection:
+  sharpness: 6.0
+  portableAverageMix: 0.62
+
+displacementGain:
+  brick: 0.55
+  tile: 0.45
+  plank: 0.40
+  pebble: 0.62
+  roof-tile: 0.48
+  fabric: 0.18

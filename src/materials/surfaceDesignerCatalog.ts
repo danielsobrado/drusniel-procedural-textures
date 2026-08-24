@@ -1,24 +1,47 @@
+import type { SurfaceGraphNode } from '../core/graph/SurfaceGraph';
+import { DENSE_GRASS_SURFACE_PRESET } from './denseGrassSurfacePreset';
+import { STRUCTURED_SURFACE_PRESETS } from './structuredSurfacePresets';
 import { SURFACE_DESIGNER_PRESETS } from './surfaceDesignerPresets';
 import type { MaterialPreset } from './types';
 
-const PHYSICAL_ROUGHNESS_OVERRIDES: Readonly<Record<string, number>> = {
-  'designer-road-asphalt': 0.68
+const BRICK_PROFILE_REFERENCE: SurfaceGraphNode = {
+  id: 'brick-shape',
+  kind: 'shape',
+  label: 'Brick Profile',
+  position: { x: 0, y: 100 },
+  params: { shape: 'rounded-rectangle' }
 };
 
-export const SURFACE_DESIGNER_CATALOG: readonly MaterialPreset[] = SURFACE_DESIGNER_PRESETS.map((preset) => {
-  const roughness = PHYSICAL_ROUGHNESS_OVERRIDES[preset.id];
-  if (roughness === undefined) return preset;
-  // Spreading `preset` here would read its lazy getters and compile the graph during
-  // boot, which is exactly what the laziness exists to avoid - so delegate instead.
+function withBrickProfileReference(source: MaterialPreset): MaterialPreset {
   return {
-    id: preset.id,
-    name: preset.name,
-    description: preset.description,
-    tags: preset.tags,
-    synthesis: preset.synthesis,
-    physical: { ...preset.physical, roughness },
-    get groups() { return preset.groups; },
-    get layers() { return preset.layers; },
-    get graph() { return preset.graph; }
+    id: source.id,
+    name: source.name,
+    description: source.description,
+    tags: source.tags,
+    physical: source.physical,
+    synthesis: source.synthesis,
+    get groups() { return source.groups; },
+    get layers() { return source.layers; },
+    get graph() {
+      const graph = source.graph;
+      if (graph === undefined || graph.nodes.some((item) => item.id === BRICK_PROFILE_REFERENCE.id)) return graph;
+      return { ...graph, nodes: [BRICK_PROFILE_REFERENCE, ...graph.nodes] };
+    }
   };
-});
+}
+
+const STRUCTURED_OVERRIDES = Object.fromEntries(
+  STRUCTURED_SURFACE_PRESETS.map((preset) => [
+    preset.id,
+    preset.id === 'designer-old-brick-wall' ? withBrickProfileReference(preset) : preset
+  ])
+) as Record<string, MaterialPreset>;
+
+const PRESET_OVERRIDES: Readonly<Record<string, MaterialPreset>> = {
+  'designer-dense-grass': DENSE_GRASS_SURFACE_PRESET,
+  ...STRUCTURED_OVERRIDES
+};
+
+export const SURFACE_DESIGNER_CATALOG: readonly MaterialPreset[] = SURFACE_DESIGNER_PRESETS.map((preset) =>
+  PRESET_OVERRIDES[preset.id] ?? preset
+);

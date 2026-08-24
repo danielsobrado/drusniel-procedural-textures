@@ -19,6 +19,12 @@ describe('surface designer configuration', () => {
     expect(micro.maxVertices).toBeLessThanOrEqual(micro.limits.maxVertices.max);
   });
 
+  it('exposes both blade and turf vegetation patterns', () => {
+    const patterns = new Map(SURFACE_DESIGNER_CONFIG.patterns.map((item) => [item.id, item.label]));
+    expect(patterns.get('grass')).toBe('Grass blades');
+    expect(patterns.get('turf')).toBe('Turf fibers');
+  });
+
   it('rejects defaults outside configured limits', () => {
     const document = configDocument();
     const micro = document.microGeometry as Record<string, unknown>;

@@ -1,0 +1,14 @@
+displacement:
+  geometrySoftLimit: 0.06
+  normalSoftLimit: 0.09
+
+normal:
+  determinantEpsilon: 0.0000001
+  vectorEpsilon: 0.00000001
+
+zoom:
+  response: 18.0
+  wheelSensitivity: 0.00065
+  maxInputPixels: 180.0
+  settleDistance: 0.0005
+  linePixels: 16.0

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import { MaterialCompiler } from '../src/materials/MaterialCompiler';
+import { TERRAIN_PRESETS } from '../src/materials/terrainPresets';
 import type { MaterialLayer, PhysicalSettings } from '../src/materials/types';
 
 function layer(overrides: Partial<MaterialLayer>): MaterialLayer {
@@ -95,6 +96,37 @@ describe('material backend contract', () => {
       expect(compiler.material).toMatchObject(expected);
       expect(compiler.renderMaterial).toMatchObject(expected);
     } finally {
+      compiler.dispose();
+    }
+  });
+
+  it('specializes ordinary terrain preset bake shaders to their active layer count', () => {
+    const preset = TERRAIN_PRESETS.find((candidate) => candidate.id === 'coastal-sand');
+    if (preset === undefined) throw new Error('Coastal Sand preset is required for this test.');
+
+    const compiler = new MaterialCompiler();
+    let bake: THREE.ShaderMaterial | null = null;
+    try {
+      compiler.sync(preset.layers, preset.groups ?? [], false, preset.synthesis);
+      bake = compiler.createBakeMaterial(PHYSICAL);
+      expect(bake.fragmentShader).toContain(`#define LAB_MAX_LAYERS ${preset.layers.length}`);
+      expect(bake.fragmentShader).not.toContain('uLabPatternKind');
+    } finally {
+      bake?.dispose();
+      compiler.dispose();
+    }
+  });
+
+  it('keeps portable bake support for pattern layers', () => {
+    const compiler = new MaterialCompiler();
+    let bake: THREE.ShaderMaterial | null = null;
+    try {
+      compiler.sync([layer({ kind: 'pattern' })], [], false);
+      bake = compiler.createBakeMaterial(PHYSICAL);
+      expect(bake.fragmentShader).toContain('#define LAB_MAX_LAYERS 1');
+      expect(bake.fragmentShader).toContain('uLabPatternKind');
+    } finally {
+      bake?.dispose();
       compiler.dispose();
     }
   });

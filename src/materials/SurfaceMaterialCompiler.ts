@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { grassPatternConfig } from '../config/grassPatternConfig';
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
 import { DEFAULT_MATERIAL_ALGORITHMS } from '../core/material/MaterialAlgorithms';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
@@ -92,11 +93,24 @@ function routesHeight(channel: LayerChannel): boolean {
   return channel === 'surface' || channel === 'height';
 }
 
-function displacementSignalExtent(kind: LayerKind): number {
-  if (kind === 'base') return 0;
-  if (kind === 'spots' || kind === 'veins' || kind === 'vessels' || kind === 'pattern') return 1;
-  if (kind === 'cellular') return PTL_CELLULAR_DEFAULTS.displacement.gain * 0.5;
+function displacementSignalExtent(layer: Readonly<MaterialLayer>): number {
+  if (layer.kind === 'base') return 0;
+  if (layer.kind === 'pattern') {
+    if (layer.pattern?.kind === 'grass') return grassPatternConfig.rendering.geometryDisplacementGain;
+    if (layer.pattern?.kind === 'turf') return grassPatternConfig.rendering.turfGeometryDisplacementGain;
+  }
+  if (layer.kind === 'spots' || layer.kind === 'veins' || layer.kind === 'vessels' || layer.kind === 'pattern') return 1;
+  if (layer.kind === 'cellular') return PTL_CELLULAR_DEFAULTS.displacement.gain * 0.5;
   return 0.5;
+}
+
+function numericPatternValue(
+  pattern: Readonly<MaterialLayer['pattern']>,
+  key: keyof typeof DEFAULT_PATTERN_SETTINGS
+): number {
+  const candidate = pattern?.[key];
+  const fallback = DEFAULT_PATTERN_SETTINGS[key];
+  return typeof candidate === 'number' ? candidate : typeof fallback === 'number' ? fallback : 0;
 }
 
 export class SurfaceMaterialCompiler {
@@ -135,6 +149,24 @@ export class SurfaceMaterialCompiler {
     uLabPatternOffset: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.offset) },
     uLabPatternDensity: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.density) },
     uLabPatternEdgeWear: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.edgeWear) },
+    uLabGrassBladeLength: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.bladeLength) },
+    uLabGrassBladeWidth: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.bladeWidth) },
+    uLabGrassBladeTaper: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.bladeTaper) },
+    uLabGrassBladeBend: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.bladeBend) },
+    uLabGrassBladeCurvature: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.bladeCurvature) },
+    uLabGrassClumpScale: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.clumpScale) },
+    uLabGrassClumpStrength: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.clumpStrength) },
+    uLabGrassDirectionality: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.directionality) },
+    uLabGrassDryness: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.dryness) },
+    uLabGrassTipFade: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.tipFade) },
+    uLabGrassRootDarkening: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.rootDarkening) },
+    uLabGrassHeightJitter: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.heightJitter) },
+    uLabGrassWidthJitter: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.widthJitter) },
+    uLabGrassLeanJitter: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.leanJitter) },
+    uLabTurfFiberLength: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberLength) },
+    uLabTurfFiberWidth: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberWidth) },
+    uLabTurfFiberBreakup: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberBreakup) },
+    uLabTurfFiberSoftness: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberSoftness) },
     uLabAge: { value: 0 },
     uLabWeathering: { value: 0 },
     uLabGravity: { value: -1 },
@@ -230,6 +262,24 @@ export class SurfaceMaterialCompiler {
       this.uniforms.uLabPatternOffset.value[index] = pattern.offset;
       this.uniforms.uLabPatternDensity.value[index] = pattern.density;
       this.uniforms.uLabPatternEdgeWear.value[index] = pattern.edgeWear;
+      this.uniforms.uLabGrassBladeLength.value[index] = numericPatternValue(pattern, 'bladeLength');
+      this.uniforms.uLabGrassBladeWidth.value[index] = numericPatternValue(pattern, 'bladeWidth');
+      this.uniforms.uLabGrassBladeTaper.value[index] = numericPatternValue(pattern, 'bladeTaper');
+      this.uniforms.uLabGrassBladeBend.value[index] = numericPatternValue(pattern, 'bladeBend');
+      this.uniforms.uLabGrassBladeCurvature.value[index] = numericPatternValue(pattern, 'bladeCurvature');
+      this.uniforms.uLabGrassClumpScale.value[index] = numericPatternValue(pattern, 'clumpScale');
+      this.uniforms.uLabGrassClumpStrength.value[index] = numericPatternValue(pattern, 'clumpStrength');
+      this.uniforms.uLabGrassDirectionality.value[index] = numericPatternValue(pattern, 'directionality');
+      this.uniforms.uLabGrassDryness.value[index] = numericPatternValue(pattern, 'dryness');
+      this.uniforms.uLabGrassTipFade.value[index] = numericPatternValue(pattern, 'tipFade');
+      this.uniforms.uLabGrassRootDarkening.value[index] = numericPatternValue(pattern, 'rootDarkening');
+      this.uniforms.uLabGrassHeightJitter.value[index] = numericPatternValue(pattern, 'heightJitter');
+      this.uniforms.uLabGrassWidthJitter.value[index] = numericPatternValue(pattern, 'widthJitter');
+      this.uniforms.uLabGrassLeanJitter.value[index] = numericPatternValue(pattern, 'leanJitter');
+      this.uniforms.uLabTurfFiberLength.value[index] = numericPatternValue(pattern, 'fiberLength');
+      this.uniforms.uLabTurfFiberWidth.value[index] = numericPatternValue(pattern, 'fiberWidth');
+      this.uniforms.uLabTurfFiberBreakup.value[index] = numericPatternValue(pattern, 'fiberBreakup');
+      this.uniforms.uLabTurfFiberSoftness.value[index] = numericPatternValue(pattern, 'fiberSoftness');
       this.uniforms.uLabColorA.value[index]?.set(active ? layer.colorA : '#000000');
       this.uniforms.uLabColorB.value[index]?.set(active ? layer.colorB : '#000000');
 
@@ -239,7 +289,7 @@ export class SurfaceMaterialCompiler {
       ) {
         hasDisplacement = true;
         this.displacementExtentValue +=
-          Math.abs(layer.displacement) * layer.opacity * groupOpacity * displacementSignalExtent(layer.kind);
+          Math.abs(layer.displacement) * layer.opacity * groupOpacity * displacementSignalExtent(layer);
       }
     }
 
@@ -299,7 +349,7 @@ export class SurfaceMaterialCompiler {
         .replace('#include <lights_physical_fragment>', PHYSICAL_LAYER_GLSL)
         .replace('#include <lights_fragment_end>', `${BIOLOGICAL_SSS_LIGHT_GLSL}\nreflectedLight.indirectDiffuse *= labSurface.ao;`);
     };
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v22';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v24';
   }
 
   private configureShadowShader(material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial, pass: 'depth' | 'distance'): void {
@@ -310,6 +360,6 @@ export class SurfaceMaterialCompiler {
         .replace('#include <begin_vertex>', SHADOW_NORMAL_GLSL)
         .replace('#include <skinning_vertex>', SHADOW_VERTEX_DISPLACEMENT_GLSL);
     };
-    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v9`;
+    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v11`;
   }
 }

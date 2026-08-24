@@ -9,7 +9,11 @@ import {
   buildMaterialSimulationAtlas,
   materialSimulationFingerprint
 } from '../engine/SimulationAtlas';
-import { BAKE_FRAGMENT_GLSL, BAKE_VERTEX_GLSL } from '../export/TextureBakeShader';
+import {
+  BAKE_VERTEX_GLSL,
+  createBakeFragmentGlsl,
+  type BakeShaderProfile
+} from '../export/TextureBakeShader';
 import { applyPhysicalSettings } from './PhysicalMaterial';
 import type {
   MaterialGroup,
@@ -20,6 +24,27 @@ import type {
 import { SurfaceMaterialCompiler } from './SurfaceMaterialCompiler';
 import { WebGpuMaterialCompiler } from './WebGpuMaterialCompiler';
 
+const COMPACT_BAKE_KINDS = new Set<MaterialLayer['kind']>([
+  'base',
+  'fbm',
+  'cellular',
+  'ridges',
+  'spots',
+  'veins',
+  'gradient',
+  'vessels',
+  'wet-film',
+  'sss'
+]);
+
+function bakeShaderProfileFor(
+  layers: readonly MaterialLayer[],
+  synthesis?: Readonly<SynthesisSettings>
+): BakeShaderProfile {
+  if ((synthesis?.stochasticTiling ?? 0) > 0) return 'portable';
+  return layers.some((layer) => !COMPACT_BAKE_KINDS.has(layer.kind)) ? 'portable' : 'compact';
+}
+
 export class MaterialCompiler extends SurfaceMaterialCompiler {
   private readonly compute = new MaterialComputeEngine();
   private readonly webGpu = new WebGpuMaterialCompiler();
@@ -27,6 +52,8 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
   private simulationFingerprint = '';
   private simulationSequence = 0;
   private simulationPromise: Promise<void> | null = null;
+  private bakeShaderProfile: BakeShaderProfile = 'compact';
+  private bakeLayerCount = 1;
 
   public get renderMaterial(): THREE.Material {
     return this.webGpu.material;
@@ -55,6 +82,8 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
   ): void {
     super.sync(layers, groups, wireframe, synthesis, coordinateSpace);
     this.webGpu.sync(layers, groups, wireframe, synthesis, coordinateSpace);
+    this.bakeShaderProfile = bakeShaderProfileFor(layers, synthesis);
+    this.bakeLayerCount = Math.max(1, this.uniforms.uLabCount.value);
     this.scheduleSimulation(layers);
   }
 
@@ -67,7 +96,6 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
     this.algorithmSettings = structuredClone(settings);
     super.setAlgorithmSettings(settings);
     this.webGpu.setAlgorithmSettings(settings);
-    this.simulationFingerprint = '';
   }
 
   public override setSimulationAtlas(
@@ -97,7 +125,7 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
         uBakeHeightExtent: { value: Math.max(this.displacementExtent, 0.000001) }
       },
       vertexShader: BAKE_VERTEX_GLSL,
-      fragmentShader: BAKE_FRAGMENT_GLSL,
+      fragmentShader: createBakeFragmentGlsl(this.bakeShaderProfile, this.bakeLayerCount),
       side: THREE.DoubleSide,
       depthTest: false,
       depthWrite: false,

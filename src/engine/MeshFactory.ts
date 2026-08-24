@@ -4,49 +4,49 @@ import { mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { ObjectPreset } from '../materials/types';
 
 const SPHERE_RADIUS = 1.18;
-const SPHERE_WIDTH_SEGMENTS = 160;
-const SPHERE_HEIGHT_SEGMENTS = 112;
+const SPHERE_WIDTH_SEGMENTS = 112;
+const SPHERE_HEIGHT_SEGMENTS = 80;
 const SPHERE_MERGE_TOLERANCE = 1e-5;
 
 const ICOSPHERE_RADIUS = 1.2;
-const ICOSPHERE_DETAIL = 6;
+const ICOSPHERE_DETAIL = 5;
 const ICOSPHERE_MERGE_TOLERANCE = 1e-5;
 
 const BOX_SIZE = 1.9;
-const BOX_SEGMENTS = 48;
+const BOX_SEGMENTS = 32;
 const BOX_MERGE_TOLERANCE = 1e-5;
 
 const ROUNDED_BOX_SIZE = 1.9;
-const ROUNDED_BOX_SEGMENTS = 32;
+const ROUNDED_BOX_SEGMENTS = 24;
 const ROUNDED_BOX_RADIUS = 0.2;
 const ROUNDED_BOX_MERGE_TOLERANCE = 1e-5;
 
 const TORUS_RADIUS = 0.82;
 const TORUS_TUBE_RADIUS = 0.38;
-const TORUS_RADIAL_SEGMENTS = 96;
-const TORUS_TUBULAR_SEGMENTS = 192;
+const TORUS_RADIAL_SEGMENTS = 72;
+const TORUS_TUBULAR_SEGMENTS = 160;
 
 const PLANE_SIZE = 2.5;
-const PLANE_SEGMENTS = 160;
+const PLANE_SEGMENTS = 128;
 const PLANE_TILT_X = -Math.PI * 0.16;
 
 const CYLINDER_RADIUS = 0.82;
 const CYLINDER_HEIGHT = 2.0;
-const CYLINDER_RADIAL_SEGMENTS = 128;
-const CYLINDER_HEIGHT_SEGMENTS = 64;
+const CYLINDER_RADIAL_SEGMENTS = 96;
+const CYLINDER_HEIGHT_SEGMENTS = 48;
 const CYLINDER_MERGE_TOLERANCE = 1e-5;
 
 const CONE_RADIUS = 0.96;
 const CONE_HEIGHT = 2.05;
-const CONE_RADIAL_SEGMENTS = 128;
-const CONE_HEIGHT_SEGMENTS = 64;
+const CONE_RADIAL_SEGMENTS = 96;
+const CONE_HEIGHT_SEGMENTS = 48;
 const CONE_MERGE_TOLERANCE = 1e-5;
 
 const CAPSULE_RADIUS = 0.64;
 const CAPSULE_LENGTH = 1.12;
-const CAPSULE_CAP_SEGMENTS = 48;
-const CAPSULE_BODY_SEGMENTS = 72;
-const CAPSULE_RADIAL_SEGMENTS = 128;
+const CAPSULE_CAP_SEGMENTS = 32;
+const CAPSULE_BODY_SEGMENTS = 48;
+const CAPSULE_RADIAL_SEGMENTS = 96;
 const CAPSULE_MERGE_TOLERANCE = 1e-5;
 
 const OCTAHEDRON_RADIUS = 1.22;
@@ -59,8 +59,8 @@ const DODECAHEDRON_MERGE_TOLERANCE = 1e-5;
 
 const TORUS_KNOT_RADIUS = 0.72;
 const TORUS_KNOT_TUBE_RADIUS = 0.25;
-const TORUS_KNOT_TUBULAR_SEGMENTS = 256;
-const TORUS_KNOT_RADIAL_SEGMENTS = 48;
+const TORUS_KNOT_TUBULAR_SEGMENTS = 192;
+const TORUS_KNOT_RADIAL_SEGMENTS = 40;
 const TORUS_KNOT_P = 2;
 const TORUS_KNOT_Q = 3;
 const TORUS_KNOT_MERGE_TOLERANCE = 1e-5;
@@ -202,13 +202,9 @@ function createClosedTorusKnotGeometry(): THREE.BufferGeometry {
 /**
  * Welded geometry templates, keyed by preset.
  *
- * Building the default sphere costs ~5 ms but welding it costs ~60 ms, and the caller
- * rebuilds the preview mesh on every object change and every undo/redo. Cloning a cached
- * template is ~0.8 ms, so the weld is paid once per preset per session.
- *
- * A clone is essential rather than an optimisation detail: replaceRoot() disposes the
- * geometry of the mesh it swaps out, so handing out the template itself would dispose
- * the cache entry.
+ * The first build for a detailed primitive can be expensive, so preview tessellation is
+ * intentionally bounded and the finished geometry is cached. A clone is essential:
+ * replaceRoot() disposes the geometry it swaps out and must never dispose the template.
  */
 const geometryTemplates = new Map<ObjectPreset, THREE.BufferGeometry>();
 
@@ -216,7 +212,6 @@ function templateGeometry(preset: ObjectPreset, build: () => THREE.BufferGeometr
   let template = geometryTemplates.get(preset);
   if (template === undefined) {
     template = build();
-    template.computeVertexNormals();
     geometryTemplates.set(preset, template);
   }
   return template.clone();

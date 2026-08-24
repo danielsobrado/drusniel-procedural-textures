@@ -124,17 +124,17 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
   {
     id: 'weathered-flagstone',
     name: 'Weathered Flagstone',
-    description: 'Warm tan irregular flagstone with fractured rock plates, dusty seams and layered erosion.',
-    tags: ['stone', 'mineral', 'rock', 'flagstone', 'weathered'],
+    description: 'Weathered warm sandstone with irregular fractured plates, dark recessed cavities, secondary cracks and granular erosion.',
+    tags: ['stone', 'mineral', 'rock', 'flagstone', 'weathered', 'sandstone'],
     physical: {
-      roughness: 0.66,
+      roughness: 0.72,
       metalness: 0,
-      clearcoat: 0.01,
-      clearcoatRoughness: 0.9,
-      specularIntensity: 0.38,
-      ior: 1.48,
+      clearcoat: 0,
+      clearcoatRoughness: 1,
+      specularIntensity: 0.32,
+      ior: 1.5,
       sheen: 0,
-      sheenRoughness: 0.7,
+      sheenRoughness: 0.8,
       sheenColor: '#ffffff',
       transmission: 0,
       thickness: 0,
@@ -142,64 +142,60 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
       attenuationColor: '#ffffff'
     },
     synthesis: {
-      age: 0.46,
-      weathering: 0.58,
-      gravity: -0.16,
-      macro: 1.04,
-      meso: 1.14,
-      micro: 0.88,
-      variation: 0.36,
-      stochasticTiling: 0.08
+      age: 0.52,
+      weathering: 0.62,
+      gravity: -0.14,
+      macro: 0.98,
+      meso: 1.08,
+      micro: 1.34,
+      variation: 0.42,
+      stochasticTiling: 0.12
     },
     layers: [
-      layer('preset-stone-weathered-flagstone-base', 'Dusty stone base', 'base', {
-        colorA: '#6f5f49',
-        colorB: '#b59f7f',
-        roughness: 0.09
+      layer('preset-stone-weathered-flagstone-base', 'Sandstone base', 'base', {
+        colorA: '#654735',
+        colorB: '#b98261',
+        roughness: 0.06
       }),
       layer(FLAGSTONE_STRUCTURE_ID, 'Broken stone plates', 'cellular', {
-        blendMode: 'overlay',
-        opacity: 0.88,
-        scale: 4.2,
-        strength: 1.68,
+        channel: 'height',
+        opacity: 0.94,
+        scale: 4.05,
+        strength: 1.55,
         seed: 22,
-        colorA: '#6a593f',
-        colorB: '#c1aa87',
-        roughness: 0.05,
-        displacement: 0.114
+        displacement: 0.104
       }),
-      layer('preset-stone-weathered-flagstone-tone', 'Plate color variation', 'cellular', {
+      layer('preset-stone-weathered-flagstone-tone', 'Mineral tone clouding', 'fbm', {
         blendMode: 'overlay',
         channel: 'color',
-        opacity: 0.32,
-        scale: 4.2,
-        strength: 1.42,
-        seed: 22,
-        colorA: '#5f513b',
-        colorB: '#cfbc9b',
-        structureSourceLayerId: FLAGSTONE_STRUCTURE_ID
+        opacity: 0.26,
+        scale: 1.75,
+        strength: 1.18,
+        seed: 34,
+        colorA: '#664430',
+        colorB: '#c49370'
       }),
-      layer('preset-stone-weathered-flagstone-seams', 'Dusty seams', 'cellular', {
-        blendMode: 'screen',
+      layer('preset-stone-weathered-flagstone-seams', 'Recessed fracture color', 'cellular', {
+        blendMode: 'multiply',
         channel: 'color',
-        opacity: 0.74,
-        scale: 4.2,
-        strength: 1.74,
+        opacity: 0.7,
+        scale: 4.05,
+        strength: 1.72,
         seed: 22,
-        colorA: '#7f6d54',
-        colorB: '#ddd1b8',
+        colorA: '#493027',
+        colorB: '#76503d',
         structureSourceLayerId: FLAGSTONE_STRUCTURE_ID,
         maskSourceLayerId: FLAGSTONE_STRUCTURE_ID,
         maskInvert: true,
         maskStrength: 1
       }),
-      layer('preset-stone-weathered-flagstone-depth', 'Fracture depth', 'cellular', {
+      layer('preset-stone-weathered-flagstone-depth', 'Primary fracture depth', 'cellular', {
         channel: 'height',
         opacity: 0.9,
-        scale: 4.2,
-        strength: 1.82,
+        scale: 4.05,
+        strength: 1.78,
         seed: 22,
-        displacement: 0.072,
+        displacement: 0.064,
         structureSourceLayerId: FLAGSTONE_STRUCTURE_ID,
         maskSourceLayerId: FLAGSTONE_STRUCTURE_ID,
         maskInvert: true,
@@ -207,44 +203,65 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
       }),
       layer('preset-stone-weathered-flagstone-erosion', 'Weathered erosion', 'erosion', {
         blendMode: 'overlay',
-        opacity: 0.32,
-        scale: 3.1,
-        strength: 1.28,
-        seed: 41,
-        colorA: '#5c4d37',
-        colorB: '#bca789',
-        roughness: 0.06,
-        displacement: 0.012
-      }),
-      layer('preset-stone-weathered-flagstone-stains', 'Mineral stains', 'spots', {
-        blendMode: 'multiply',
-        opacity: 0.16,
-        scale: 12.8,
+        opacity: 0.24,
+        scale: 3.35,
         strength: 1.22,
-        seed: 56,
-        colorA: '#8b6938',
-        colorB: '#c6a36e',
+        seed: 41,
+        colorA: '#5f4332',
+        colorB: '#ad8061',
         roughness: 0.04,
-        displacement: -0.004
-      }),
-      layer('preset-stone-weathered-flagstone-ridges', 'Layered rock ridges', 'ridges', {
-        blendMode: 'screen',
-        opacity: 0.18,
-        scale: 8.6,
-        strength: 1.24,
-        seed: 68,
-        colorA: '#7a664b',
-        colorB: '#d4c3a2',
-        roughness: 0.01,
         displacement: 0.01
       }),
-      layer('preset-stone-weathered-flagstone-roughness', 'Dry rock roughness', 'fbm', {
+      layer('preset-stone-weathered-flagstone-stains', 'Iron mineral stains', 'spots', {
+        blendMode: 'multiply',
+        channel: 'color',
+        opacity: 0.13,
+        scale: 12.4,
+        strength: 1.2,
+        seed: 56,
+        colorA: '#70452e',
+        colorB: '#9f6a45'
+      }),
+      layer('preset-stone-weathered-flagstone-secondary-fractures', 'Secondary fractures', 'veins', {
+        blendMode: 'multiply',
+        opacity: 0.2,
+        scale: 6.8,
+        strength: 1.42,
+        seed: 87,
+        colorA: '#3f2a23',
+        colorB: '#76513f',
+        roughness: 0.07,
+        displacement: -0.012
+      }),
+      layer('preset-stone-weathered-flagstone-grain', 'Sandstone grain and pits', 'spots', {
+        blendMode: 'multiply',
+        opacity: 0.11,
+        scale: 19.6,
+        strength: 1.3,
+        seed: 94,
+        colorA: '#604231',
+        colorB: '#b88464',
+        roughness: 0.07,
+        displacement: -0.003
+      }),
+      layer('preset-stone-weathered-flagstone-cavity-ao', 'Fracture cavity occlusion', 'cellular', {
+        channel: 'ao',
+        opacity: 0.82,
+        scale: 4.05,
+        strength: 1.78,
+        seed: 22,
+        structureSourceLayerId: FLAGSTONE_STRUCTURE_ID,
+        maskSourceLayerId: FLAGSTONE_STRUCTURE_ID,
+        maskInvert: true,
+        maskStrength: 1
+      }),
+      layer('preset-stone-weathered-flagstone-roughness', 'Dry granular roughness', 'fbm', {
         channel: 'roughness',
-        opacity: 0.38,
-        scale: 13.7,
+        opacity: 0.3,
+        scale: 16.8,
         strength: 1.16,
         seed: 79,
-        roughness: 0.22
+        roughness: 0.15
       })
     ]
   }

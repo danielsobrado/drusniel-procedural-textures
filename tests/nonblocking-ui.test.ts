@@ -8,6 +8,8 @@ const thumbnailSource = readFileSync(
 const bakerSource = readFileSync(new URL('../src/export/TextureBaker.ts', import.meta.url), 'utf8');
 const seamlessSource = readFileSync(new URL('../src/export/SeamlessTexture.ts', import.meta.url), 'utf8');
 const rendererSource = readFileSync(new URL('../src/engine/LabRenderer.ts', import.meta.url), 'utf8');
+const meshFactorySource = readFileSync(new URL('../src/engine/MeshFactory.ts', import.meta.url), 'utf8');
+const appSource = readFileSync(new URL('../src/app/App.ts', import.meta.url), 'utf8');
 const inspectorSource = readFileSync(new URL('../src/ui/Inspector.ts', import.meta.url), 'utf8');
 const layerStripSource = readFileSync(new URL('../src/ui/LayerStrip.ts', import.meta.url), 'utf8');
 const canvasSource = readFileSync(new URL('../src/utils/canvas.ts', import.meta.url), 'utf8');
@@ -18,6 +20,11 @@ describe('nonblocking interactive paths', () => {
     expect(thumbnailSource).not.toContain('.readRenderTargetPixels(');
     expect(bakerSource).toContain('readRenderTargetPixelsAsync');
     expect(bakerSource).not.toContain('.readRenderTargetPixels(');
+  });
+
+  it('uses bounded shader preparation for texture baking', () => {
+    expect(bakerSource).toContain('this.renderer.compile(context.scene, this.camera);');
+    expect(bakerSource).not.toContain('this.renderer.compileAsync(');
   });
 
   it('encodes PNG output asynchronously', () => {
@@ -34,6 +41,33 @@ describe('nonblocking interactive paths', () => {
   it('does not traverse selected mesh bounds every render frame', () => {
     const startBody = rendererSource.match(/private start\(\): void \{[^]*?\n  \}\n\}/)?.[0] ?? '';
     expect(startBody).not.toContain('selectionBox.setFromObject');
+  });
+
+  it('reuses the compiled WebGPU material when only the procedural primitive changes', () => {
+    expect(rendererSource).toContain('const canReuseCompiledMaterial = this.currentRoot instanceof THREE.Mesh');
+    expect(rendererSource).toContain('this.currentRoot.userData.labProceduralPreview === true');
+    expect(rendererSource).toContain('this.replaceRoot(mesh, new Map(), new Map(), !canReuseCompiledMaterial);');
+    expect(rendererSource).toContain('if (recompileMaterial) this.sceneRevision += 1;');
+  });
+
+  it('paints shape-change progress before doing synchronous geometry work', () => {
+    const start = appSource.indexOf('private async changeObjectPreset(');
+    const begin = appSource.indexOf('this.progress.begin(`Changing preview shape', start);
+    const paint = appSource.indexOf('await nextPaint();', begin);
+    const change = appSource.indexOf('this.state.setObjectPreset(preset);', paint);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(begin).toBeGreaterThan(start);
+    expect(paint).toBeGreaterThan(begin);
+    expect(change).toBeGreaterThan(paint);
+    expect(appSource).toContain('await this.renderer.waitForMaterialReady();');
+  });
+
+  it('keeps preview primitive tessellation bounded for interactive shape changes', () => {
+    expect(meshFactorySource).toContain('const SPHERE_WIDTH_SEGMENTS = 112;');
+    expect(meshFactorySource).toContain('const ICOSPHERE_DETAIL = 5;');
+    expect(meshFactorySource).toContain('const CAPSULE_RADIAL_SEGMENTS = 96;');
+    expect(meshFactorySource).not.toContain('const ICOSPHERE_DETAIL = 6;');
+    expect(meshFactorySource).not.toContain('const CAPSULE_RADIAL_SEGMENTS = 128;');
   });
 
   it('keeps inspector value edits out of its structural rebuild key', () => {
@@ -58,6 +92,19 @@ describe('nonblocking interactive paths', () => {
     expect(layerStripSource).toContain("const nextStructureKey = state.layers.map((layer) => layer.id).join('|');");
     expect(layerStripSource).toContain('this.sync(state);');
     expect(layerStripSource).toContain('private sync(state: Readonly<ProjectState>): void');
+  });
+
+  it('uses one compiled bake context for a full PBR and height bake', () => {
+    expect(bakerSource).toContain("const FULL_BAKE_CHANNELS: readonly BakeChannel[] = [...PBR_CHANNELS, 'height'];");
+    expect(bakerSource).toContain('private async renderChannelsSnapshot(');
+    expect(bakerSource).not.toContain('const common = await this.renderPbrSnapshot');
+  });
+
+  it('reuses the readback buffer and allocates padding queue storage lazily', () => {
+    expect(bakerSource).toContain('function flipRowsInPlace(');
+    expect(bakerSource).toContain('new Uint8ClampedArray(source.buffer, source.byteOffset, source.byteLength)');
+    expect(bakerSource).toContain('let queue: Int32Array<ArrayBuffer> | null = null;');
+    expect(bakerSource).toContain('queue ??= new Int32Array(');
   });
 
   it('yields during large CPU texture padding work', () => {

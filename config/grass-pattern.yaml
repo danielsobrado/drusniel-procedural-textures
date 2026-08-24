@@ -1,0 +1,49 @@
+defaults:
+  bladeLength: 0.82
+  bladeWidth: 0.055
+  bladeTaper: 1.45
+  bladeBend: 0.11
+  bladeCurvature: 1.35
+  clumpScale: 0.72
+  clumpStrength: 0.62
+  directionality: 0.62
+  dryness: 0.08
+  tipFade: 0.18
+  rootDarkening: 0.55
+  heightJitter: 0.30
+  widthJitter: 0.32
+  leanJitter: 0.50
+
+turfDefaults:
+  fiberLength: 0.42
+  fiberWidth: 0.055
+  fiberBreakup: 0.48
+  fiberSoftness: 0.55
+
+limits:
+  bladeLength: { min: 0.35, max: 0.95 }
+  bladeWidth: { min: 0.012, max: 0.14 }
+  bladeTaper: { min: 0.4, max: 3.0 }
+  bladeBend: { min: 0.0, max: 0.35 }
+  bladeCurvature: { min: 0.5, max: 3.0 }
+  clumpScale: { min: 0.1, max: 3.0 }
+  clumpStrength: { min: 0.0, max: 1.0 }
+  directionality: { min: 0.0, max: 1.0 }
+  dryness: { min: 0.0, max: 1.0 }
+  tipFade: { min: 0.0, max: 1.0 }
+  rootDarkening: { min: 0.0, max: 1.0 }
+  heightJitter: { min: 0.0, max: 0.65 }
+  widthJitter: { min: 0.0, max: 0.65 }
+  leanJitter: { min: 0.0, max: 1.0 }
+
+turfLimits:
+  fiberLength: { min: 0.12, max: 0.72 }
+  fiberWidth: { min: 0.012, max: 0.16 }
+  fiberBreakup: { min: 0.0, max: 1.0 }
+  fiberSoftness: { min: 0.0, max: 1.0 }
+
+rendering:
+  geometryDisplacementGain: 0.12
+  triplanarAverageMix: 0.45
+  turfGeometryDisplacementGain: 0.035
+  turfTriplanarAverageMix: 0.72

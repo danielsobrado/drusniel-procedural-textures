@@ -1,8 +1,11 @@
+import { grassPatternConfig } from '../../config/grassPatternConfig';
+
 export type PatternKind =
   | 'brick'
   | 'tile'
   | 'plank'
   | 'grass'
+  | 'turf'
   | 'pebble'
   | 'roof-tile'
   | 'fabric';
@@ -17,9 +20,27 @@ export interface PatternSettings {
   offset: number;
   density: number;
   edgeWear: number;
+  bladeLength?: number;
+  bladeWidth?: number;
+  bladeTaper?: number;
+  bladeBend?: number;
+  bladeCurvature?: number;
+  clumpScale?: number;
+  clumpStrength?: number;
+  directionality?: number;
+  dryness?: number;
+  tipFade?: number;
+  rootDarkening?: number;
+  heightJitter?: number;
+  widthJitter?: number;
+  leanJitter?: number;
+  fiberLength?: number;
+  fiberWidth?: number;
+  fiberBreakup?: number;
+  fiberSoftness?: number;
 }
 
-export const DEFAULT_PATTERN_SETTINGS: Readonly<PatternSettings> = {
+export const DEFAULT_PATTERN_SETTINGS: Readonly<Required<PatternSettings>> = {
   kind: 'brick',
   aspect: 2,
   gap: 0.08,
@@ -28,7 +49,9 @@ export const DEFAULT_PATTERN_SETTINGS: Readonly<PatternSettings> = {
   rotation: 0,
   offset: 0.5,
   density: 1,
-  edgeWear: 0.08
+  edgeWear: 0.08,
+  ...grassPatternConfig.defaults,
+  ...grassPatternConfig.turfDefaults
 };
 
 export const PATTERN_LIMITS = {
@@ -42,8 +65,11 @@ export const PATTERN_LIMITS = {
   edgeWear: { min: 0, max: 1 }
 } as const;
 
+export const GRASS_PATTERN_LIMITS = grassPatternConfig.limits;
+export const TURF_PATTERN_LIMITS = grassPatternConfig.turfLimits;
+
 const KINDS = new Set<PatternKind>([
-  'brick', 'tile', 'plank', 'grass', 'pebble', 'roof-tile', 'fabric'
+  'brick', 'tile', 'plank', 'grass', 'turf', 'pebble', 'roof-tile', 'fabric'
 ]);
 
 function finite(value: unknown, label: string, min: number, max: number): number {
@@ -62,19 +88,45 @@ export function normalizePatternSettings(value: unknown): PatternSettings {
   if (typeof kind !== 'string' || !KINDS.has(kind as PatternKind)) {
     throw new Error(`Unsupported pattern kind: ${String(kind)}.`);
   }
-  const number = (key: keyof typeof PATTERN_LIMITS): number => {
+  const baseNumber = (key: keyof typeof PATTERN_LIMITS): number => {
     const range = PATTERN_LIMITS[key];
     return finite(input[key] ?? DEFAULT_PATTERN_SETTINGS[key], `Pattern ${key}`, range.min, range.max);
   };
+  const grassNumber = (key: keyof typeof GRASS_PATTERN_LIMITS): number => {
+    const range = GRASS_PATTERN_LIMITS[key];
+    return finite(input[key] ?? DEFAULT_PATTERN_SETTINGS[key], `Grass pattern ${key}`, range.min, range.max);
+  };
+  const turfNumber = (key: keyof typeof TURF_PATTERN_LIMITS): number => {
+    const range = TURF_PATTERN_LIMITS[key];
+    return finite(input[key] ?? DEFAULT_PATTERN_SETTINGS[key], `Turf pattern ${key}`, range.min, range.max);
+  };
   return {
     kind: kind as PatternKind,
-    aspect: number('aspect'),
-    gap: number('gap'),
-    roundness: number('roundness'),
-    jitter: number('jitter'),
-    rotation: number('rotation'),
-    offset: number('offset'),
-    density: number('density'),
-    edgeWear: number('edgeWear')
+    aspect: baseNumber('aspect'),
+    gap: baseNumber('gap'),
+    roundness: baseNumber('roundness'),
+    jitter: baseNumber('jitter'),
+    rotation: baseNumber('rotation'),
+    offset: baseNumber('offset'),
+    density: baseNumber('density'),
+    edgeWear: baseNumber('edgeWear'),
+    bladeLength: grassNumber('bladeLength'),
+    bladeWidth: grassNumber('bladeWidth'),
+    bladeTaper: grassNumber('bladeTaper'),
+    bladeBend: grassNumber('bladeBend'),
+    bladeCurvature: grassNumber('bladeCurvature'),
+    clumpScale: grassNumber('clumpScale'),
+    clumpStrength: grassNumber('clumpStrength'),
+    directionality: grassNumber('directionality'),
+    dryness: grassNumber('dryness'),
+    tipFade: grassNumber('tipFade'),
+    rootDarkening: grassNumber('rootDarkening'),
+    heightJitter: grassNumber('heightJitter'),
+    widthJitter: grassNumber('widthJitter'),
+    leanJitter: grassNumber('leanJitter'),
+    fiberLength: turfNumber('fiberLength'),
+    fiberWidth: turfNumber('fiberWidth'),
+    fiberBreakup: turfNumber('fiberBreakup'),
+    fiberSoftness: turfNumber('fiberSoftness')
   };
 }

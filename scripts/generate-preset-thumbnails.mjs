@@ -10,7 +10,7 @@ const PORT = 4181;
 const START_TIMEOUT_MS = 30_000;
 const RENDER_TIMEOUT_MS = 120_000;
 const GENERATOR_URL = `http://${HOST}:${PORT}/thumbnail-generator.html`;
-const FORCE = process.argv.includes('--force');
+const MISSING_ONLY = process.argv.includes('--missing-only');
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 function startVite(root) {
@@ -73,7 +73,7 @@ async function main() {
     const pending = [];
     for (const id of presetIds) {
       const outputPath = join(outputDirectory, `${id}.png`);
-      if (FORCE || !(await hasCachedPng(outputPath))) pending.push({ id, outputPath });
+      if (!MISSING_ONLY || !(await hasCachedPng(outputPath))) pending.push({ id, outputPath });
     }
 
     if (pending.length === 0) {
@@ -81,7 +81,7 @@ async function main() {
       return;
     }
 
-    console.log(`Generating ${pending.length} missing preset thumbnail${pending.length === 1 ? '' : 's'}…`);
+    console.log(`Generating ${pending.length} preset thumbnail${pending.length === 1 ? '' : 's'}…`);
     for (const [index, entry] of pending.entries()) {
       const dataUrl = await page.evaluate(
         (id) => window.__PTL_THUMBNAIL_GENERATOR__.render(id),

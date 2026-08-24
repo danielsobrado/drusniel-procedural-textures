@@ -27,7 +27,7 @@ import { makeTextureSetSeamless } from '../export/SeamlessTexture';
 import { TileMaterialBaker } from '../export/TileMaterialBaker';
 import type { BakeChannel, BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
-import type { EnvironmentPreset, LayerKind, ProjectState } from '../materials/types';
+import type { EnvironmentPreset, LayerKind, ObjectPreset, ProjectState } from '../materials/types';
 import { serializeMaterialRecipe } from '../runtime/MaterialRecipe';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
@@ -140,6 +140,7 @@ export class App {
   private suppressImportedRestore = false;
   private projectImportSequence = 0;
   private environmentLoadSequence = 0;
+  private objectChangeSequence = 0;
   private productionOperation: ProductionOperation | null = null;
   private tilePreviewMaps: BakedTextureSet | null = null;
   private tilePreviewStale = true;
@@ -157,7 +158,7 @@ export class App {
     this.renderer.setPerformanceCallback((stats) => this.shell.setPerformanceStats(stats));
 
     this.library = new LibraryPanel(this.shell.elements.library, {
-      onObject: (preset) => this.runSafely(() => this.state.setObjectPreset(preset)),
+      onObject: (preset) => { void this.changeObjectPreset(preset); },
       onPreset: (preset) => this.runSafely(() => this.state.applyPreset(preset)),
       onImport: () => this.shell.elements.modelInput.click(),
       getProjectState: () => this.state.snapshot
@@ -458,8 +459,8 @@ export class App {
       this.runSafely(() => this.state.addLayer(layerKind));
       return;
     }
-    if (command === 'sphere') this.state.setObjectPreset('sphere');
-    else if (command === 'torus') this.state.setObjectPreset('torus');
+    if (command === 'sphere') void this.changeObjectPreset('sphere');
+    else if (command === 'torus') void this.changeObjectPreset('torus');
     else if (command === 'import') this.shell.elements.modelInput.click();
     else if (command === 'open-project') this.shell.elements.projectInput.click();
     else if (command === 'save-project') this.runSafely(() => this.exportProject());
@@ -467,6 +468,49 @@ export class App {
     else if (command === 'export-glb') void this.exportGlb();
     else if (command === 'frame') this.renderer.frameSelection();
     else if (command === 'wireframe') this.state.toggleWireframe();
+  }
+
+  private async changeObjectPreset(preset: ObjectPreset): Promise<void> {
+    const current = this.state.snapshot;
+    if (current.selectedObject === preset && current.importedAssetName === null) return;
+
+    const sequence = ++this.objectChangeSequence;
+    const label = OBJECT_PRESETS.find((item) => item.id === preset)?.label ?? preset;
+    const ownsProgress = this.productionOperation === null;
+    if (ownsProgress) {
+      this.progress.begin(`Changing preview shape · ${label}`);
+      this.progress.report('Preparing geometry…', 0.12);
+    }
+    this.shell.setStatus(`Changing preview shape · ${label}…`);
+
+    try {
+      await nextPaint();
+      if (sequence !== this.objectChangeSequence) return;
+
+      this.state.setObjectPreset(preset);
+      if (ownsProgress) this.progress.report('Updating preview…', 0.62);
+      await nextPaint();
+      if (sequence !== this.objectChangeSequence) return;
+
+      if (ownsProgress) this.progress.report('Preparing material…', 0.82);
+      await this.renderer.waitForMaterialReady();
+      if (sequence !== this.objectChangeSequence) return;
+
+      this.renderer.invalidate();
+      await nextPaint();
+      if (sequence === this.objectChangeSequence && ownsProgress) {
+        this.progress.report('Ready', 1);
+      }
+    } catch (error) {
+      if (sequence !== this.objectChangeSequence) return;
+      console.error('Preview shape change failed.', error);
+      this.shell.toast(this.errorMessage(error), 'error');
+    } finally {
+      if (sequence === this.objectChangeSequence) {
+        if (ownsProgress && this.productionOperation === null) this.progress.finish();
+        this.shell.setStatus(this.projectStatus(this.state.snapshot));
+      }
+    }
   }
 
   private async importModel(files: readonly File[]): Promise<void> {

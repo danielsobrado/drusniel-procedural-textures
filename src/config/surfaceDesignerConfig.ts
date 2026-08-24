@@ -26,7 +26,7 @@ export interface SurfaceDesignerConfig {
 }
 
 const PATTERN_KINDS = new Set<PatternKind>([
-  'brick', 'tile', 'plank', 'grass', 'pebble', 'roof-tile', 'fabric'
+  'brick', 'tile', 'plank', 'grass', 'turf', 'pebble', 'roof-tile', 'fabric'
 ]);
 
 function record(value: unknown, label: string): Record<string, unknown> {
