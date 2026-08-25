@@ -2,7 +2,7 @@
 
 A realtime Three.js material playground for building layered procedural surfaces, previewing them on 3D meshes, and exporting practical PBR assets.
 
-**Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/procedural-texture-lab/)
+**Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/drusniel-procedural-textures/)
 
 ## V0.3 — Surface Designer (WIP)
 
