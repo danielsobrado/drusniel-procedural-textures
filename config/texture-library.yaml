@@ -1,0 +1,216 @@
+version: 2
+basePath: "textures"
+transcoderPath: "basis"
+generation:
+  source: "scripts/generate-texture-library.mjs"
+  encoder: "KTX-Software toktx 4.4.2"
+  format: "UASTC"
+  supercompression: "Zstandard"
+  referencedResolution: 1024
+  longTailResolution: 512
+  encodedByteBudget: 50331648
+  highResolutionFiles:
+    - "cracks-pack-01.ktx2"
+    - "craters-pack-01.ktx2"
+    - "crystal-pack-01.ktx2"
+    - "gabor-pack-01.ktx2"
+    - "grainy-pack-01.ktx2"
+    - "grainy-pack-02.ktx2"
+    - "manifold-pack-01.ktx2"
+    - "manifold-pack-02.ktx2"
+    - "marble-pack-01.ktx2"
+    - "melt-pack-01.ktx2"
+    - "milky-pack-01.ktx2"
+    - "milky-pack-02.ktx2"
+    - "organic-pack-01.ktx2"
+    - "perlin-pack-01.ktx2"
+    - "radial-pack-01.ktx2"
+    - "rock-pack-01.ktx2"
+    - "spokes-pack-01.ktx2"
+    - "stone-pack-01.ktx2"
+    - "streak-pack-01.ktx2"
+    - "streak-pack-02.ktx2"
+    - "super-noise-pack-01.ktx2"
+    - "super-noise-pack-02.ktx2"
+    - "super-perlin-pack-01.ktx2"
+    - "super-perlin-pack-02.ktx2"
+    - "swirl-pack-01.ktx2"
+    - "techno-pack-01.ktx2"
+    - "tiles-pack-01.ktx2"
+    - "turbulence-pack-01.ktx2"
+    - "vein-pack-01.ktx2"
+    - "voronoi-pack-01.ktx2"
+defaults:
+  type: "scalar"
+  colorSpace: "linear"
+  tileable: true
+  usages: ["height", "mask", "roughness", "color"]
+  provenance: "deterministic-project-generator-v1"
+  license: "Apache-2.0"
+  source: "scripts/generate-texture-library.mjs"
+families:
+  - id: "cracks"
+    variants:
+      - { id: "01", file: "cracks-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "cracks-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "cracks-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "cracks-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "cracks-pack-02.ktx2", channel: "r" }
+  - id: "craters"
+    variants:
+      - { id: "01", file: "craters-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "craters-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "craters-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "craters-pack-01.ktx2", channel: "a" }
+  - id: "crystal"
+    variants:
+      - { id: "01", file: "crystal-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "crystal-pack-01.ktx2", channel: "g" }
+  - id: "gabor"
+    variants:
+      - { id: "01", file: "gabor-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "gabor-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "gabor-pack-01.ktx2", channel: "b" }
+  - id: "grainy"
+    variants:
+      - { id: "02", file: "grainy-pack-01.ktx2", channel: "r" }
+      - { id: "03", file: "grainy-pack-01.ktx2", channel: "g" }
+      - { id: "04", file: "grainy-pack-01.ktx2", channel: "b" }
+      - { id: "05", file: "grainy-pack-01.ktx2", channel: "a" }
+      - { id: "06", file: "grainy-pack-02.ktx2", channel: "r" }
+  - id: "manifold"
+    variants:
+      - { id: "01", file: "manifold-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "manifold-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "manifold-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "manifold-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "manifold-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "manifold-pack-02.ktx2", channel: "g" }
+      - { id: "07", file: "manifold-pack-02.ktx2", channel: "b" }
+      - { id: "08", file: "manifold-pack-02.ktx2", channel: "a" }
+  - id: "marble"
+    variants:
+      - { id: "01", file: "marble-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "marble-pack-01.ktx2", channel: "g" }
+      - { id: "06", file: "marble-pack-01.ktx2", channel: "b" }
+      - { id: "07", file: "marble-pack-01.ktx2", channel: "a" }
+      - { id: "08", file: "marble-pack-02.ktx2", channel: "r" }
+      - { id: "09", file: "marble-pack-02.ktx2", channel: "g" }
+  - id: "melt"
+    variants:
+      - { id: "01", file: "melt-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "melt-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "melt-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "melt-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "melt-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "melt-pack-02.ktx2", channel: "g" }
+  - id: "milky"
+    variants:
+      - { id: "01", file: "milky-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "milky-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "milky-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "milky-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "milky-pack-02.ktx2", channel: "r" }
+  - id: "organic"
+    variants:
+      - { id: "02", file: "organic-pack-01.ktx2", channel: "r" }
+  - id: "perlin"
+    variants:
+      - { id: "01", file: "perlin-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "perlin-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "perlin-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "perlin-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "perlin-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "perlin-pack-02.ktx2", channel: "g" }
+      - { id: "07", file: "perlin-pack-02.ktx2", channel: "b" }
+      - { id: "08", file: "perlin-pack-02.ktx2", channel: "a" }
+      - { id: "09", file: "perlin-pack-03.ktx2", channel: "r" }
+  - id: "radial"
+    variants:
+      - { id: "01", file: "radial-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "radial-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "radial-pack-01.ktx2", channel: "b" }
+  - id: "rock"
+    variants:
+      - { id: "01", file: "rock-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "rock-pack-01.ktx2", channel: "g" }
+  - id: "spokes"
+    variants:
+      - { id: "01", file: "spokes-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "spokes-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "spokes-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "spokes-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "spokes-pack-02.ktx2", channel: "r" }
+  - id: "stone"
+    variants:
+      - { id: "01", file: "stone-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "stone-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "stone-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "stone-pack-01.ktx2", channel: "a" }
+  - id: "streak"
+    variants:
+      - { id: "01", file: "streak-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "streak-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "streak-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "streak-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "streak-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "streak-pack-02.ktx2", channel: "g" }
+  - id: "super-noise"
+    variants:
+      - { id: "01", file: "super-noise-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "super-noise-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "super-noise-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "super-noise-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "super-noise-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "super-noise-pack-02.ktx2", channel: "g" }
+  - id: "super-perlin"
+    variants:
+      - { id: "01", file: "super-perlin-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "super-perlin-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "super-perlin-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "super-perlin-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "super-perlin-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "super-perlin-pack-02.ktx2", channel: "g" }
+      - { id: "07", file: "super-perlin-pack-02.ktx2", channel: "b" }
+      - { id: "08", file: "super-perlin-pack-02.ktx2", channel: "a" }
+      - { id: "09", file: "super-perlin-pack-03.ktx2", channel: "r" }
+  - id: "swirl"
+    variants:
+      - { id: "03", file: "swirl-pack-01.ktx2", channel: "r" }
+      - { id: "04", file: "swirl-pack-01.ktx2", channel: "g" }
+      - { id: "05", file: "swirl-pack-01.ktx2", channel: "b" }
+      - { id: "06", file: "swirl-pack-01.ktx2", channel: "a" }
+      - { id: "07", file: "swirl-pack-02.ktx2", channel: "r" }
+      - { id: "08", file: "swirl-pack-02.ktx2", channel: "g" }
+  - id: "techno"
+    variants:
+      - { id: "01", file: "techno-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "techno-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "techno-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "techno-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "techno-pack-02.ktx2", channel: "r" }
+  - id: "tiles"
+    variants:
+      - { id: "01", file: "tiles-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "tiles-pack-01.ktx2", channel: "g" }
+  - id: "turbulence"
+    variants:
+      - { id: "01", file: "turbulence-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "turbulence-pack-01.ktx2", channel: "g" }
+      - { id: "06", file: "turbulence-pack-01.ktx2", channel: "b" }
+  - id: "vein"
+    variants:
+      - { id: "01", file: "vein-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "vein-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "vein-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "vein-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "vein-pack-02.ktx2", channel: "r" }
+  - id: "voronoi"
+    variants:
+      - { id: "01", file: "voronoi-pack-01.ktx2", channel: "r" }
+      - { id: "02", file: "voronoi-pack-01.ktx2", channel: "g" }
+      - { id: "03", file: "voronoi-pack-01.ktx2", channel: "b" }
+      - { id: "04", file: "voronoi-pack-01.ktx2", channel: "a" }
+      - { id: "05", file: "voronoi-pack-02.ktx2", channel: "r" }
+      - { id: "06", file: "voronoi-pack-02.ktx2", channel: "g" }
+      - { id: "07", file: "voronoi-pack-02.ktx2", channel: "b" }

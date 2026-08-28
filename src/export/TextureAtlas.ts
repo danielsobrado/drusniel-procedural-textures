@@ -90,7 +90,7 @@ function atlasTexture(
     );
   }
 
-  return { canvas, blob: new Blob() };
+  return { canvas };
 }
 
 export function combinePbrTextureSets(

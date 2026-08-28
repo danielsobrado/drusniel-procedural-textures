@@ -181,7 +181,7 @@ export class GlbExporter {
     const sourceMeshes = collectMeshes(sourceRoot);
     if (sourceMeshes.length === 0) throw new Error('There is no mesh geometry to export.');
 
-    await this.compiler.ensureSimulationReady();
+    await this.baker.prepare();
     const physical = structuredClone(settings);
     const animations = sourceRoot.animations.map((clip) => clip.clone());
     const displacementExtent = this.compiler.displacementExtent;

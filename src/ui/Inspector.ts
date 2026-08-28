@@ -25,7 +25,7 @@ import {
 } from '../core/material/PatternSettings';
 import { SURFACE_DESIGNER_CONFIG } from '../config/surfaceDesignerConfig';
 import { canReparentGroup } from '../materials/GroupHierarchy';
-import { compileMaterialGraph } from '../materials/MaterialGraph';
+import { compileMaterialGraph } from '../core/material/MaterialGraph';
 import type {
   EnvironmentPreset,
   GenomeLocks,

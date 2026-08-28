@@ -7,12 +7,22 @@ const thumbnailSource = readFileSync(
 );
 const bakerSource = readFileSync(new URL('../src/export/TextureBaker.ts', import.meta.url), 'utf8');
 const seamlessSource = readFileSync(new URL('../src/export/SeamlessTexture.ts', import.meta.url), 'utf8');
+const computeSource = readFileSync(new URL('../src/engine/MaterialComputeEngine.ts', import.meta.url), 'utf8');
+const simulationAtlasSource = readFileSync(new URL('../src/engine/SimulationAtlas.ts', import.meta.url), 'utf8');
 const rendererSource = readFileSync(new URL('../src/engine/LabRenderer.ts', import.meta.url), 'utf8');
 const meshFactorySource = readFileSync(new URL('../src/engine/MeshFactory.ts', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('../src/app/App.ts', import.meta.url), 'utf8');
 const inspectorSource = readFileSync(new URL('../src/ui/Inspector.ts', import.meta.url), 'utf8');
 const layerStripSource = readFileSync(new URL('../src/ui/LayerStrip.ts', import.meta.url), 'utf8');
 const canvasSource = readFileSync(new URL('../src/utils/canvas.ts', import.meta.url), 'utf8');
+const tileBakerSource = readFileSync(
+  new URL('../src/export/TileMaterialBaker.ts', import.meta.url),
+  'utf8'
+);
+const terrainPanelSource = readFileSync(
+  new URL('../src/ui/TerrainTileLabPanel.ts', import.meta.url),
+  'utf8'
+);
 
 describe('nonblocking interactive paths', () => {
   it('uses asynchronous GPU readback for thumbnails and baked maps', () => {
@@ -23,8 +33,15 @@ describe('nonblocking interactive paths', () => {
   });
 
   it('uses bounded shader preparation for texture baking', () => {
+    // Linking a many-layer portable shader is the longest step of a bake, so it must not block
+    // the main thread. compileAsync alone polls COMPLETION_STATUS_KHR with no deadline, which is
+    // its own hang; the poll is raced against a budget that falls back to a compile that returns.
+    expect(bakerSource).toContain('const SHADER_COMPILE_POLL_BUDGET_MS =');
+    expect(bakerSource).toContain('.compileAsync(context.scene, this.camera)');
+    expect(bakerSource).toContain("=== 'timeout'");
     expect(bakerSource).toContain('this.renderer.compile(context.scene, this.camera);');
-    expect(bakerSource).not.toContain('this.renderer.compileAsync(');
+    // The blocking compile survives only as the bounded fallback, never on the hot path.
+    expect(bakerSource).not.toContain('await this.renderer.compile(context.scene, this.camera);');
   });
 
   it('encodes PNG output asynchronously', () => {
@@ -36,6 +53,16 @@ describe('nonblocking interactive paths', () => {
   it('does not keep a synchronous bulk thumbnail path', () => {
     expect(rendererSource).not.toContain('generatePresetThumbnails(');
     expect(thumbnailSource).not.toContain('public render(');
+  });
+
+  it('keeps the texture baker out of the initial application chunk', () => {
+    expect(tileBakerSource).toContain("await import('./TextureBaker')");
+    expect(tileBakerSource).not.toMatch(/import\s*\{[^}]*TextureBaker[^}]*\}\s*from\s*['"]\.\/TextureBaker['"]/);
+  });
+
+  it('cancels the Tile Lab GPU warmup when the panel is disposed', () => {
+    expect(terrainPanelSource).toContain('this.cancelPresetWarmup = scheduleIdleTask(');
+    expect(terrainPanelSource).toContain('this.cancelPresetWarmup?.();');
   });
 
   it('does not traverse selected mesh bounds every render frame', () => {
@@ -107,14 +134,16 @@ describe('nonblocking interactive paths', () => {
     expect(bakerSource).toContain('queue ??= new Int32Array(');
   });
 
-  it('yields during large CPU texture padding work', () => {
-    expect(bakerSource).toContain('PIXEL_WORK_YIELD_INTERVAL');
-    expect(bakerSource).toContain('await yieldToMainThread();');
+  it('guards every frame-budget await in CPU hot paths', () => {
+    for (const source of [bakerSource, seamlessSource, computeSource, simulationAtlasSource]) {
+      expect(source).toContain('if (budget.isDue()) await budget.yieldIfDue();');
+      expect(source).not.toMatch(/^\s*await budget\.yieldIfDue\(\);/mu);
+    }
   });
 
-  it('yields during seamless normal reconstruction', () => {
+  it('keeps seamless normal reconstruction chunked', () => {
     expect(seamlessSource).toContain('rebuildNormalPixelsFromHeightAsync');
-    expect(seamlessSource).toContain('NORMAL_REBUILD_YIELD_ROWS');
+    expect(seamlessSource).toContain('const budget = createFrameBudget();');
     expect(seamlessSource).toContain('await normalizeNormalPixelsAsync(output);');
     expect(seamlessSource).toContain('await rebuildNormalFromHeight(');
   });

@@ -1,6 +1,7 @@
 import { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
 import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from '../core/material/PatternSettings';
-import { compileMaterialGraph, materialGraphHasCycle } from '../materials/MaterialGraph';
+import { compileMaterialGraph, materialGraphHasCycle } from '../core/material/MaterialGraph';
+import { normalizeTextureFieldSettings } from '../core/texture/TextureFieldSettings';
 import { compileSurfaceGraph } from '../materials/SurfaceGraphCompiler';
 import type {
   BlendMode,
@@ -162,7 +163,10 @@ export function normalizeMaterialLayer(value: unknown, index: number): MaterialL
       : asControlNumber(input.maskStrength, `Layer ${index + 1} mask strength`, CONTROL_RANGES.layer.maskStrength),
     pattern: kind === 'pattern'
       ? normalizePatternSettings(input.pattern ?? DEFAULT_PATTERN_SETTINGS)
-      : null
+      : null,
+    texture: input.texture === undefined || input.texture === null
+      ? null
+      : normalizeTextureFieldSettings(input.texture)
   };
 }
 

@@ -1,5 +1,5 @@
 import type { Color } from 'three';
-import type { PhysicalSettings } from './types';
+import type { PhysicalSettings } from '../core/material/RuntimeMaterial';
 
 const MIN_RUNTIME_CLEARCOAT = 0.0001;
 

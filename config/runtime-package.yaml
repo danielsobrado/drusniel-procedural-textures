@@ -1,0 +1,19 @@
+name: "@drusniel/ptl-runtime"
+version: "0.3.0"
+description: "Portable procedural material runtime for Three.js"
+license: "Apache-2.0"
+publishable: true
+repository: "https://github.com/danielsobrado/procedural-texture-lab"
+keywords:
+  - threejs
+  - webgpu
+  - procedural
+  - material
+  - texture
+peerDependencies:
+  three: ">=0.185.0 <0.186.0"
+budgets:
+  javascriptBytes: 400000
+  gzipBytes: 100000
+  declarationBytes: 300000
+  dependencyCount: 1

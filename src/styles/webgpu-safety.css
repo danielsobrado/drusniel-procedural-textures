@@ -1,0 +1,19 @@
+/* Avoid compositor readback of the live WebGPU canvas behind floating UI. */
+.viewport-badge,
+.viewport-help,
+.performance-hud,
+.drop-overlay,
+.radial-center,
+.radial-item,
+.popup-menu,
+.toast,
+.renderer-fallback,
+.viewport::before,
+.viewport::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+
+.viewport::before {
+  background-color: rgba(9, 12, 17, 0.42);
+}

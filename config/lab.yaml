@@ -1,5 +1,5 @@
 app:
-  name: Procedural Texture Lab
+  name: Drusniel Procedural Texture Lab
   storageKey: procedural-texture-lab.project.v2
   legacyStorageKeys:
     - procedural-texture-lab.project.v1
@@ -26,6 +26,7 @@ ui:
   toastInfoMs: 2600
   toastErrorMs: 4200
   idleWorkTimeoutMs: 1000
+  frameBudgetMs: 5
 
 controls:
   layer:

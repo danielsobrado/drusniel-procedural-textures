@@ -11,7 +11,7 @@ import type {
   MaterialLayer,
   PhysicalSettings,
   SynthesisSettings
-} from './types';
+} from '../core/material/RuntimeMaterial';
 import { derivePatternParams, type PatternParamNodes } from './WebGpuPatternNodes';
 
 const DEFAULT_PATTERN_PARAMS = derivePatternParams(DEFAULT_PATTERN_SETTINGS);

@@ -1,3 +1,5 @@
+import type { TextureFieldSettings } from '../texture/TextureFieldSettings';
+
 export type SurfaceGraphValueType =
   | 'float'
   | 'color'
@@ -12,6 +14,7 @@ export type SurfaceGraphValueType =
 export type SurfaceGraphNodeKind =
   | 'shape'
   | 'noise'
+  | 'texture-field'
   | 'tile-sampler'
   | 'shape-splatter'
   | 'flood-fill'
@@ -173,6 +176,7 @@ export interface SurfaceGraphRuntimeLayer {
   maskInvert?: boolean;
   maskStrength?: number;
   pattern?: SurfaceRuntimePattern | null;
+  texture?: TextureFieldSettings | null;
 }
 
 export interface SurfaceGraphNode {

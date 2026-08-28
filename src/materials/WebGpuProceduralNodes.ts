@@ -21,8 +21,8 @@ import {
   SIMULATION_ATLAS_ROWS
 } from '../core/material/SimulationAtlasLayout';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
-import { cellularConfig } from './CellularConfig';
-import type { BlendMode, LayerChannel, LayerKind, MaterialLayer } from './types';
+import { RUNTIME_CELLULAR_CONFIG as cellularConfig } from '../core/material/generated/runtimeConfig';
+import type { BlendMode, LayerChannel, LayerKind, MaterialLayer } from '../core/material/RuntimeMaterial';
 import type { WebGpuMaterialUniforms } from './WebGpuMaterialUniforms';
 
 export interface WebGpuSimulationState {
@@ -272,6 +272,20 @@ function simulationField(
   return sample(position.xy).add(sample(position.xz)).add(sample(position.yz)).div(3);
 }
 
+export function buildWebGpuStochasticDomain(
+  position: Node<'vec3'>,
+  seedOffset: Node<'vec3'>,
+  stochasticTiling: Node<'float'>
+): Node<'vec3'> {
+  const warpDomain = position.mul(0.5).add(seedOffset.mul(0.031));
+  const tileWarp = vec3(
+    noise3(warpDomain.add(vec3(11, 3, 7))),
+    noise3(warpDomain.add(vec3(23, 17, 5))),
+    noise3(warpDomain.add(vec3(2, 29, 19)))
+  ).sub(0.5);
+  return position.add(tileWarp.mul(stochasticTiling));
+}
+
 function layerField(
   layerIndex: number,
   kind: LayerKind,
@@ -282,13 +296,7 @@ function layerField(
   const seed = uniforms.seed[layerIndex]!.add(17);
   const scale = uniforms.scale[layerIndex]!;
   const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
-  const warpDomain = position.mul(0.5).add(seedOffset.mul(0.031));
-  const tileWarp = vec3(
-    noise3(warpDomain.add(vec3(11, 3, 7))),
-    noise3(warpDomain.add(vec3(23, 17, 5))),
-    noise3(warpDomain.add(vec3(2, 29, 19)))
-  ).sub(0.5);
-  const domain = position.add(tileWarp.mul(uniforms.stochasticTiling));
+  const domain = buildWebGpuStochasticDomain(position, seedOffset, uniforms.stochasticTiling);
   const mesoScale = scale.mul(max(uniforms.meso, 0.1));
   const p = domain.mul(max(mesoScale, 0.001)).add(seedOffset);
 
@@ -364,6 +372,15 @@ function fieldAtIndex(
   const fieldLayer = layers[fieldIndex];
   if (fieldLayer === undefined) return float(0.5);
   const meso = layerField(fieldIndex, fieldLayer.kind, position, uniforms, simulation);
+  return buildWebGpuFieldWithSynthesis(meso, fieldIndex, position, uniforms);
+}
+
+export function buildWebGpuFieldWithSynthesis(
+  meso: Node<'float'>,
+  fieldIndex: number,
+  position: Node<'vec3'>,
+  uniforms: WebGpuMaterialUniforms
+): Node<'float'> {
   const seed = uniforms.seed[fieldIndex]!;
   const scale = uniforms.scale[fieldIndex]!;
   const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
@@ -374,6 +391,19 @@ function fieldAtIndex(
     0,
     1
   );
+}
+
+export function buildWebGpuProceduralLayerMesoField(
+  layerIndex: number,
+  position: Node<'vec3'>,
+  layers: readonly MaterialLayer[],
+  uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>
+): Node<'float'> {
+  const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
+  const layer = activeLayers[layerIndex];
+  if (layer === undefined || layer.kind === 'pattern') return float(0.5);
+  return layerField(layerIndex, layer.kind, position, uniforms, simulation);
 }
 
 function fieldForLayer(

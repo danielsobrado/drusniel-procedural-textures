@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
-import { canvasToPngBlob } from '../utils/canvas';
+import { createFrameBudget } from '../utils/scheduling';
 import { createTriangleAtlas, validateBakeUv } from './UvValidation';
 
 export type BakeChannel =
@@ -37,9 +37,17 @@ const FULL_BAKE_CHANNELS: readonly BakeChannel[] = [...PBR_CHANNELS, 'height'];
  */
 export type BakeProgressCallback = (channel: BakeChannel, index: number, total: number) => void;
 
+/** Ceiling on the non-blocking link poll before falling back to a compile that must return. */
+const SHADER_COMPILE_POLL_BUDGET_MS = 10_000;
+
+/**
+ * A baked channel is held as its canvas. PNG encoding is deferred to the download path: the
+ * seamless tile export rewrites every canvas after the bake, so encoding here produced a blob
+ * that was always discarded and re-encoded, doubling the slowest step of a full-resolution
+ * export. See pngBlobsForTextureSet.
+ */
 export interface BakedTexture {
   canvas: HTMLCanvasElement;
-  blob: Blob;
 }
 
 export interface BakedPbrTextureSet {
@@ -84,7 +92,23 @@ const CHANNEL_MODE: Record<BakeChannel, number> = {
   emissive: 8
 };
 const DILATION_PENDING_ALPHA = 1;
-const PIXEL_WORK_YIELD_INTERVAL = 262_144;
+
+function isDisplacementChannel(channel: BakeChannel): boolean {
+  return channel === 'normal' || channel === 'height';
+}
+
+function applyBakePhysicalSettings(
+  material: THREE.ShaderMaterial,
+  settings: Readonly<PhysicalSettings>
+): void {
+  const uniforms = material.uniforms;
+  if (uniforms.uBakeBaseRoughness !== undefined) uniforms.uBakeBaseRoughness.value = settings.roughness;
+  if (uniforms.uBakeBaseMetalness !== undefined) uniforms.uBakeBaseMetalness.value = settings.metalness;
+  if (uniforms.uBakeBaseClearcoat !== undefined) uniforms.uBakeBaseClearcoat.value = settings.clearcoat;
+  if (uniforms.uBakeBaseClearcoatRoughness !== undefined) {
+    uniforms.uBakeBaseClearcoatRoughness.value = settings.clearcoatRoughness;
+  }
+}
 
 function hasMorphTargets(mesh: THREE.Mesh): boolean {
   return Object.values(mesh.geometry.morphAttributes).some((attributes) => attributes.length > 0);
@@ -172,10 +196,6 @@ function flipRowsInPlace(
   return pixels;
 }
 
-function yieldToMainThread(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
 function copyPixel(
   pixels: Uint8ClampedArray<ArrayBuffer>,
   sourceIndex: number,
@@ -212,16 +232,15 @@ async function dilateTransparentPixels(
   if (iterations <= 0) return pixels;
 
   const pixelCount = width * height;
+  const budget = createFrameBudget();
   let queue: Int32Array<ArrayBuffer> | null = null;
   let queueHead = 0;
   let queueTail = 0;
-  let scanned = 0;
 
   for (let y = 0; y < height; y += 1) {
+    if (budget.isDue()) await budget.yieldIfDue();
     for (let x = 0; x < width; x += 1) {
       const index = y * width + x;
-      scanned += 1;
-      if (scanned % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
       if ((pixels[index * 4 + 3] ?? 0) !== 0) continue;
 
       let sourceIndex = -1;
@@ -256,7 +275,7 @@ async function dilateTransparentPixels(
       if (y > 0) queueTail = enqueueDilatedNeighbor(pixels, queue, queueTail, index, index - width);
       if (y + 1 < height) queueTail = enqueueDilatedNeighbor(pixels, queue, queueTail, index, index + width);
 
-      if (queueHead % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
+      if (budget.isDue()) await budget.yieldIfDue();
     }
     depth += 1;
   }
@@ -264,7 +283,7 @@ async function dilateTransparentPixels(
   for (let index = 0; index < queueTail; index += 1) {
     const pixelIndex = queue[index] ?? -1;
     if (pixelIndex >= 0) pixels[pixelIndex * 4 + 3] = 255;
-    if (index > 0 && index % PIXEL_WORK_YIELD_INTERVAL === 0) await yieldToMainThread();
+    if (budget.isDue()) await budget.yieldIfDue();
   }
   return pixels;
 }
@@ -303,6 +322,10 @@ export class TextureBaker {
     private readonly compiler: MaterialCompiler
   ) {}
 
+  public async prepare(): Promise<void> {
+    await this.compiler.ensureBakeReady(this.renderer);
+  }
+
   public snapshotMesh(source: THREE.Mesh): BakeMeshSnapshot {
     source.updateMatrixWorld(true);
     const bake = createBakeGeometry(source);
@@ -325,7 +348,7 @@ export class TextureBaker {
     resolution: number,
     onProgress?: BakeProgressCallback
   ): Promise<BakedTextureSet> {
-    await this.compiler.ensureSimulationReady();
+    await this.prepare();
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
@@ -341,11 +364,34 @@ export class TextureBaker {
     settings: Readonly<PhysicalSettings>,
     resolution: number
   ): Promise<BakedPbrTextureSet> {
-    await this.compiler.ensureSimulationReady();
+    await this.prepare();
     const snapshot = this.snapshotMesh(source);
     const material = this.compiler.createBakeMaterial(settings);
     try {
       return await this.bakePbrSnapshot(snapshot, settings, resolution, material);
+    } finally {
+      material.dispose();
+      this.disposeSnapshot(snapshot);
+    }
+  }
+
+  public async bakeAlbedo(
+    source: THREE.Mesh,
+    settings: Readonly<PhysicalSettings>,
+    resolution: number
+  ): Promise<BakedTexture> {
+    await this.prepare();
+    const snapshot = this.snapshotMesh(source);
+    const material = this.compiler.createBakeMaterial(settings);
+    try {
+      const rendered = await this.renderChannelsSnapshot(
+        snapshot,
+        settings,
+        resolution,
+        material,
+        ['albedo']
+      );
+      return requireRenderedTexture(rendered, 'albedo');
     } finally {
       material.dispose();
       this.disposeSnapshot(snapshot);
@@ -401,25 +447,41 @@ export class TextureBaker {
       throw new Error('Bake resolution must be an integer between 128 and 4096 pixels.');
     }
 
+    await this.prepare();
+    this.compiler.applyBakeTextureFields(material);
+
+    const hasSurfacePass = channels.some((channel) => !isDisplacementChannel(channel));
+    const hasDisplacementPass = channels.some(isDisplacementChannel);
+    const displacementMaterial = hasDisplacementPass
+      ? this.compiler.createBakeMaterial(settings, 'displacement')
+      : null;
     const context = this.createContext(snapshot, material, resolution);
-    const uniforms = material.uniforms;
-    if (uniforms.uBakeBaseRoughness !== undefined) uniforms.uBakeBaseRoughness.value = settings.roughness;
-    if (uniforms.uBakeBaseMetalness !== undefined) uniforms.uBakeBaseMetalness.value = settings.metalness;
-    if (uniforms.uBakeBaseClearcoat !== undefined) uniforms.uBakeBaseClearcoat.value = settings.clearcoat;
-    if (uniforms.uBakeBaseClearcoatRoughness !== undefined) {
-      uniforms.uBakeBaseClearcoatRoughness.value = settings.clearcoatRoughness;
-    }
+    applyBakePhysicalSettings(material, settings);
 
     try {
-      this.prepareContext(context, snapshot.name);
+      if (hasSurfacePass) {
+        context.mesh.material = material;
+        await this.prepareContext(context, snapshot.name);
+      }
+      if (displacementMaterial !== null) {
+        context.mesh.material = displacementMaterial;
+        await this.prepareContext(context, snapshot.name);
+      }
+
       const rendered = new Map<BakeChannel, BakedTexture>();
       for (const [index, channel] of channels.entries()) {
         onProgress?.(channel, index, channels.length);
-        rendered.set(channel, await this.renderChannel(context, material, channel, resolution));
+        const channelMaterial = isDisplacementChannel(channel) ? displacementMaterial : material;
+        if (channelMaterial === null) {
+          throw new Error(`Texture bake material is unavailable for the ${channel} channel.`);
+        }
+        context.mesh.material = channelMaterial;
+        rendered.set(channel, await this.renderChannel(context, channelMaterial, channel, resolution));
       }
       return rendered;
     } finally {
       this.disposeContext(context);
+      displacementMaterial?.dispose();
     }
   }
 
@@ -441,11 +503,75 @@ export class TextureBaker {
     return { scene, mesh, target };
   }
 
-  private prepareContext(context: BakeContext, meshName: string): void {
+  /**
+   * Linking the portable bake program is the longest single step for a many-layer material, and
+   * the synchronous renderer.compile() blocks the main thread for all of it, freezing the
+   * caller's progress reporting. compileAsync lets the driver link off-thread where
+   * KHR_parallel_shader_compile is available, matching LabRenderer and PresetThumbnailRenderer.
+   *
+   * three.js polls COMPLETION_STATUS_KHR with no deadline, so a driver that never reports ready
+   * would hang the bake outright. The poll is therefore bounded: past the budget we fall back to
+   * the synchronous compile, which always returns. See tests/nonblocking-ui.test.ts.
+   */
+  private async compileWithinBudget(context: BakeContext): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<'timeout'>((resolve) => {
+      timer = globalThis.setTimeout(() => resolve('timeout'), SHADER_COMPILE_POLL_BUDGET_MS);
+    });
+    // A late rejection from the abandoned link would otherwise surface as an unhandled
+    // rejection once the timeout has already won the race.
+    const compiled = this.renderer
+      .compileAsync(context.scene, this.camera)
+      .then(() => 'compiled' as const);
+    compiled.catch(() => undefined);
     try {
-      this.renderer.compile(context.scene, this.camera);
+      if ((await Promise.race([compiled, expired])) === 'timeout') {
+        this.renderer.compile(context.scene, this.camera);
+      }
+    } finally {
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+    }
+  }
+
+  private async prepareContext(context: BakeContext, meshName: string): Promise<void> {
+    const gl = this.renderer.getContext();
+    if (gl.isContextLost()) throw new Error('Texture bake WebGL context is lost.');
+
+    const previousCheckShaderErrors = this.renderer.debug.checkShaderErrors;
+    const previousShaderError = this.renderer.debug.onShaderError;
+    let shaderError: Error | null = null;
+
+    this.renderer.debug.checkShaderErrors = true;
+    this.renderer.debug.onShaderError = (webGl, program, vertexShader, fragmentShader) => {
+      const logs = [
+        webGl.getProgramInfoLog(program)?.trim(),
+        webGl.getShaderInfoLog(vertexShader)?.trim(),
+        webGl.getShaderInfoLog(fragmentShader)?.trim()
+      ].filter((value): value is string => value !== undefined && value.length > 0);
+      shaderError = new Error(
+        logs.length > 0 ? logs.join('\n') : 'Shader validation failed without a driver diagnostic.'
+      );
+    };
+
+    try {
+      await this.compileWithinBudget(context);
+      if (shaderError !== null) {
+        const materialName = Array.isArray(context.mesh.material)
+          ? 'Texture bake material'
+          : context.mesh.material.name || context.mesh.material.type;
+        throw new Error(
+          `Texture bake shader compilation failed for mesh "${meshName}" using ${materialName}.`,
+          { cause: shaderError }
+        );
+      }
     } catch (error) {
+      if (error instanceof Error && error.message.startsWith('Texture bake shader compilation failed')) {
+        throw error;
+      }
       throw new Error(`Texture bake shader compilation failed for mesh "${meshName}".`, { cause: error });
+    } finally {
+      this.renderer.debug.checkShaderErrors = previousCheckShaderErrors;
+      this.renderer.debug.onShaderError = previousShaderError;
     }
   }
 
@@ -460,6 +586,10 @@ export class TextureBaker {
     channel: BakeChannel,
     resolution: number
   ): Promise<BakedTexture> {
+    if (this.renderer.getContext().isContextLost()) {
+      throw new Error(`Texture bake WebGL context was lost before rendering the ${channel} channel.`);
+    }
+
     const modeUniform = material.uniforms.uBakeMode;
     if (modeUniform === undefined) throw new Error('Bake shader is missing its output mode uniform.');
     modeUniform.value = CHANNEL_MODE[channel];
@@ -482,9 +612,22 @@ export class TextureBaker {
         resolution,
         pixels
       );
+    } catch (error) {
+      if (this.renderer.getContext().isContextLost()) {
+        throw new Error(`Texture bake WebGL context was lost while rendering the ${channel} channel.`, {
+          cause: error
+        });
+      }
+      throw error;
     } finally {
-      this.renderer.setRenderTarget(previousTarget);
-      this.renderer.setClearColor(previousClearColor, previousClearAlpha);
+      if (!this.renderer.getContext().isContextLost()) {
+        this.renderer.setRenderTarget(previousTarget);
+        this.renderer.setClearColor(previousClearColor, previousClearAlpha);
+      }
+    }
+
+    if (this.renderer.getContext().isContextLost()) {
+      throw new Error(`Texture bake WebGL context was lost while rendering the ${channel} channel.`);
     }
 
     const flipped = flipRowsInPlace(pixels, resolution, resolution);
@@ -497,9 +640,13 @@ export class TextureBaker {
     const canvas = document.createElement('canvas');
     canvas.width = resolution;
     canvas.height = resolution;
-    const canvasContext = canvas.getContext('2d');
+    // A canvas keeps the attributes of whichever getContext call created its context, so the
+    // willReadFrequently requested later by makeTextureSeamless, the terrain preset library and
+    // the GLB height sampler is ignored unless it is set here. Without it every downstream
+    // getImageData is a GPU readback of the full bake resolution.
+    const canvasContext = canvas.getContext('2d', { willReadFrequently: true });
     if (canvasContext === null) throw new Error('Browser does not provide a 2D canvas required for texture baking.');
     canvasContext.putImageData(new ImageData(padded, resolution, resolution), 0, 0);
-    return { canvas, blob: await canvasToPngBlob(canvas) };
+    return { canvas };
   }
 }

@@ -1,0 +1,14 @@
+# Triplanar projection settings for KTX2 texture fields.
+#
+# Fields are scalar 2D assets sampled through three axis-aligned projections.
+# The projections are weighted by the surface normal so a face pointing down an
+# axis reads its own projection at full contrast instead of averaging in two
+# smeared ones. `sharpness` controls how quickly the blend collapses onto a
+# single projection; `minWeight` snaps numerical dust to zero so a flat face
+# samples exactly one plane.
+projection:
+  sharpness: 6.0
+  minWeight: 0.004
+
+sampling:
+  maxAnisotropy: 8

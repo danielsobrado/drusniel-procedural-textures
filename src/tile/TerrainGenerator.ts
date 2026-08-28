@@ -9,15 +9,22 @@ export class TerrainGenerator {
   public async generate(
     settings: Readonly<TerrainSettings>,
     resolution = TERRAIN_CONFIG.resolution,
-    onProgress?: TerrainFieldProgress
+    onProgress?: TerrainFieldProgress,
+    signal?: AbortSignal
   ): Promise<TerrainFields> {
-    const generated = await this.compute.generate(settings, resolution);
+    // Editor controls mutate their settings object in place. Keep every async phase on the
+    // same job snapshot even when the user starts another generation while this one yields.
+    const snapshot = { ...settings };
+    signal?.throwIfAborted();
+    const generated = await this.compute.generate(snapshot, resolution, signal);
+    signal?.throwIfAborted();
     return buildTerrainFieldsChunked(
       generated.height,
       resolution,
-      settings,
+      snapshot,
       generated.backend,
-      onProgress
+      onProgress,
+      signal
     );
   }
 }

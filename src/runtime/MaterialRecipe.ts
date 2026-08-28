@@ -13,16 +13,28 @@ import type {
   MaterialGroup,
   MaterialLayer,
   PhysicalSettings,
-  ProjectState,
+  RuntimeMaterialDefinition,
   SynthesisSettings
-} from '../materials/types';
+} from '../core/material/RuntimeMaterial';
 
 export const PTL_MATERIAL_FORMAT = 'ptl-material';
-export const PTL_MATERIAL_VERSION = 2;
+export const PTL_MATERIAL_VERSION = 3;
 export const PTL_MATERIAL_FILE_SUFFIX = '.ptl.json';
 
+const SURFACE_GRAPH_MATERIAL_VERSION = 2;
 const LEGACY_MATERIAL_VERSION = 1;
 const MAX_RECIPE_SEED = 0xffff_ffff;
+const MAX_TEXTURE_DEPENDENCIES = 64;
+const SAFE_DEPENDENCY_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/iu;
+
+export interface MaterialTextureDependency {
+  id: string;
+  version: 1;
+}
+
+export interface MaterialRecipeDependencies {
+  textures: MaterialTextureDependency[];
+}
 
 export interface MaterialRecipe {
   format: typeof PTL_MATERIAL_FORMAT;
@@ -35,6 +47,7 @@ export interface MaterialRecipe {
   groups: MaterialGroup[];
   layers: MaterialLayer[];
   surfaceGraph: SurfaceGraphDefinition | null;
+  dependencies?: MaterialRecipeDependencies;
 }
 
 function asRecord(value: unknown, label: string): Record<string, unknown> {
@@ -54,40 +67,100 @@ function graphDefinition(value: unknown): SurfaceGraphDefinition | null {
   return normalizeSurfaceGraph(value);
 }
 
+function graphContainsTextureField(graph: Readonly<SurfaceGraphDefinition>): boolean {
+  return graph.nodes.some((node) => node.kind === 'texture-field') ||
+    graph.subgraphs.some(graphContainsTextureField);
+}
+
+function textureDependenciesFromLayers(layers: readonly MaterialLayer[]): MaterialTextureDependency[] {
+  const ids = [...new Set(layers
+    .filter((layer) => layer.texture !== null && layer.texture !== undefined)
+    .map((layer) => layer.texture!.id))]
+    .sort((left, right) => left.localeCompare(right));
+  return ids.map((id) => ({ id, version: 1 as const }));
+}
+
+function normalizeDependencies(
+  value: unknown,
+  layers: readonly MaterialLayer[]
+): MaterialRecipeDependencies | undefined {
+  const required = new Map(textureDependenciesFromLayers(layers).map((item) => [item.id, item] as const));
+  if (value !== undefined && value !== null) {
+    const input = asRecord(value, 'Material recipe dependencies');
+    if (!Array.isArray(input.textures) || input.textures.length > MAX_TEXTURE_DEPENDENCIES) {
+      throw new Error(`Material recipe texture dependencies must contain at most ${MAX_TEXTURE_DEPENDENCIES} entries.`);
+    }
+    const declared = new Set<string>();
+    for (const [index, dependencyValue] of input.textures.entries()) {
+      const dependency = asRecord(dependencyValue, `Texture dependency ${index + 1}`);
+      if (typeof dependency.id !== 'string' || !SAFE_DEPENDENCY_ID.test(dependency.id)) {
+        throw new Error(`Texture dependency ${index + 1} contains an invalid id.`);
+      }
+      if (dependency.version !== 1) {
+        throw new Error(`Texture dependency ${dependency.id} uses unsupported version ${String(dependency.version)}.`);
+      }
+      if (declared.has(dependency.id)) {
+        throw new Error(`Texture dependency ${dependency.id} is declared more than once.`);
+      }
+      if (!required.has(dependency.id)) {
+        throw new Error(`Texture dependency ${dependency.id} is not referenced by a material layer.`);
+      }
+      declared.add(dependency.id);
+    }
+  }
+  if (required.size === 0) return undefined;
+  return { textures: [...required.values()] };
+}
+
 export function createMaterialRecipe(
-  state: Readonly<ProjectState>,
+  definition: Readonly<RuntimeMaterialDefinition>,
   seed = 0,
   coordinateSpace: MaterialCoordinateSpace = 'world',
   algorithms: Readonly<MaterialAlgorithmSettings> = DEFAULT_MATERIAL_ALGORITHMS
 ): MaterialRecipe {
-  const surfaceGraph = state.surfaceGraph === null || state.surfaceGraph === undefined
+  const surfaceGraph = definition.surfaceGraph === null || definition.surfaceGraph === undefined
     ? null
-    : normalizeSurfaceGraph(state.surfaceGraph);
+    : normalizeSurfaceGraph(definition.surfaceGraph);
   const compiled = surfaceGraph === null ? null : compileSurfaceGraph(surfaceGraph);
+  const layers = compiled?.layers ?? definition.layers;
   return parseMaterialRecipe({
     format: PTL_MATERIAL_FORMAT,
     version: PTL_MATERIAL_VERSION,
     seed,
     coordinateSpace,
     algorithms,
-    physical: state.physical,
-    synthesis: state.synthesis,
-    groups: compiled?.groups ?? state.groups,
-    layers: compiled?.layers ?? state.layers,
-    surfaceGraph
+    physical: definition.physical,
+    synthesis: definition.synthesis,
+    groups: compiled?.groups ?? definition.groups,
+    layers,
+    surfaceGraph,
+    dependencies: normalizeDependencies(undefined, layers)
   });
 }
 
 export function parseMaterialRecipe(value: unknown): MaterialRecipe {
   const recipe = asRecord(value, 'Material recipe');
   if (recipe.format !== PTL_MATERIAL_FORMAT) throw new Error('File is not a Procedural Texture Lab material recipe.');
-  if (recipe.version !== PTL_MATERIAL_VERSION && recipe.version !== LEGACY_MATERIAL_VERSION) {
-    throw new Error(`Unsupported material recipe version: ${String(recipe.version)}.`);
+  const version = recipe.version;
+  if (
+    version !== PTL_MATERIAL_VERSION &&
+    version !== SURFACE_GRAPH_MATERIAL_VERSION &&
+    version !== LEGACY_MATERIAL_VERSION
+  ) {
+    throw new Error(`Unsupported material recipe version: ${String(version)}.`);
   }
 
-  const surfaceGraph = recipe.version === PTL_MATERIAL_VERSION
+  const surfaceGraph = version >= SURFACE_GRAPH_MATERIAL_VERSION
     ? graphDefinition(recipe.surfaceGraph)
     : null;
+  if (
+    version < PTL_MATERIAL_VERSION &&
+    surfaceGraph !== null &&
+    graphContainsTextureField(surfaceGraph)
+  ) {
+    throw new Error(`Texture-field material recipes require version ${PTL_MATERIAL_VERSION}.`);
+  }
+
   const compiled = surfaceGraph === null ? null : compileSurfaceGraph(surfaceGraph);
   const normalized = normalizeRuntimeMaterialDefinition({
     physical: recipe.physical,
@@ -95,6 +168,15 @@ export function parseMaterialRecipe(value: unknown): MaterialRecipe {
     groups: compiled?.groups ?? recipe.groups,
     layers: compiled?.layers ?? recipe.layers
   });
+  if (
+    version < PTL_MATERIAL_VERSION &&
+    normalized.layers.some((layer) => layer.texture !== null && layer.texture !== undefined)
+  ) {
+    throw new Error(`Texture-field material recipes require version ${PTL_MATERIAL_VERSION}.`);
+  }
+  const dependencies = version === PTL_MATERIAL_VERSION
+    ? normalizeDependencies(recipe.dependencies, normalized.layers)
+    : undefined;
 
   return {
     format: PTL_MATERIAL_FORMAT,
@@ -106,12 +188,28 @@ export function parseMaterialRecipe(value: unknown): MaterialRecipe {
     synthesis: normalized.synthesis,
     groups: normalized.groups,
     layers: normalized.layers,
-    surfaceGraph
+    surfaceGraph,
+    ...(dependencies === undefined ? {} : { dependencies })
   };
 }
 
+/**
+ * Re-seeds a recipe that parseMaterialRecipe has already returned.
+ *
+ * The recipe seed is applied by runtimeVariantLayers when the material syncs; it takes no part
+ * in surface-graph lowering or layer normalization. Round-tripping through parseMaterialRecipe
+ * to change it would recompile the graph and revalidate every layer only to rebuild identical
+ * values, which is the dominant cost of generating seeded variants.
+ */
+export function reseedMaterialRecipe(
+  recipe: Readonly<MaterialRecipe>,
+  seed: number
+): MaterialRecipe {
+  return { ...recipe, seed: normalizeSeed(seed) };
+}
+
 export function serializeMaterialRecipe(
-  source: Readonly<ProjectState> | Readonly<MaterialRecipe>,
+  source: Readonly<RuntimeMaterialDefinition> | Readonly<MaterialRecipe>,
   seed = 'format' in source ? source.seed : 0
 ): string {
   const recipe = 'format' in source ? parseMaterialRecipe(source) : createMaterialRecipe(source, seed);

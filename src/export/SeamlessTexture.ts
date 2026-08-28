@@ -1,4 +1,4 @@
-import { canvasToPngBlob } from '../utils/canvas';
+import { createFrameBudget } from '../utils/scheduling';
 import type { BakedTexture, BakedTextureSet } from './TextureBaker';
 
 export interface SeamlessTextureOptions {
@@ -10,9 +10,6 @@ export interface SeamlessTextureOptions {
 const CHANNEL_COUNT = 4;
 const NORMAL_Z = 1;
 const INNER_EDGE_OFFSET = 1;
-const NORMAL_REBUILD_YIELD_ROWS = 16;
-const BLEND_YIELD_ROWS = 64;
-const NORMALIZE_YIELD_PIXELS = 262_144;
 const DISPLACEMENT_EXTENT = Symbol('seamless-displacement-extent');
 
 type TextureSetWithMetadata = BakedTextureSet & {
@@ -43,10 +40,6 @@ function canvasContext(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
     throw new Error('Browser does not provide the 2D canvas required for seamless texture export.');
   }
   return context;
-}
-
-function yieldToMainThread(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
 function smootherStep(value: number): number {
@@ -82,8 +75,9 @@ async function blendHorizontalEdges(
 ): Promise<void> {
   const source = new Uint8ClampedArray(pixels);
   const denominator = Math.max(blendPixels - 1, 1);
+  const budget = createFrameBudget();
   for (let y = 0; y < height; y += 1) {
-    if (y > 0 && y % BLEND_YIELD_ROWS === 0) await yieldToMainThread();
+    if (budget.isDue()) await budget.yieldIfDue();
     for (let distance = 0; distance < blendPixels; distance += 1) {
       const leftX = distance;
       const rightX = width - 1 - distance;
@@ -108,8 +102,9 @@ async function blendVerticalEdges(
 ): Promise<void> {
   const source = new Uint8ClampedArray(pixels);
   const denominator = Math.max(blendPixels - 1, 1);
+  const budget = createFrameBudget();
   for (let x = 0; x < width; x += 1) {
-    if (x > 0 && x % BLEND_YIELD_ROWS === 0) await yieldToMainThread();
+    if (budget.isDue()) await budget.yieldIfDue();
     for (let distance = 0; distance < blendPixels; distance += 1) {
       const topY = distance;
       const bottomY = height - 1 - distance;
@@ -256,11 +251,10 @@ function normalizeNormalPixels(pixels: Uint8ClampedArray): void {
 }
 
 async function normalizeNormalPixelsAsync(pixels: Uint8ClampedArray): Promise<void> {
-  let processed = 0;
+  const budget = createFrameBudget();
   for (let offset = 0; offset < pixels.length; offset += CHANNEL_COUNT) {
     normalizeNormalPixel(pixels, offset);
-    processed += 1;
-    if (processed % NORMALIZE_YIELD_PIXELS === 0) await yieldToMainThread();
+    if (budget.isDue()) await budget.yieldIfDue();
   }
 }
 
@@ -383,6 +377,7 @@ async function rebuildNormalPixelsFromHeightAsync(
   const output = new Uint8ClampedArray(new ArrayBuffer(heightPixels.length));
   const pixelWorldX = worldSize / Math.max(width - 1, 1);
   const pixelWorldY = worldSize / Math.max(height - 1, 1);
+  const budget = createFrameBudget();
 
   for (let y = 0; y < height; y += 1) {
     rebuildNormalRow(
@@ -395,7 +390,7 @@ async function rebuildNormalPixelsFromHeightAsync(
       pixelWorldY,
       displacementExtent
     );
-    if ((y + 1) % NORMAL_REBUILD_YIELD_ROWS === 0) await yieldToMainThread();
+    if (budget.isDue()) await budget.yieldIfDue();
   }
 
   await normalizeNormalPixelsAsync(output);
@@ -426,6 +421,12 @@ async function rebuildNormalFromHeight(
   canvasContext(normal.canvas).putImageData(new ImageData(pixels, width, canvasHeight), 0, 0);
 }
 
+function validateBlendFraction(blendFraction: number): void {
+  if (!Number.isFinite(blendFraction) || blendFraction <= 0 || blendFraction >= 0.5) {
+    throw new Error('Seam blend fraction must be greater than 0 and less than 0.5.');
+  }
+}
+
 async function seamTexture(texture: BakedTexture, blendFraction: number): Promise<void> {
   const width = texture.canvas.width;
   const height = texture.canvas.height;
@@ -438,21 +439,25 @@ async function seamTexture(texture: BakedTexture, blendFraction: number): Promis
   );
 
   await blendHorizontalEdges(image.data, width, height, blendPixels);
-  await yieldToMainThread();
   await blendVerticalEdges(image.data, width, height, blendPixels);
-  await yieldToMainThread();
   stabilizePixelSeamSlopes(image.data, width, height);
   context.putImageData(image, 0, 0);
-  texture.blob = await canvasToPngBlob(texture.canvas);
+}
+
+export async function makeTextureSeamless(
+  texture: BakedTexture,
+  blendFraction: number
+): Promise<BakedTexture> {
+  validateBlendFraction(blendFraction);
+  await seamTexture(texture, blendFraction);
+  return texture;
 }
 
 export async function makeTextureSetSeamless(
   textures: BakedTextureSet,
   options: Readonly<SeamlessTextureOptions>
 ): Promise<BakedTextureSet> {
-  if (!Number.isFinite(options.blendFraction) || options.blendFraction <= 0 || options.blendFraction >= 0.5) {
-    throw new Error('Seam blend fraction must be greater than 0 and less than 0.5.');
-  }
+  validateBlendFraction(options.blendFraction);
   if (!Number.isFinite(options.worldSize) || options.worldSize <= 0) {
     throw new Error('Tile world size must be greater than zero.');
   }
@@ -476,7 +481,6 @@ export async function makeTextureSetSeamless(
     options.worldSize,
     displacementExtent
   );
-  textures.normal.blob = await canvasToPngBlob(textures.normal.canvas);
   return textures;
 }
 

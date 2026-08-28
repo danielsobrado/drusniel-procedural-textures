@@ -1,4 +1,4 @@
-import { grassPatternConfig } from '../config/grassPatternConfig';
+import { RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig } from '../core/material/generated/runtimeConfig';
 import type { PatternKind } from '../core/material/PatternSettings';
 
 const GRASS_DISPLACEMENT_GAIN = grassPatternConfig.rendering.geometryDisplacementGain.toFixed(6);

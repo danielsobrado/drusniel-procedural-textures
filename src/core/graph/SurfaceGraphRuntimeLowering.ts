@@ -1,3 +1,5 @@
+import { normalizeTextureFieldSettings } from '../texture/TextureFieldSettings';
+import { surfaceGraphRuntimeInputRoutes } from './SurfaceGraphRuntimeRouting';
 import type {
   SurfaceGraphDefinition,
   SurfaceGraphNode,
@@ -50,6 +52,11 @@ function stringParam(node: Readonly<SurfaceGraphNode>, key: string, fallback: st
   return typeof value === 'string' ? value : fallback;
 }
 
+function booleanParam(node: Readonly<SurfaceGraphNode>, key: string, fallback: boolean): boolean {
+  const value = node.params[key];
+  return typeof value === 'boolean' ? value : fallback;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
@@ -80,6 +87,24 @@ function patternForNode(node: Readonly<SurfaceGraphNode>): SurfaceRuntimePattern
   };
 }
 
+function textureForNode(node: Readonly<SurfaceGraphNode>) {
+  return normalizeTextureFieldSettings({
+    id: stringParam(node, 'textureId', 'perlin.01'),
+    scaleX: numberParam(node, 'scaleX', 1),
+    scaleY: numberParam(node, 'scaleY', 1),
+    rotation: numberParam(node, 'rotation', 0),
+    offsetX: numberParam(node, 'offsetX', 0),
+    offsetY: numberParam(node, 'offsetY', 0),
+    contrast: numberParam(node, 'contrast', 1),
+    bias: numberParam(node, 'bias', 0),
+    invert: booleanParam(node, 'invert', false),
+    clamp: booleanParam(node, 'clamp', true),
+    channel: stringParam(node, 'sampleChannel', 'r'),
+    mode: stringParam(node, 'mode', 'replace'),
+    modeAmount: numberParam(node, 'modeAmount', 1)
+  });
+}
+
 function outputChannel(graph: Readonly<SurfaceGraphDefinition>, nodeId: string): SurfaceRuntimeChannel | undefined {
   const channels = graph.outputs.filter((item) => item.source.nodeId === nodeId).map((item) => item.channel);
   if (channels.includes('baseColor') && channels.includes('height')) return 'surface';
@@ -99,6 +124,9 @@ function runtimeForNode(
   node: Readonly<SurfaceGraphNode>
 ): SurfaceGraphRuntimeLayer | undefined {
   if (node.kind === 'output') return undefined;
+  if (node.kind === 'subgraph') {
+    throw new Error(`Subgraph node ${node.label} requires an explicit runtime binding in Surface Designer V0.3.`);
+  }
   const channel = outputChannel(graph, node.id);
   const common = {
     channel,
@@ -114,6 +142,18 @@ function runtimeForNode(
     return { ...common, kind: 'sdf', displacement: channel === 'height' || channel === 'surface' ? 0.025 : 0 };
   }
   if (node.kind === 'noise') return { ...common, kind: 'fbm', displacement: channel === 'height' ? 0.02 : 0 };
+  if (node.kind === 'texture-field') {
+    return {
+      ...common,
+      kind: 'base',
+      seed: clamp(numberParam(node, 'seed', 0), 0, 100),
+      displacement: channel === 'height' || channel === 'surface'
+        ? clamp(numberParam(node, 'displacement', 0.025), -0.18, 0.18)
+        : 0,
+      roughness: channel === 'roughness' ? clamp(numberParam(node, 'roughness', 0.12), -0.5, 0.5) : 0,
+      texture: textureForNode(node)
+    };
+  }
   if (node.kind === 'tile-sampler' || node.kind === 'shape-splatter') {
     return {
       ...common,
@@ -130,7 +170,6 @@ function runtimeForNode(
   }
   if (node.kind === 'height-to-ao') return { ...common, kind: 'ridges', channel: channel ?? 'ao' };
   if (node.kind === 'sdf') return { ...common, kind: 'sdf', displacement: channel === 'height' || channel === 'surface' ? 0.03 : 0 };
-  if (node.kind === 'subgraph') return { ...common, kind: 'fbm' };
 
   const blendMode = BLEND_KIND_TO_MODE[node.kind];
   if (blendMode !== undefined) return { ...common, kind: 'fbm', blendMode };
@@ -164,30 +203,15 @@ function reachableNodeIds(graph: Readonly<SurfaceGraphDefinition>): Set<string> 
     for (const source of incoming.get(id) ?? []) visit(source);
   };
   for (const output of graph.outputs) visit(output.source.nodeId);
+  for (const node of graph.nodes) if (node.runtime !== undefined) visit(node.id);
   return reachable;
-}
-
-function incomingRuntimeSources(
-  graph: Readonly<SurfaceGraphDefinition>,
-  nodeId: string,
-  runtimeIds: ReadonlySet<string>
-): { structureFrom?: string; maskFrom?: string } {
-  const edges = graph.edges.filter((edge) => edge.to.nodeId === nodeId && runtimeIds.has(edge.from.nodeId));
-  const maskEdge = edges.find((edge) => ['mask', 'opacity', 'density', 'intensity'].includes(edge.to.port));
-  const structureEdge = edges.find((edge) => edge !== maskEdge);
-  return {
-    structureFrom: structureEdge?.from.nodeId,
-    maskFrom: maskEdge?.from.nodeId
-  };
 }
 
 export function lowerSurfaceGraphRuntimeNodes(
   graph: Readonly<SurfaceGraphDefinition>
 ): SurfaceGraphNode[] {
   const reachable = reachableNodeIds(graph);
-  const candidates = graph.nodes.filter((node) =>
-    node.kind !== 'output' && (node.runtime !== undefined || reachable.has(node.id))
-  );
+  const candidates = graph.nodes.filter((node) => node.kind !== 'output' && reachable.has(node.id));
   const runtimeIds = new Set(candidates.map((node) => node.id));
 
   return candidates.map((source) => {
@@ -201,17 +225,17 @@ export function lowerSurfaceGraphRuntimeNodes(
             ...source.runtime,
             pattern: source.runtime.pattern === undefined || source.runtime.pattern === null
               ? source.runtime.pattern
-              : { ...source.runtime.pattern }
+              : { ...source.runtime.pattern },
+            texture: source.runtime.texture === undefined || source.runtime.texture === null
+              ? source.runtime.texture
+              : { ...source.runtime.texture }
           }
     };
-    if (source.runtime !== undefined || node.runtime === undefined) return node;
-    const incoming = incomingRuntimeSources(graph, node.id, runtimeIds);
-    if (node.runtime.structureFrom === undefined && incoming.structureFrom !== undefined) {
-      node.runtime.structureFrom = incoming.structureFrom;
-    }
-    if (node.runtime.maskFrom === undefined && incoming.maskFrom !== undefined) {
-      node.runtime.maskFrom = incoming.maskFrom;
-    }
+    if (node.runtime === undefined) return node;
+
+    const incoming = surfaceGraphRuntimeInputRoutes(graph, node.id, runtimeIds);
+    if (incoming.structureFrom !== undefined) node.runtime.structureFrom = incoming.structureFrom;
+    if (incoming.maskFrom !== undefined) node.runtime.maskFrom = incoming.maskFrom;
     return node;
   });
 }

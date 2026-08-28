@@ -1,4 +1,4 @@
-import { grassPatternConfig } from '../../config/grassPatternConfig';
+import { RUNTIME_GRASS_PATTERN_CONFIG } from './generated/runtimeConfig';
 
 export type PatternKind =
   | 'brick'
@@ -9,6 +9,16 @@ export type PatternKind =
   | 'pebble'
   | 'roof-tile'
   | 'fabric';
+
+export type StructuredPatternKind = Exclude<PatternKind, 'grass' | 'turf'>;
+
+const STRUCTURED_PATTERN_KINDS: readonly StructuredPatternKind[] = [
+  'brick', 'tile', 'plank', 'pebble', 'roof-tile', 'fabric'
+];
+
+export function isStructuredPatternKind(value: string): value is StructuredPatternKind {
+  return STRUCTURED_PATTERN_KINDS.includes(value as StructuredPatternKind);
+}
 
 export interface PatternSettings {
   kind: PatternKind;
@@ -50,8 +60,8 @@ export const DEFAULT_PATTERN_SETTINGS: Readonly<Required<PatternSettings>> = {
   offset: 0.5,
   density: 1,
   edgeWear: 0.08,
-  ...grassPatternConfig.defaults,
-  ...grassPatternConfig.turfDefaults
+  ...RUNTIME_GRASS_PATTERN_CONFIG.defaults,
+  ...RUNTIME_GRASS_PATTERN_CONFIG.turfDefaults
 };
 
 export const PATTERN_LIMITS = {
@@ -65,8 +75,8 @@ export const PATTERN_LIMITS = {
   edgeWear: { min: 0, max: 1 }
 } as const;
 
-export const GRASS_PATTERN_LIMITS = grassPatternConfig.limits;
-export const TURF_PATTERN_LIMITS = grassPatternConfig.turfLimits;
+export const GRASS_PATTERN_LIMITS = RUNTIME_GRASS_PATTERN_CONFIG.limits;
+export const TURF_PATTERN_LIMITS = RUNTIME_GRASS_PATTERN_CONFIG.turfLimits;
 
 const KINDS = new Set<PatternKind>([
   'brick', 'tile', 'plank', 'grass', 'turf', 'pebble', 'roof-tile', 'fabric'

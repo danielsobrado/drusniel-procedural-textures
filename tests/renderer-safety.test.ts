@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { rendererSafetyConfig } from '../src/config/rendererSafetyConfig';
 import {
@@ -5,6 +6,8 @@ import {
   FRAGMENT_GLSL,
   SHARED_GLSL
 } from '../src/materials/PortableProceduralShader';
+
+const labRendererSource = readFileSync(new URL('../src/engine/LabRenderer.ts', import.meta.url), 'utf8');
 
 describe('renderer safety configuration', () => {
   it('keeps geometry displacement conservative while preserving normal detail', () => {
@@ -44,5 +47,25 @@ describe('portable renderer safety guards', () => {
     expect(DISPLACED_NORMAL_GLSL).toContain('vec3 labNormalCandidate');
     expect(DISPLACED_NORMAL_GLSL).toContain('labNormalCandidateLengthSq');
     expect(DISPLACED_NORMAL_GLSL).toContain(': labBaseWorldNormal;');
+  });
+});
+
+describe('renderer loss containment', () => {
+  it('handles WebGPU device loss instead of continuing the render loop', () => {
+    expect(labRendererSource).toContain(
+      'this.renderer.onDeviceLost = (info) => this.handleRendererDeviceLost(info);'
+    );
+    expect(labRendererSource).toContain('cancelAnimationFrame(this.animationFrame);');
+    expect(labRendererSource).toContain(
+      'if (this.disposed || this.rendererInitializationError !== null) return;'
+    );
+    expect(labRendererSource).toContain("this.container.dataset.rendererState = 'unavailable';");
+  });
+
+  it('replaces a lost WebGL bake renderer and invalidates dependent helpers', () => {
+    expect(labRendererSource).toContain('if (!current.getContext().isContextLost()) return current;');
+    expect(labRendererSource).toContain('this.releaseBakeRenderer();');
+    expect(labRendererSource).toContain('this.baker = null;');
+    expect(labRendererSource).toContain('this.glbExporter = null;');
   });
 });

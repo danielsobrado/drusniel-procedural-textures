@@ -1,5 +1,9 @@
-import { rendererSafetyConfig } from '../config/rendererSafetyConfig';
-import { structuredPatternConfig } from '../config/structuredPatternConfig';
+import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+import {
+  RUNTIME_RENDERER_SAFETY_CONFIG as rendererSafetyConfig,
+  RUNTIME_STRUCTURED_PATTERN_CONFIG as structuredPatternConfig,
+  RUNTIME_TEXTURE_FIELD_CONFIG as textureFieldConfig
+} from '../core/material/generated/runtimeConfig';
 import {
   DISPLACED_NORMAL_GLSL as BASE_DISPLACED_NORMAL_GLSL,
   FRAGMENT_GLSL as BASE_FRAGMENT_GLSL,
@@ -20,6 +24,8 @@ const NORMAL_VECTOR_EPSILON_SQUARED = (
   rendererSafetyConfig.normal.vectorEpsilon * rendererSafetyConfig.normal.vectorEpsilon
 ).toFixed(18);
 const STRUCTURED_PORTABLE_AVERAGE_MIX = structuredPatternConfig.projection.portableAverageMix.toFixed(6);
+const TEXTURE_FIELD_TRIPLANAR_SHARPNESS = textureFieldConfig.projection.sharpness.toFixed(6);
+const TEXTURE_FIELD_TRIPLANAR_MIN_WEIGHT = textureFieldConfig.projection.minWeight.toFixed(6);
 const STRUCTURED_DISPLACEMENT_GAIN = Object.fromEntries(
   Object.entries(structuredPatternConfig.displacementGain).map(([kind, value]) => [kind, value.toFixed(6)])
 ) as Record<keyof typeof structuredPatternConfig.displacementGain, string>;
@@ -33,6 +39,13 @@ uniform float uLabSimulationCellSize;
 uniform float uLabSdfRadius;
 uniform float uLabSdfBoxSize;
 uniform float uLabSdfEdgeSoftness;
+uniform sampler2D uLabTextureFields[LAB_MAX_LAYERS];
+uniform vec4 uLabTextureTransform[LAB_MAX_LAYERS];
+uniform vec4 uLabTextureAdjust[LAB_MAX_LAYERS];
+uniform int uLabTextureChannel[LAB_MAX_LAYERS];
+uniform float uLabTextureClamp[LAB_MAX_LAYERS];
+uniform int uLabTextureMode[LAB_MAX_LAYERS];
+uniform float uLabTextureModeAmount[LAB_MAX_LAYERS];
 ${PATTERN_GLSL_UNIFORMS}`;
 
 const SIMULATION_HELPERS = `
@@ -50,6 +63,101 @@ float labSimulationField(int layerIndex, vec3 p) {
   float xz = texture2D(uLabSimulationAtlas, labSimulationAtlasUv(layerIndex, p.xz)).r;
   float yz = texture2D(uLabSimulationAtlas, labSimulationAtlasUv(layerIndex, p.yz)).r;
   return (xy + xz + yz) / 3.0;
+}
+`;
+
+const TEXTURE_FIELD_SAMPLER_BRANCHES = Array.from(
+  { length: PTL_MAX_LAYERS },
+  (_, layer) => [
+    `#if LAB_MAX_LAYERS > ${layer}`,
+    `  if (layerIndex == ${layer}) return texture2D(uLabTextureFields[${layer}], uv);`,
+    '#endif'
+  ].join('\n')
+).join('\n');
+
+const TEXTURE_FIELD_HELPERS = `
+vec2 labTextureFieldUv(int layerIndex, vec2 uv) {
+  vec4 transform = uLabTextureTransform[layerIndex];
+  vec4 adjust = uLabTextureAdjust[layerIndex];
+  vec2 centered = uv - 0.5;
+  float c = cos(adjust.x);
+  float s = sin(adjust.x);
+  vec2 rotated = vec2(
+    centered.x * c - centered.y * s,
+    centered.x * s + centered.y * c
+  );
+  return rotated * transform.xy + 0.5 + transform.zw;
+}
+
+float labTextureFieldChannel(int layerIndex, vec4 sampleValue) {
+  int channel = uLabTextureChannel[layerIndex];
+  if (channel == 1) return sampleValue.g;
+  if (channel == 2) return sampleValue.b;
+  if (channel == 3) return sampleValue.a;
+  if (channel == 4) return dot(sampleValue.rgb, vec3(0.2126, 0.7152, 0.0722));
+  return sampleValue.r;
+}
+
+// GLSL ES 1.00 requires a literal constant index into a sampler array; ANGLE rejects even a
+// for-loop index. The branches are therefore unrolled with literal indices, and each one is
+// guarded by the preprocessor so the body stays valid when the bake shader specializes
+// LAB_MAX_LAYERS down to the material's actual layer count (see specializeLayerLimit).
+vec4 labTextureFieldTexel(int layerIndex, vec2 uv) {
+${TEXTURE_FIELD_SAMPLER_BRANCHES}
+  return vec4(0.0);
+}
+
+float labTextureFieldSample(int layerIndex, vec2 uv) {
+  return labTextureFieldChannel(layerIndex, labTextureFieldTexel(layerIndex, labTextureFieldUv(layerIndex, uv)));
+}
+
+float labTextureField(int layerIndex, vec3 p) {
+  vec3 weights = pow(abs(labTriplanarNormal), vec3(${TEXTURE_FIELD_TRIPLANAR_SHARPNESS}));
+  weights *= step(vec3(${TEXTURE_FIELD_TRIPLANAR_MIN_WEIGHT}), weights);
+  float totalWeight = max(dot(weights, vec3(1.0)), 0.000001);
+  float value = 0.0;
+  if (weights.z > 0.0) value += labTextureFieldSample(layerIndex, p.xy) * weights.z;
+  if (weights.y > 0.0) value += labTextureFieldSample(layerIndex, p.xz) * weights.y;
+  if (weights.x > 0.0) value += labTextureFieldSample(layerIndex, p.yz) * weights.x;
+  value /= totalWeight;
+  vec4 adjust = uLabTextureAdjust[layerIndex];
+  value = 0.5 + (value - 0.5) * adjust.y + adjust.z;
+  if (adjust.w > 0.5) value = 1.0 - value;
+  return mix(value, clamp(value, 0.0, 1.0), uLabTextureClamp[layerIndex]);
+}
+`;
+
+const TEXTURE_MODE_HELPERS = `
+float labLayerField(int layerIndex, int kind, vec3 position, float scale, float seed) {
+  int textureMode = uLabTextureMode[layerIndex];
+  if (textureMode == 0) return labGeneratorField(layerIndex, kind, position, scale, seed);
+
+  vec3 seedOffset = vec3(seed * 0.71, seed * 1.17, seed * 1.91);
+  vec3 warpDomain = position * 0.5 + seedOffset * 0.031;
+  vec3 tileWarp = vec3(
+    labNoise3(warpDomain + vec3(11.0, 3.0, 7.0)),
+    labNoise3(warpDomain + vec3(23.0, 17.0, 5.0)),
+    labNoise3(warpDomain + vec3(2.0, 29.0, 19.0))
+  ) - 0.5;
+  vec3 domain = position + tileWarp * uLabStochasticTiling;
+  float safeScale = max(scale, 0.001);
+  float textureField = labTextureField(layerIndex, domain * safeScale + seedOffset);
+  float amount = max(uLabTextureModeAmount[layerIndex], 0.0);
+
+  if (textureMode == 1) return textureField;
+
+  vec3 generatorPosition = position;
+  if (textureMode == 3) {
+    generatorPosition += vec3((textureField - 0.5) * amount / safeScale);
+  }
+  float generatorField = labGeneratorField(layerIndex, kind, generatorPosition, scale, seed);
+  if (textureMode == 2) {
+    return clamp(generatorField * mix(1.0, textureField * 2.0, amount), 0.0, 1.0);
+  }
+  if (textureMode == 4) {
+    return clamp(generatorField + (textureField - 0.5) * amount, 0.0, 1.0);
+  }
+  return generatorField;
 }
 `;
 
@@ -92,7 +200,7 @@ function extendSharedShader(source: string): string {
     )
     .replace(
       'float labLayerField(int kind, vec3 position, float scale, float seed) {',
-      `${SIMULATION_HELPERS}\n${PORTABLE_PATTERN_GLSL_HELPERS}\nfloat labLayerField(int layerIndex, int kind, vec3 position, float scale, float seed) {`
+      `${SIMULATION_HELPERS}\n${TEXTURE_FIELD_HELPERS}\n${PORTABLE_PATTERN_GLSL_HELPERS}\nfloat labGeneratorField(int layerIndex, int kind, vec3 position, float scale, float seed) {`
     )
     .replace(
       `  if (kind == 10) {\n    vec3 q = p + (labFbm3(p * 0.21) - 0.5) * 2.1;\n    float activator = sin(q.x * 1.7 + sin(q.y * 1.3)) * cos(q.z * 1.1 - q.y * 0.7);\n    float inhibitor = labFbm3(q * 0.38 + 19.0);\n    return smoothstep(-0.28, 0.38, activator * 0.62 + inhibitor - 0.5);\n  }`,
@@ -106,6 +214,7 @@ function extendSharedShader(source: string): string {
       `  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - 0.31;\n  float box = length(max(abs(cell) - vec3(0.25), 0.0)) - 0.055;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-0.06, 0.18, sdf);`,
       `  if (kind == 13) return labPatternField(layerIndex, p, seed);\n  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - uLabSdfRadius;\n  float box = length(max(abs(cell) - vec3(uLabSdfBoxSize), 0.0)) - uLabSdfEdgeSoftness;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-uLabSdfEdgeSoftness, uLabSdfEdgeSoftness * 3.0, sdf);`
     )
+    .replace('float labFieldForLayer(int layerIndex, vec3 position) {', `${TEXTURE_MODE_HELPERS}\nfloat labFieldForLayer(int layerIndex, vec3 position) {`)
     .replace(
       `  float mesoField = labLayerField(\n    uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`,
       `  float mesoField = labLayerField(\n    fieldIndex, uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`
@@ -153,14 +262,27 @@ function addCoordinatePolicy(source: string): string {
   return source
     .replace(
       'float labDisplacement = labEvaluateDisplacement(labPosition);',
-      `vec3 labSamplePosition = uLabCoordinateSpace == 0 ? transformed : labPosition;\nfloat labDisplacement = labEvaluateDisplacement(labSamplePosition);`
+      'vec3 labSamplePosition = uLabCoordinateSpace == 0 ? transformed : labPosition;'
+    )
+    .replace(
+      'float labWorldDeterminant = dot(labWorldA, labCofactorX);',
+      `float labWorldDeterminant = dot(labWorldA, labCofactorX);\nlabTriplanarNormal = normalize(objectNormal);\nif (uLabCoordinateSpace != 0 && abs(labWorldDeterminant) > 0.00000001) {\n  vec3 labWorldSamplingNormal = mat3(labCofactorX, labCofactorY, labCofactorZ) * objectNormal;\n  if (labWorldDeterminant < 0.0) labWorldSamplingNormal = -labWorldSamplingNormal;\n  labTriplanarNormal = normalize(labWorldSamplingNormal);\n}\nfloat labDisplacement = labEvaluateDisplacement(labSamplePosition);`
     )
     .replace('vLabPosition = labPosition;', 'vLabPosition = labSamplePosition;');
+}
+
+function exposeSurfaceTriplanarNormal(source: string): string {
+  return source.replace(
+    'vLabPosition = labSamplePosition;',
+    'vLabPosition = labSamplePosition;\nvLabTriplanarNormal = labTriplanarNormal;'
+  );
 }
 
 export const SHARED_GLSL = extendSharedShader(BASE_SHARED_GLSL);
 export const FRAGMENT_GLSL = extendFragmentShader(BASE_FRAGMENT_GLSL);
 export { PHYSICAL_LAYER_GLSL, SHADOW_NORMAL_GLSL };
-export const SURFACE_VERTEX_DISPLACEMENT_GLSL = addCoordinatePolicy(BASE_SURFACE_VERTEX_DISPLACEMENT_GLSL);
+export const SURFACE_VERTEX_DISPLACEMENT_GLSL = exposeSurfaceTriplanarNormal(
+  addCoordinatePolicy(BASE_SURFACE_VERTEX_DISPLACEMENT_GLSL)
+);
 export const SHADOW_VERTEX_DISPLACEMENT_GLSL = addCoordinatePolicy(BASE_SHADOW_VERTEX_DISPLACEMENT_GLSL);
 export const DISPLACED_NORMAL_GLSL = extendDisplacedNormalShader(BASE_DISPLACED_NORMAL_GLSL);

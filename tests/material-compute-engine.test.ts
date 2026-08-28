@@ -1,8 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   MaterialComputeEngine,
   REACTION_DIFFUSION_WGSL
 } from '../src/engine/MaterialComputeEngine';
+
+function restoreGpu(descriptor: PropertyDescriptor | undefined): void {
+  if (descriptor === undefined) Reflect.deleteProperty(globalThis.navigator, 'gpu');
+  else Object.defineProperty(globalThis.navigator, 'gpu', descriptor);
+}
 
 describe('material compute engine', () => {
   it('applies feed to the inhibitor decay in the Gray-Scott update', async () => {
@@ -65,9 +70,109 @@ describe('material compute engine', () => {
       expect((await engine.initialize()).available).toBe(false);
       expect((await engine.initialize()).available).toBe(true);
       expect(attempts).toBe(2);
+      engine.dispose();
     } finally {
-      if (originalGpu === undefined) Reflect.deleteProperty(globalThis.navigator, 'gpu');
-      else Object.defineProperty(globalThis.navigator, 'gpu', originalGpu);
+      restoreGpu(originalGpu);
+    }
+  });
+
+  it('destroys an initialized WebGPU device on dispose', async () => {
+    const originalGpu = Object.getOwnPropertyDescriptor(globalThis.navigator, 'gpu');
+    const destroy = vi.fn();
+    const pipeline = { getBindGroupLayout: () => ({}) };
+    const device = {
+      createShaderModule: () => ({}),
+      createComputePipelineAsync: async () => pipeline,
+      destroy
+    };
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: {
+        requestAdapter: async () => ({ requestDevice: async () => device })
+      }
+    });
+
+    try {
+      const engine = new MaterialComputeEngine();
+      expect((await engine.initialize()).available).toBe(true);
+      expect(engine.cachedPipelineCount).toBe(1);
+
+      engine.dispose();
+
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(engine.cachedPipelineCount).toBe(0);
+      expect(engine.status.available).toBe(false);
+      await expect(engine.initialize()).rejects.toThrow(/disposed/iu);
+    } finally {
+      restoreGpu(originalGpu);
+    }
+  });
+
+  it('does not resurrect a WebGPU device when initialization finishes after dispose', async () => {
+    const originalGpu = Object.getOwnPropertyDescriptor(globalThis.navigator, 'gpu');
+    const destroy = vi.fn();
+    const pipeline = { getBindGroupLayout: () => ({}) };
+    const device = {
+      createShaderModule: () => ({}),
+      createComputePipelineAsync: async () => pipeline,
+      destroy
+    };
+    let resolveDevice!: (value: typeof device) => void;
+    const devicePromise = new Promise<typeof device>((resolve) => { resolveDevice = resolve; });
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: {
+        requestAdapter: async () => ({ requestDevice: () => devicePromise })
+      }
+    });
+
+    try {
+      const engine = new MaterialComputeEngine();
+      const initialization = engine.initialize();
+      await Promise.resolve();
+      engine.dispose();
+      resolveDevice(device);
+
+      expect((await initialization).available).toBe(false);
+      expect(destroy).toHaveBeenCalledOnce();
+      expect(engine.cachedPipelineCount).toBe(0);
+      expect(engine.status.available).toBe(false);
+    } finally {
+      restoreGpu(originalGpu);
+    }
+  });
+
+  it('invalidates cached compute state when the WebGPU device is lost', async () => {
+    const originalGpu = Object.getOwnPropertyDescriptor(globalThis.navigator, 'gpu');
+    const pipeline = { getBindGroupLayout: () => ({}) };
+    let resolveLost!: () => void;
+    const lost = new Promise<void>((resolve) => { resolveLost = resolve; });
+    const device = {
+      createShaderModule: () => ({}),
+      createComputePipelineAsync: async () => pipeline,
+      lost
+    };
+    Object.defineProperty(globalThis.navigator, 'gpu', {
+      configurable: true,
+      value: {
+        requestAdapter: async () => ({ requestDevice: async () => device })
+      }
+    });
+
+    try {
+      const engine = new MaterialComputeEngine();
+      expect((await engine.initialize()).available).toBe(true);
+      expect(engine.cachedPipelineCount).toBe(1);
+
+      resolveLost();
+      await lost;
+      await Promise.resolve();
+
+      expect(engine.status.available).toBe(false);
+      expect(engine.cachedPipelineCount).toBe(0);
+      engine.dispose();
+    } finally {
+      restoreGpu(originalGpu);
     }
   });
 

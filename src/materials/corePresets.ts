@@ -1,12 +1,28 @@
+import {
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  type TextureFieldSettings
+} from '../core/texture/TextureFieldSettings';
 import { createPresetLayer as layer } from './presetLayer';
 import type { MaterialPreset } from './types';
+
+function textureField(
+  id: string,
+  overrides: Partial<TextureFieldSettings> = {}
+): TextureFieldSettings {
+  return {
+    ...DEFAULT_TEXTURE_FIELD_SETTINGS,
+    mode: 'modulate',
+    id,
+    ...overrides
+  };
+}
 
 export const CORE_MATERIAL_PRESETS: readonly MaterialPreset[] = [
   {
     id: 'adipose-v8',
     name: 'Adipose Tissue · SSS',
-    description: 'Layered adipose tissue with branching vessels, subsurface depth and a procedural wet film.',
-    tags: ['biological', 'organic', 'sss', 'wet'],
+    description: 'Layered adipose tissue with branching vessels, hybrid stromal breakup, subsurface depth and a procedural wet film.',
+    tags: ['biological', 'organic', 'sss', 'wet', 'hybrid'],
     physical: {
       roughness: 0.34,
       metalness: 0,
@@ -28,7 +44,7 @@ export const CORE_MATERIAL_PRESETS: readonly MaterialPreset[] = [
         colorB: '#f2bf72',
         roughness: 0.16
       }),
-      layer('preset-adipose-clouds', 'Cloudy fat', 'fbm', {
+      layer('preset-adipose-clouds', 'Hybrid cloudy fat', 'fbm', {
         blendMode: 'screen',
         opacity: 0.62,
         scale: 2.2,
@@ -37,7 +53,16 @@ export const CORE_MATERIAL_PRESETS: readonly MaterialPreset[] = [
         colorA: '#c87820',
         colorB: '#f6d49c',
         roughness: 0.1,
-        displacement: 0.04
+        displacement: 0.04,
+        texture: textureField('organic.02', {
+          scaleX: 1.18,
+          scaleY: 0.84,
+          rotation: 0.34,
+          offsetX: 0.24,
+          offsetY: 0.51,
+          contrast: 1.1,
+          bias: -0.025
+        })
       }),
       layer('preset-adipose-lobules', 'Lobules', 'cellular', {
         blendMode: 'overlay',
@@ -69,16 +94,27 @@ export const CORE_MATERIAL_PRESETS: readonly MaterialPreset[] = [
         strength: 1.35,
         seed: 44,
         colorA: '#7f2831',
-        colorB: '#c65e5d'
+        colorB: '#c65e5d',
+        maskSourceLayerId: 'preset-adipose-clouds',
+        maskStrength: 0.18
       }),
-      layer('preset-adipose-sss', 'Subsurface depth', 'sss', {
+      layer('preset-adipose-sss', 'Hybrid subsurface depth', 'sss', {
         channel: 'sss',
         opacity: 0.66,
         scale: 2.6,
         strength: 1.2,
         seed: 52,
         colorA: '#f09b42',
-        colorB: '#c83e45'
+        colorB: '#c83e45',
+        texture: textureField('milky.03', {
+          scaleX: 1.17,
+          scaleY: 0.86,
+          rotation: -0.24,
+          offsetX: 0.18,
+          offsetY: 0.48,
+          contrast: 1.02,
+          bias: 0
+        })
       }),
       layer('preset-adipose-wet', 'Wet membrane', 'wet-film', {
         channel: 'clearcoat',

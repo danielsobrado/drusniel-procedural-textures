@@ -13,7 +13,7 @@ import {
   smoothstep,
   vec2
 } from 'three/tsl';
-import { structuredPatternConfig } from '../config/structuredPatternConfig';
+import { RUNTIME_STRUCTURED_PATTERN_CONFIG as structuredPatternConfig } from '../core/material/generated/runtimeConfig';
 import type { PatternSettings } from '../core/material/PatternSettings';
 import type { PatternParamNodes } from './WebGpuPatternNodes';
 

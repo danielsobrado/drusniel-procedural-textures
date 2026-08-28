@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  makeTextureSeamless,
   measurePixelSeamMismatch,
   rebuildNormalPixelsFromHeight,
   stabilizePixelSeamSlopes
@@ -27,6 +28,14 @@ function grayscaleTexture(rows: readonly (readonly number[])[]): Uint8ClampedArr
 }
 
 describe('seamless texture processing', () => {
+  it('rejects invalid single-texture blend fractions before touching the canvas', async () => {
+    const texture = { canvas: null as unknown as HTMLCanvasElement };
+
+    await expect(makeTextureSeamless(texture, 0)).rejects.toThrow(
+      'Seam blend fraction must be greater than 0 and less than 0.5.'
+    );
+  });
+
   it('reconstructs the full periodic height slope at duplicated tile edges', () => {
     const row = [128, 255, 128, 0, 128] as const;
     const heightPixels = grayscaleTexture([row, row, row]);

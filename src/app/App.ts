@@ -28,15 +28,17 @@ import { TileMaterialBaker } from '../export/TileMaterialBaker';
 import type { BakeChannel, BakedTextureSet } from '../export/TextureBaker';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { EnvironmentPreset, LayerKind, ObjectPreset, ProjectState } from '../materials/types';
-import { serializeMaterialRecipe } from '../runtime/MaterialRecipe';
+import { serializeMaterialRecipeFromProject } from './MaterialRecipeAdapter';
 import { Inspector } from '../ui/Inspector';
 import { LayerStrip } from '../ui/LayerStrip';
 import { LibraryPanel } from '../ui/LibraryPanel';
 import { ProgressOverlay } from '../ui/ProgressOverlay';
 import { RadialMenu, type RadialCommand } from '../ui/RadialMenu';
 import { Shell } from '../ui/Shell';
+import { SurfaceGraphEditor } from '../ui/SurfaceGraphEditor';
 import { TilePreviewPanel } from '../ui/TilePreviewPanel';
 import { TileWorkspace } from '../ui/TileWorkspace';
+import { canvasToPngBlob } from '../utils/canvas';
 import { downloadBlob, downloadDataUrl, downloadText } from '../utils/download';
 import { idleTurn, nextPaint } from '../utils/scheduling';
 
@@ -123,6 +125,7 @@ export class App {
   private readonly modelLoader = new ModelLoader();
   private readonly library: LibraryPanel;
   private readonly inspector: Inspector;
+  private readonly surfaceGraph: SurfaceGraphEditor;
   private readonly layers: LayerStrip;
   private readonly radial: RadialMenu;
   private readonly tilePreview: TilePreviewPanel;
@@ -185,6 +188,15 @@ export class App {
       onMeshAssigned: (id, assigned) => this.runSafely(() => this.state.setMeshAssignment(id, assigned))
     });
 
+    this.surfaceGraph = new SurfaceGraphEditor(this.shell.elements.surfaceGraph, {
+      onGraphChange: (graph, coalesceKey) => this.state.setSurfaceGraph(graph, coalesceKey),
+      onClose: () => this.state.setGraphMode(false),
+      onError: (error) => {
+        console.error('Surface graph edit failed.', error);
+        this.shell.toast(this.errorMessage(error), 'error');
+      }
+    });
+
     this.layers = new LayerStrip(this.shell.elements.layers, {
       onAdd: (kind) => this.runSafely(() => this.state.addLayer(kind)),
       onSelect: (id) => this.state.selectLayer(id),
@@ -231,6 +243,8 @@ export class App {
     } else if (reason === 'background' || reason === 'wireframe' || reason === 'physical' || reason === 'object') {
       this.schedulePanelRender(state, { inspector: true });
     }
+
+    this.surfaceGraph.render(state.surfaceGraph, state.graphMode);
 
     if (reason === 'object' || reason === 'project') {
       this.syncObject(state);
@@ -301,6 +315,7 @@ export class App {
     this.renderer.setSelectedMesh(state.selectedMeshId);
     this.library.render(state);
     this.inspector.render(state);
+    this.surfaceGraph.render(state.surfaceGraph, state.graphMode);
     this.layers.render(state);
     this.shell.setQualityTier(PERFORMANCE_CONFIG.defaultTier);
     this.shell.setStatus(this.projectStatus(state));
@@ -670,7 +685,7 @@ export class App {
   private exportMaterialRecipe(): void {
     downloadText(
       'procedural-material.ptl.json',
-      serializeMaterialRecipe(this.state.snapshot)
+      serializeMaterialRecipeFromProject(this.state.snapshot)
     );
     this.shell.toast('Portable PTL material recipe exported.');
   }
@@ -735,7 +750,7 @@ export class App {
       this.progress.report('Generating seamless tile…', null);
       const maps = await this.buildSeamlessTileSet(quality.bakeResolution);
       const stem = `${EXPORT_CONFIG.textureFileStem}-${TILE_CONFIG.fileSuffix}`;
-      this.downloadTextureSet(maps, stem);
+      await this.downloadTextureSet(maps, stem);
       this.shell.toast(`Saved 9 seamless maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Seamless texture export failed.', error);
@@ -763,16 +778,25 @@ export class App {
     });
   }
 
-  private downloadTextureSet(maps: Readonly<BakedTextureSet>, stem: string): void {
-    downloadBlob(`${stem}-albedo.png`, maps.albedo.blob);
-    downloadBlob(`${stem}-roughness.png`, maps.roughness.blob);
-    downloadBlob(`${stem}-normal.png`, maps.normal.blob);
-    downloadBlob(`${stem}-height.png`, maps.height.blob);
-    downloadBlob(`${stem}-clearcoat.png`, maps.clearcoat.blob);
-    downloadBlob(`${stem}-clearcoat-roughness.png`, maps.clearcoatRoughness.blob);
-    downloadBlob(`${stem}-metallic.png`, maps.metallic.blob);
-    downloadBlob(`${stem}-ao.png`, maps.ao.blob);
-    downloadBlob(`${stem}-emissive.png`, maps.emissive.blob);
+  private async downloadTextureSet(maps: Readonly<BakedTextureSet>, stem: string): Promise<void> {
+    const channels = [
+      ['albedo', maps.albedo],
+      ['roughness', maps.roughness],
+      ['normal', maps.normal],
+      ['height', maps.height],
+      ['clearcoat', maps.clearcoat],
+      ['clearcoat-roughness', maps.clearcoatRoughness],
+      ['metallic', maps.metallic],
+      ['ao', maps.ao],
+      ['emissive', maps.emissive]
+    ] as const;
+
+    // Every channel is encoded before the first download starts, so the nine downloads still
+    // leave as one burst rather than trickling out between encodes.
+    const encoded = await Promise.all(
+      channels.map(async ([name, texture]) => [name, await canvasToPngBlob(texture.canvas)] as const)
+    );
+    for (const [name, blob] of encoded) downloadBlob(`${stem}-${name}.png`, blob);
   }
 
   private async bakeTextures(): Promise<void> {
@@ -785,7 +809,7 @@ export class App {
         this.state.snapshot.physical,
         (channel, index, total) => this.reportBakeChannel(channel, index, total)
       );
-      this.downloadTextureSet(maps, EXPORT_CONFIG.textureFileStem);
+      await this.downloadTextureSet(maps, EXPORT_CONFIG.textureFileStem);
       this.shell.toast(`Baked 9 maps at ${maps.resolution}×${maps.resolution}.`);
     } catch (error) {
       console.error('Texture bake failed.', error);
@@ -885,7 +909,20 @@ export class App {
     }
   }
 
+  /**
+   * Failures are wrapped with the stage that failed and the real reason in `cause`
+   * ("Renderer is unavailable." caused by "WebGPU renderer device was lost."). Reporting only
+   * the outer message leaves the user, and any bug report they file, with nothing actionable,
+   * so the chain is flattened. The depth cap keeps a self-referential cause from looping.
+   */
   private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : 'Unexpected error.';
+    const chain: string[] = [];
+    let current: unknown = error;
+    for (let depth = 0; current instanceof Error && depth < 4; depth += 1) {
+      const message = current.message.trim();
+      if (message.length > 0 && !chain.includes(message)) chain.push(message);
+      current = current.cause;
+    }
+    return chain.length === 0 ? 'Unexpected error.' : chain.join(' · ');
   }
 }

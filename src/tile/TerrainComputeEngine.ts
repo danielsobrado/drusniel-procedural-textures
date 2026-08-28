@@ -324,20 +324,28 @@ export class TerrainComputeEngine {
   private pipeline: GpuPipelineLike | null = null;
   private initializationPromise: Promise<boolean> | null = null;
 
-  public async generate(settings: Readonly<TerrainSettings>, resolution: number): Promise<TerrainHeightResult> {
+  public async generate(
+    settings: Readonly<TerrainSettings>,
+    resolution: number,
+    signal?: AbortSignal
+  ): Promise<TerrainHeightResult> {
     this.validateResolution(resolution);
     validateTerrainSettings(settings);
+    signal?.throwIfAborted();
     if (await this.initialize()) {
+      signal?.throwIfAborted();
       try {
-        return { height: await this.generateGpu(settings, resolution), backend: 'webgpu' };
+        return { height: await this.generateGpu(settings, resolution, signal), backend: 'webgpu' };
       } catch (error) {
+        signal?.throwIfAborted();
         console.warn('Terrain WebGPU generation failed; using deterministic CPU fallback.', error);
         this.device = null;
         this.pipeline = null;
         this.initializationPromise = null;
       }
     }
-    return { height: await this.generateCpu(settings, resolution), backend: 'cpu' };
+    signal?.throwIfAborted();
+    return { height: await this.generateCpu(settings, resolution, signal), backend: 'cpu' };
   }
 
   private async initialize(): Promise<boolean> {
@@ -372,7 +380,12 @@ export class TerrainComputeEngine {
     }
   }
 
-  private async generateGpu(settings: Readonly<TerrainSettings>, resolution: number): Promise<Float32Array> {
+  private async generateGpu(
+    settings: Readonly<TerrainSettings>,
+    resolution: number,
+    signal?: AbortSignal
+  ): Promise<Float32Array> {
+    signal?.throwIfAborted();
     const device = this.device;
     const pipeline = this.pipeline;
     if (device === null || pipeline === null) throw new Error('Terrain WebGPU pipeline is unavailable.');
@@ -420,6 +433,7 @@ export class TerrainComputeEngine {
       encoder.copyBufferToBuffer(fieldBuffer, 0, readBuffer, 0, byteLength);
       device.queue.submit([encoder.finish()]);
       await readBuffer.mapAsync(GPU_MAP_MODE_READ);
+      signal?.throwIfAborted();
       const values = new Float32Array(readBuffer.getMappedRange()).slice();
       readBuffer.unmap();
       return values;
@@ -430,14 +444,22 @@ export class TerrainComputeEngine {
     }
   }
 
-  private async generateCpu(settings: Readonly<TerrainSettings>, resolution: number): Promise<Float32Array> {
+  private async generateCpu(
+    settings: Readonly<TerrainSettings>,
+    resolution: number,
+    signal?: AbortSignal
+  ): Promise<Float32Array> {
     const height = new Float32Array(resolution * resolution);
     const yieldRows = TERRAIN_CONFIG.compute.cpuYieldRows;
     for (let y = 0; y < resolution; y += 1) {
+      signal?.throwIfAborted();
       for (let x = 0; x < resolution; x += 1) {
         height[y * resolution + x] = periodicHeight(x / resolution, y / resolution, settings);
       }
-      if ((y + 1) % yieldRows === 0 && y + 1 < resolution) await waitForTask();
+      if ((y + 1) % yieldRows === 0 && y + 1 < resolution) {
+        await waitForTask();
+        signal?.throwIfAborted();
+      }
     }
     return height;
   }

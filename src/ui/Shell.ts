@@ -4,6 +4,7 @@ import { escapeHtml } from '../utils/html';
 
 export interface ShellElements {
   viewport: HTMLElement;
+  surfaceGraph: HTMLElement;
   library: HTMLElement;
   inspector: HTMLElement;
   layers: HTMLElement;
@@ -101,6 +102,7 @@ export class Shell {
           <div class="viewport-help">Right click / Space · radial menu</div>
           <div class="performance-hud" data-role="performance">Profiling…</div>
           <div class="drop-overlay">Drop GLB / GLTF bundle</div>
+          <div class="surface-graph-workspace" data-role="surface-graph" hidden></div>
         </main>
 
         <aside class="panel inspector-panel" data-role="inspector"></aside>
@@ -122,6 +124,7 @@ export class Shell {
 
     this.elements = {
       viewport: required(this.root, '[data-role="viewport"]'),
+      surfaceGraph: required(this.root, '[data-role="surface-graph"]'),
       library: required(this.root, '[data-role="library"]'),
       inspector: required(this.root, '[data-role="inspector"]'),
       layers: required(this.root, '[data-role="layers"]'),

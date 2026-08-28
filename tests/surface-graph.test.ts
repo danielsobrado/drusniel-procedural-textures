@@ -13,6 +13,15 @@ function designerGraph(): SurfaceGraphDefinition {
   return structuredClone(graph);
 }
 
+function runtimeBinding(graph: Record<string, unknown>): Record<string, unknown> {
+  const nodes = graph.nodes as Array<Record<string, unknown>>;
+  const runtime = nodes.find((node) => node.runtime !== undefined)?.runtime;
+  if (typeof runtime !== 'object' || runtime === null || Array.isArray(runtime)) {
+    throw new Error('Designer test graph has no runtime-bound node.');
+  }
+  return runtime as Record<string, unknown>;
+}
+
 describe('surface designer graphs', () => {
   it('exposes the core Substance-style node families', () => {
     const kinds = new Set(SURFACE_GRAPH_NODE_SPECS.map((spec) => spec.kind));
@@ -74,10 +83,7 @@ describe('surface designer graphs', () => {
 
   it('rejects malformed runtime values instead of coercing them', () => {
     const graph = designerGraph() as unknown as Record<string, unknown>;
-    const nodes = graph.nodes as Array<Record<string, unknown>>;
-    const runtimeNode = nodes.find((n) => n.runtime !== undefined);
-    if (runtimeNode === undefined) throw new Error('Designer graph has no runtime node.');
-    const runtime = runtimeNode.runtime as Record<string, unknown>;
+    const runtime = runtimeBinding(graph);
     runtime.maskInvert = 'false';
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/mask invert.*boolean/iu);
 
@@ -95,10 +101,7 @@ describe('surface designer graphs', () => {
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/missing output port/iu);
 
     graph.edges = [];
-    const nodes = graph.nodes as Array<Record<string, unknown>>;
-    const runtimeNode = nodes.find((n) => n.runtime !== undefined);
-    if (runtimeNode === undefined) throw new Error('Designer graph has no runtime node.');
-    const runtime = runtimeNode.runtime as Record<string, unknown>;
+    const runtime = runtimeBinding(graph);
     runtime.structureFrom = 'missing-node';
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/missing runtime structure source/iu);
   });

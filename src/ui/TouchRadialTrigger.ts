@@ -24,6 +24,7 @@ export class TouchRadialTrigger {
   }
 
   private handlePointerDown(event: PointerEvent): void {
+    if (event.target instanceof Element && event.target.closest('[data-role="surface-graph"]') !== null) return;
     if (event.pointerType === 'mouse' || event.button !== 0) return;
     if (!event.isPrimary) {
       this.cancel();

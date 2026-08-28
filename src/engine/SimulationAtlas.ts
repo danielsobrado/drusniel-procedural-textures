@@ -1,11 +1,13 @@
 import * as THREE from 'three';
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
+import { requiredMaterialFieldLayerIndices } from '../core/material/MaterialFieldDependencies';
 import {
   SIMULATION_ATLAS_COLUMNS,
   SIMULATION_ATLAS_ROWS
 } from '../core/material/SimulationAtlasLayout';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
-import type { MaterialLayer } from '../materials/types';
+import type { MaterialLayer } from '../core/material/RuntimeMaterial';
+import { createFrameBudget } from '../core/scheduling/FrameBudget';
 import { MaterialComputeEngine } from './MaterialComputeEngine';
 
 export interface MaterialSimulationAtlas {
@@ -14,30 +16,43 @@ export interface MaterialSimulationAtlas {
   cellSize: number;
 }
 
-const ATLAS_PACK_YIELD_MIN_SIZE = 512;
-const ATLAS_PACK_YIELD_ROWS = 16;
+const ATLAS_PACK_BUDGET_MS = 5;
 
-function simulationKind(layer: Readonly<MaterialLayer>): 'reaction-diffusion' | 'thermal-erosion' | null {
-  if (!layer.enabled) return null;
+type SimulationKind = 'reaction-diffusion' | 'thermal-erosion';
+
+interface SimulationLayer {
+  layer: MaterialLayer;
+  index: number;
+  kind: SimulationKind;
+}
+
+function simulationKind(layer: Readonly<MaterialLayer>): SimulationKind | null {
   if (layer.kind === 'reaction-diffusion') return 'reaction-diffusion';
   if (layer.kind === 'erosion') return 'thermal-erosion';
   return null;
 }
 
-function waitForTask(): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
+function requiredSimulationLayers(layers: readonly MaterialLayer[]): SimulationLayer[] {
+  const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
+  const required = requiredMaterialFieldLayerIndices(activeLayers);
+  return activeLayers
+    .map((layer, index) => ({ layer, index, kind: simulationKind(layer) }))
+    .filter((item): item is SimulationLayer => required.has(item.index) && item.kind !== null);
+}
+
+export function materialRequiresSimulation(layers: readonly MaterialLayer[]): boolean {
+  return requiredSimulationLayers(layers).length > 0;
 }
 
 export function materialSimulationFingerprint(
   layers: readonly MaterialLayer[],
   algorithms: Readonly<MaterialAlgorithmSettings>
 ): string {
-  const inputs = layers
-    .slice(0, PTL_MAX_LAYERS)
-    .map((layer, index) => ({ index, kind: simulationKind(layer), seed: layer.seed }))
-    .filter((input): input is { index: number; kind: 'reaction-diffusion' | 'thermal-erosion'; seed: number } =>
-      input.kind !== null
-    );
+  const inputs = requiredSimulationLayers(layers).map(({ index, kind, layer }) => ({
+    index,
+    kind,
+    seed: layer.seed
+  }));
   const usesReactionDiffusion = inputs.some((input) => input.kind === 'reaction-diffusion');
   const usesThermalErosion = inputs.some((input) => input.kind === 'thermal-erosion');
   return JSON.stringify({
@@ -54,13 +69,7 @@ export async function buildMaterialSimulationAtlas(
   layers: readonly MaterialLayer[],
   algorithms: Readonly<MaterialAlgorithmSettings>
 ): Promise<MaterialSimulationAtlas | null> {
-  const simulationLayers = layers
-    .slice(0, PTL_MAX_LAYERS)
-    .map((layer, index) => ({ layer, index, kind: simulationKind(layer) }))
-    .filter((item): item is { layer: MaterialLayer; index: number; kind: 'reaction-diffusion' | 'thermal-erosion' } =>
-      item.kind !== null
-    );
-
+  const simulationLayers = requiredSimulationLayers(layers);
   if (simulationLayers.length === 0) return null;
 
   const cellSize = algorithms.simulationSize;
@@ -68,6 +77,7 @@ export async function buildMaterialSimulationAtlas(
   const atlasHeight = cellSize * SIMULATION_ATLAS_ROWS;
   const bytes = new Uint8Array(atlasWidth * atlasHeight);
   const readyLayers = new Array<boolean>(PTL_MAX_LAYERS).fill(false);
+  const budget = createFrameBudget(ATLAS_PACK_BUDGET_MS);
 
   for (const item of simulationLayers) {
     const field = await engine.simulate({
@@ -91,11 +101,7 @@ export async function buildMaterialSimulationAtlas(
         const value = field.values[sourceOffset + x] ?? 0;
         bytes[targetOffset + x] = Math.round(THREE.MathUtils.clamp(value, 0, 1) * 255);
       }
-      if (
-        cellSize >= ATLAS_PACK_YIELD_MIN_SIZE &&
-        y > 0 &&
-        y % ATLAS_PACK_YIELD_ROWS === 0
-      ) await waitForTask();
+      if (budget.isDue()) await budget.yieldIfDue();
     }
     readyLayers[item.index] = true;
   }

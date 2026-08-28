@@ -7,7 +7,10 @@ import { TerrainGenerator } from '../tile/TerrainGenerator';
 import { TerrainMeshPreview } from '../tile/TerrainMeshPreview';
 import { TerrainPainter } from '../tile/TerrainPainter';
 import type { TerrainPlayerState } from '../tile/TerrainPlayerController';
-import { TerrainPresetTextureLibrary } from '../tile/TerrainPresetTextureLibrary';
+import {
+  TerrainPresetBakeCancelled,
+  TerrainPresetTextureLibrary
+} from '../tile/TerrainPresetTextureLibrary';
 import { TerrainSurfaceComposer, terrainTextureFromCanvas } from '../tile/TerrainSurfaceComposer';
 import {
   TERRAIN_MATERIALS,
@@ -23,6 +26,7 @@ import {
 } from '../tile/TerrainTypes';
 import { downloadBlob, downloadText } from '../utils/download';
 import { escapeHtml } from '../utils/html';
+import { scheduleIdleTask } from '../utils/scheduling';
 
 interface TerrainTileLabCallbacks {
   onStatus?: (status: string) => void;
@@ -74,6 +78,13 @@ function materialButtons(): string {
             ${presetOptions(material.label)}
           </select>
         </label>
+        <div class="terrain-material-progress" data-material-progress="${material.id}" role="progressbar"
+          aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+          aria-label="${escapeHtml(material.label)} bake progress" hidden>
+          <div class="terrain-material-progress-track">
+            <div class="terrain-material-progress-bar" data-material-progress-bar="${material.id}"></div>
+          </div>
+        </div>
       </div>
     `;
   }).join('');
@@ -140,6 +151,7 @@ export class TerrainTileLabPanel {
   private viewMode: TerrainViewMode = 'material';
   private previewMode: '2d' | '3d' = '2d';
   private generationSequence = 0;
+  private generationAbort: AbortController | null = null;
   private textureImportSequence = 0;
   private renderFrame = 0;
   private surfaceFrame = 0;
@@ -148,6 +160,7 @@ export class TerrainTileLabPanel {
   private lastStroke: { x: number; y: number } | null = null;
   private importedTextureName: string | null = null;
   private hasCurrentMaterialTexture = false;
+  private cancelPresetWarmup: (() => void) | null = null;
 
   public constructor(
     private readonly root: HTMLElement,
@@ -193,7 +206,7 @@ export class TerrainTileLabPanel {
             </button>
             <label><span>View</span><select data-role="terrain-view">
               <option value="material">Material</option><option value="height">Height</option><option value="slope">Slope</option>
-              <option value="flow">Flow</option><option value="river">Rivers</option><option value="wetness">Wetness</option><option value="repeat">3 × 3 repeat</option>
+              <option value="flow">Flow</option><option value="river">Rivers</option><option value="wetness">Wetness</option><option value="repeat">3 × 3 material</option>
             </select></label>
             <span class="terrain-backend" data-role="terrain-backend">Preparing…</span>
           </div>
@@ -244,6 +257,12 @@ export class TerrainTileLabPanel {
     this.resizeObserver.observe(this.mapCanvas);
     this.selectMaterial(this.selectedMaterial);
     this.syncPlayerButton('idle');
+    // Building the bake context costs a WebGL2 context creation. Doing it while the terrain
+    // generates keeps it off the critical path of the first preset change.
+    this.cancelPresetWarmup = scheduleIdleTask(() => {
+      this.cancelPresetWarmup = null;
+      this.presetTextures.warm();
+    });
     void this.generate();
   }
 
@@ -280,12 +299,16 @@ export class TerrainTileLabPanel {
 
   public dispose(): void {
     this.generationSequence += 1;
+    this.generationAbort?.abort();
+    this.generationAbort = null;
     this.textureImportSequence += 1;
     for (const material of BASE_MATERIAL_IDS) {
       this.presetLoadSequences[material] = (this.presetLoadSequences[material] ?? 0) + 1;
     }
     if (this.renderFrame !== 0) cancelAnimationFrame(this.renderFrame);
     if (this.surfaceFrame !== 0) cancelAnimationFrame(this.surfaceFrame);
+    this.cancelPresetWarmup?.();
+    this.cancelPresetWarmup = null;
     this.resizeObserver.disconnect();
     this.presetTextures.clear();
     this.meshPreview.dispose();
@@ -405,10 +428,22 @@ export class TerrainTileLabPanel {
 
     selector.disabled = true;
     slot.classList.add('is-loading');
+    const progress = this.materialProgress(material);
+    progress.show();
     sourceLabel.textContent = `Baking ${preset.name}…`;
     this.setStatus(`Baking ${preset.name} for ${materialLabel.toLowerCase()} terrain…`);
     try {
-      const texture = await this.presetTextures.load(preset.id);
+      const texture = await this.presetTextures.load(preset.id, {
+        isCurrent: () => sequence === this.presetLoadSequences[material],
+        onProgress: (phase, fraction) => {
+          if (sequence !== this.presetLoadSequences[material]) return;
+          progress.set(fraction);
+          sourceLabel.textContent = `${preset.name} · ${phase}`;
+          this.setStatus(
+            `${preset.name} → ${materialLabel.toLowerCase()} · ${phase} ${Math.round(fraction * 100)}%`
+          );
+        }
+      });
       if (sequence !== this.presetLoadSequences[material]) return;
       this.composer.setTexture(terrainMaterialIndex(material), texture);
       this.presetAssignments[material] = preset.id;
@@ -418,6 +453,7 @@ export class TerrainTileLabPanel {
       this.refreshSurface();
     } catch (error) {
       if (sequence !== this.presetLoadSequences[material]) return;
+      if (error instanceof TerrainPresetBakeCancelled) return;
       console.error(`Terrain material preset bake failed for ${preset.id}.`, error);
       selector.value = previousPresetId;
       sourceLabel.textContent = previousPresetId === ''
@@ -428,23 +464,53 @@ export class TerrainTileLabPanel {
       if (sequence === this.presetLoadSequences[material]) {
         selector.disabled = false;
         slot.classList.remove('is-loading');
+        this.materialProgress(material).hide();
       }
     }
   }
 
+  private materialProgress(material: TerrainBaseMaterialId): {
+    show: () => void;
+    set: (fraction: number) => void;
+    hide: () => void;
+  } {
+    const host = required<HTMLElement>(this.root, `[data-material-progress="${material}"]`);
+    const bar = required<HTMLElement>(this.root, `[data-material-progress-bar="${material}"]`);
+    const set = (fraction: number): void => {
+      const percent = Math.max(0, Math.min(100, Math.round(fraction * 100)));
+      host.setAttribute('aria-valuenow', String(percent));
+      bar.style.width = `${percent}%`;
+    };
+    return {
+      show: () => {
+        set(0);
+        host.hidden = false;
+      },
+      set,
+      hide: () => {
+        host.hidden = true;
+      }
+    };
+  }
+
   private async generate(): Promise<void> {
     const sequence = ++this.generationSequence;
+    this.generationAbort?.abort();
+    const abort = new AbortController();
+    this.generationAbort = abort;
     this.readGenerationSettings();
+    const settings = { ...this.settings };
     this.setStatus('Generating tileable mountains, drainage and material masks…');
     try {
       const fields = await this.generator.generate(
-        this.settings,
+        settings,
         undefined,
         (phase, fraction) => {
           if (sequence === this.generationSequence) {
             this.setStatus(`${phase}… ${Math.round(fraction * 100)}%`);
           }
-        }
+        },
+        abort.signal
       );
       if (sequence !== this.generationSequence) return;
       this.fields = fields;
@@ -455,8 +521,11 @@ export class TerrainTileLabPanel {
       this.scheduleRender();
       this.refreshSurface();
     } catch (error) {
+      if (sequence !== this.generationSequence) return;
       console.error('Terrain generation failed.', error);
       this.setStatus(error instanceof Error ? error.message : 'Terrain generation failed.');
+    } finally {
+      if (this.generationAbort === abort) this.generationAbort = null;
     }
   }
 
@@ -511,6 +580,7 @@ export class TerrainTileLabPanel {
       this.setStatus('Baking current PTL material for terrain painting…');
       this.callbacks.onCurrentMaterialRequested?.();
     }
+    if (this.viewMode === 'repeat') this.scheduleRender();
   }
 
   private togglePlayerMode(): void {
@@ -559,8 +629,22 @@ export class TerrainTileLabPanel {
     if (this.renderFrame !== 0) return;
     this.renderFrame = requestAnimationFrame(() => {
       this.renderFrame = 0;
-      if (this.fields !== null && this.previewMode === '2d') {
-        this.composer.renderPreview(this.mapCanvas, this.fields, this.painter.mask, this.viewMode, this.settings.materialRepeat);
+      if (this.previewMode !== '2d') return;
+      if (this.viewMode === 'repeat') {
+        this.composer.renderMaterialRepeatPreview(
+          this.mapCanvas,
+          terrainMaterialIndex(this.selectedMaterial)
+        );
+        return;
+      }
+      if (this.fields !== null) {
+        this.composer.renderPreview(
+          this.mapCanvas,
+          this.fields,
+          this.painter.mask,
+          this.viewMode,
+          this.settings.materialRepeat
+        );
       }
     });
   }

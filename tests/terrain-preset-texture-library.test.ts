@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MATERIAL_PRESETS } from '../src/materials/presets';
 import { TerrainPresetTextureLibrary } from '../src/tile/TerrainPresetTextureLibrary';
 import type { TerrainTextureSource } from '../src/tile/TerrainTypes';
@@ -66,5 +66,33 @@ describe('terrain preset texture library', () => {
     expect(await joinedLoad).toBe(activeTexture);
     expect(await library.load(presetId)).toBe(activeTexture);
     expect(bakeCalls).toBe(2);
+  });
+
+  it('releases owned GPU resources after queued work settles', async () => {
+    const library = new TerrainPresetTextureLibrary();
+    const queue = deferred<void>();
+    const bakerDispose = vi.fn();
+    const compilerDispose = vi.fn();
+    const mutable = library as unknown as {
+      bakeQueue: Promise<void>;
+      baker: { dispose: () => void } | null;
+      compiler: { dispose: () => void } | null;
+    };
+    mutable.bakeQueue = queue.promise;
+    mutable.baker = { dispose: bakerDispose };
+    mutable.compiler = { dispose: compilerDispose };
+
+    library.clear();
+    expect(bakerDispose).not.toHaveBeenCalled();
+    expect(compilerDispose).not.toHaveBeenCalled();
+
+    queue.resolve(undefined);
+    await queue.promise;
+    await Promise.resolve();
+
+    expect(bakerDispose).toHaveBeenCalledOnce();
+    expect(compilerDispose).toHaveBeenCalledOnce();
+    expect(mutable.baker).toBeNull();
+    expect(mutable.compiler).toBeNull();
   });
 });

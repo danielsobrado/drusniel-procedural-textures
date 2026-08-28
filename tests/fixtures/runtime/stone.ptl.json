@@ -1,0 +1,15 @@
+{
+  "format": "ptl-material",
+  "version": 1,
+  "seed": 48291,
+  "coordinateSpace": "world",
+  "groups": [],
+  "layers": [{
+    "id": "stone", "name": "Stone", "kind": "cellular", "enabled": true,
+    "blendMode": "normal", "channel": "surface", "opacity": 1, "scale": 2.4,
+    "strength": 1.1, "seed": 27, "colorA": "#282b2d", "colorB": "#8b8f90",
+    "roughness": 0.22, "displacement": 0.06, "groupId": null,
+    "maskSourceLayerId": null, "structureSourceLayerId": null,
+    "maskInvert": false, "maskStrength": 1
+  }]
+}

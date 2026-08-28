@@ -1,4 +1,5 @@
-import type { PhysicalSettings, SynthesisSettings } from '../../materials/types';
+import type { PhysicalSettings, SynthesisSettings } from './RuntimeMaterial';
+import { RUNTIME_CELLULAR_CONFIG } from './generated/runtimeConfig';
 
 export const PTL_MAX_LAYERS = 12;
 export const PTL_MAX_GROUPS = 8;
@@ -79,13 +80,4 @@ export const PTL_SHADER_DEFAULTS = {
   sssThicknessScale: 1.15
 } as const;
 
-export const PTL_CELLULAR_DEFAULTS = {
-  sampling: { jitter: 0.42 },
-  warp: { scale: 0.2, strength: 0.24 },
-  interior: { low: 0.08, high: 0.66 },
-  boundary: { compression: 0.025 },
-  breakup: { scale: 1.05, strength: 0.025 },
-  asymmetry: { scale: 0.28, strength: 0.06 },
-  displacement: { gain: 0.42 },
-  output: { floor: 0.42, gain: 0.18 }
-} as const;
+export const PTL_CELLULAR_DEFAULTS = RUNTIME_CELLULAR_CONFIG;

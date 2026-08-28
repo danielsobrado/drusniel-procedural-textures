@@ -1,10 +1,13 @@
 import type { SurfaceGraphDefinition, SurfaceGraphRuntimeLayer } from '../core/graph/SurfaceGraph';
+import { validateSurfaceGraphExposedControls } from '../core/graph/SurfaceGraphExposedValidation';
+import { validateSurfaceGraphOutputContracts } from '../core/graph/SurfaceGraphOutputValidation';
 import { lowerSurfaceGraphRuntimeNodes } from '../core/graph/SurfaceGraphRuntimeLowering';
 import { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
 import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from '../core/material/PatternSettings';
 import { PTL_MAX_GROUPS, PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
-import { compileMaterialGraph, materialGraphHasCycle } from './MaterialGraph';
-import type { MaterialGroup, MaterialLayer } from './types';
+import { compileMaterialGraph, materialGraphHasCycle } from '../core/material/MaterialGraph';
+import { normalizeTextureFieldSettings } from '../core/texture/TextureFieldSettings';
+import type { MaterialGroup, MaterialLayer } from '../core/material/RuntimeMaterial';
 
 export interface SurfaceGraphCompilation {
   graph: SurfaceGraphDefinition;
@@ -91,12 +94,17 @@ function runtimeLayer(
     maskStrength: runtime.maskStrength ?? 1,
     pattern: runtime.kind === 'pattern'
       ? normalizePatternSettings({ ...DEFAULT_PATTERN_SETTINGS, ...(runtime.pattern ?? {}) })
-      : null
+      : null,
+    texture: runtime.texture === undefined || runtime.texture === null
+      ? null
+      : normalizeTextureFieldSettings(runtime.texture)
   };
 }
 
 export function compileSurfaceGraph(value: unknown): SurfaceGraphCompilation {
   const graph = normalizeSurfaceGraph(value);
+  validateSurfaceGraphOutputContracts(graph);
+  validateSurfaceGraphExposedControls(graph);
   validateUnambiguousGraph(graph);
   const runtimeNodes = lowerSurfaceGraphRuntimeNodes(graph).filter((node) => node.runtime !== undefined);
   if (runtimeNodes.length === 0) throw new Error(`Surface graph ${graph.name} does not contain executable material nodes.`);

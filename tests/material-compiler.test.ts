@@ -100,7 +100,7 @@ describe('material backend contract', () => {
     }
   });
 
-  it('specializes ordinary terrain preset bake shaders to their active layer count', () => {
+  it('specializes ordinary terrain preset bake shaders and uniforms to their active layer count', () => {
     const preset = TERRAIN_PRESETS.find((candidate) => candidate.id === 'coastal-sand');
     if (preset === undefined) throw new Error('Coastal Sand preset is required for this test.');
 
@@ -111,8 +111,34 @@ describe('material backend contract', () => {
       bake = compiler.createBakeMaterial(PHYSICAL);
       expect(bake.fragmentShader).toContain(`#define LAB_MAX_LAYERS ${preset.layers.length}`);
       expect(bake.fragmentShader).not.toContain('uLabPatternKind');
+      expect(bake.uniforms.uLabEnabled?.value).toHaveLength(preset.layers.length);
+      expect(bake.uniforms.uLabColorA?.value).toHaveLength(preset.layers.length);
     } finally {
       bake?.dispose();
+      compiler.dispose();
+    }
+  });
+
+  it('separates surface evaluation from displacement-only bake shaders', () => {
+    const preset = TERRAIN_PRESETS.find((candidate) => candidate.id === 'coastal-sand');
+    if (preset === undefined) throw new Error('Coastal Sand preset is required for this test.');
+
+    const compiler = new MaterialCompiler();
+    let surface: THREE.ShaderMaterial | null = null;
+    let displacement: THREE.ShaderMaterial | null = null;
+    try {
+      compiler.sync(preset.layers, preset.groups ?? [], false, preset.synthesis);
+      surface = compiler.createBakeMaterial(PHYSICAL, 'surface');
+      displacement = compiler.createBakeMaterial(PHYSICAL, 'displacement');
+
+      expect(surface.fragmentShader).toContain('LabSurface surface = labEvaluateSurface(vBakePosition);');
+      expect(surface.fragmentShader).not.toContain('float height = labEvaluateDisplacement(vBakePosition);');
+      expect(displacement.fragmentShader).toContain('float height = labEvaluateDisplacement(vBakePosition);');
+      expect(displacement.fragmentShader).not.toContain('struct LabSurface');
+      expect(displacement.fragmentShader).not.toContain('uLabBlendMode');
+    } finally {
+      displacement?.dispose();
+      surface?.dispose();
       compiler.dispose();
     }
   });

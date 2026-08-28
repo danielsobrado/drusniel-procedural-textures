@@ -263,11 +263,13 @@ export function buildTerrainFieldsChunked(
   resolution: number,
   settings: Readonly<TerrainSettings>,
   backend: TerrainComputeBackend,
-  onProgress?: TerrainFieldProgress
+  onProgress?: TerrainFieldProgress,
+  signal?: AbortSignal
 ): Promise<TerrainFields> {
   validateTerrainInput(baseHeight, resolution);
   validateHydrologySettings(settings);
-  return runFieldPhases(baseHeight, resolution, settings, backend, onProgress);
+  signal?.throwIfAborted();
+  return runFieldPhases(baseHeight, resolution, settings, backend, onProgress, signal);
 }
 
 function yieldToBrowser(): Promise<void> {
@@ -282,27 +284,33 @@ async function runFieldPhases(
   resolution: number,
   settings: Readonly<TerrainSettings>,
   backend: TerrainComputeBackend,
-  onProgress?: TerrainFieldProgress
+  onProgress?: TerrainFieldProgress,
+  signal?: AbortSignal
 ): Promise<TerrainFields> {
   onProgress?.('Tracing drainage', 0);
   await yieldToBrowser();
+  signal?.throwIfAborted();
   const flow = deriveFlow(baseHeight, resolution);
 
   onProgress?.('Carving rivers', 0.2);
   await yieldToBrowser();
+  signal?.throwIfAborted();
   const river = deriveRiver(flow, resolution, settings.riverDensity);
   const height = carveRivers(baseHeight, river, settings.riverDepth);
 
   onProgress?.('Deriving slope', 0.45);
   await yieldToBrowser();
+  signal?.throwIfAborted();
   const slope = deriveSlope(height, resolution);
 
   onProgress?.('Spreading wetness', 0.65);
   await yieldToBrowser();
+  signal?.throwIfAborted();
   const wetness = deriveWetness(river, flow, resolution, settings.wetnessRadius);
 
   onProgress?.('Classifying materials', 0.85);
   await yieldToBrowser();
+  signal?.throwIfAborted();
   const material = classifyMaterials(height, slope, wetness);
 
   onProgress?.('Classifying materials', 1);

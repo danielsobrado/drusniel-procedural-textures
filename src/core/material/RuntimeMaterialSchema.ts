@@ -1,4 +1,4 @@
-import { compileMaterialGraph, materialGraphHasCycle } from '../../materials/MaterialGraph';
+import { compileMaterialGraph, materialGraphHasCycle } from './MaterialGraph';
 import type {
   BlendMode,
   LayerChannel,
@@ -7,8 +7,9 @@ import type {
   MaterialLayer,
   PhysicalSettings,
   SynthesisSettings
-} from '../../materials/types';
+} from './RuntimeMaterial';
 import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from './PatternSettings';
+import { normalizeTextureFieldSettings } from '../texture/TextureFieldSettings';
 import {
   PTL_DEFAULT_PHYSICAL,
   PTL_DEFAULT_SYNTHESIS,
@@ -119,7 +120,10 @@ function normalizeLayer(value: unknown, index: number): MaterialLayer {
       : finite(input.maskStrength, `Layer ${index + 1} mask strength`, PTL_LAYER_LIMITS.maskStrength.min, PTL_LAYER_LIMITS.maskStrength.max),
     pattern: kind === 'pattern'
       ? normalizePatternSettings(input.pattern ?? DEFAULT_PATTERN_SETTINGS)
-      : null
+      : null,
+    texture: input.texture === undefined || input.texture === null
+      ? null
+      : normalizeTextureFieldSettings(input.texture)
   };
 }
 

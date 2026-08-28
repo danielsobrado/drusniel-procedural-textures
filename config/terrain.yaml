@@ -38,7 +38,7 @@ imports:
   maxFileBytes: 33554432
   maxDimension: 4096
 preview:
-  maxPixels: 1500000
+  maxPixels: 524288
   riverWidthPixels: 1
   riverOpacity: 0.86
   riverColor: 3968949

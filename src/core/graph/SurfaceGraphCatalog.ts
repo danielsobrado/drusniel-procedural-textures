@@ -38,6 +38,7 @@ const id = (name = 'id', optional = false): SurfaceGraphPortSpec => ({ name, typ
 export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] = [
   { kind: 'shape', label: 'Shape', category: 'generator', inputs: [], outputs: [height()] },
   { kind: 'noise', label: 'Noise', category: 'generator', inputs: [], outputs: [height()] },
+  { kind: 'texture-field', label: 'Texture Field', category: 'generator', inputs: [], outputs: [height(), mask(), scalar('value'), color()] },
   { kind: 'tile-sampler', label: 'Tile Sampler', category: 'scatter', inputs: [height('pattern', true), mask('density', true), scalar('scale', true), scalar('rotation', true)], outputs: [height(), id()] },
   { kind: 'shape-splatter', label: 'Shape Splatter', category: 'scatter', inputs: [height('shape', true), mask('density', true), scalar('scale', true), scalar('rotation', true)], outputs: [height(), id(), mask()] },
   { kind: 'flood-fill', label: 'Flood Fill', category: 'flood', inputs: [height()], outputs: [id()] },
@@ -93,9 +94,6 @@ export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] = [
   { kind: 'normal-combine', label: 'Normal Combine', category: 'utility', inputs: [normal('a'), normal('b')], outputs: [normal()] },
   { kind: 'normal-blend', label: 'Normal Blend', category: 'utility', inputs: [normal('a'), normal('b'), mask('opacity', true)], outputs: [normal()] },
   { kind: 'normal-rotate', label: 'Normal Rotate', category: 'utility', inputs: [normal()], outputs: [normal()] },
-  // Typed as a colour, not a bare vector3: nothing in the catalog consumes vector3, so
-  // the vector3 form made this a dead-end node that could not be wired to anything - not
-  // even to `hsl-adjust`, which takes a colour. It also already lowers to a colour layer.
   { kind: 'rgb-to-hsl', label: 'RGB to HSL', category: 'utility', inputs: [color()], outputs: [color('hsl')] },
   { kind: 'hsl-adjust', label: 'HSL Adjust', category: 'utility', inputs: [color()], outputs: [color()] },
   { kind: 'color-variation', label: 'Color Variation', category: 'utility', inputs: [color(), id('id', true)], outputs: [color()] },

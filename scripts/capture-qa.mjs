@@ -243,6 +243,7 @@ async function openTileLab(page, presetId, presetName) {
   await selectPreset(page, presetId, presetName);
   await (await required(page.locator('[data-command="tile-preview"]'), 'Tile Lab command')).click();
   await page.locator('.app-shell.is-tile-mode').waitFor({ state: 'visible', timeout: UI_TIMEOUT_MS });
+  await (await required(page.locator('[data-tile-mode="texture"]'), 'Tile Lab texture mode')).click();
   await waitForTileReady(page);
 
   const tileCount = await required(page.locator('[data-role="tile-count"]'), 'Tile Lab tile count selector');

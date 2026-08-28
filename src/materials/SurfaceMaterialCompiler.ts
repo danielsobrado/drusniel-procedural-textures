@@ -1,14 +1,20 @@
 import * as THREE from 'three';
-import { grassPatternConfig } from '../config/grassPatternConfig';
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
 import { DEFAULT_MATERIAL_ALGORITHMS } from '../core/material/MaterialAlgorithms';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
+import { materialDisplacementExtent } from '../core/material/MaterialDisplacement';
 import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
+import { PTL_MAX_LAYERS, PTL_SHADER_DEFAULTS } from '../core/material/runtimeDefaults';
 import {
-  PTL_CELLULAR_DEFAULTS,
-  PTL_MAX_LAYERS,
-  PTL_SHADER_DEFAULTS
-} from '../core/material/runtimeDefaults';
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  type TextureFieldChannel,
+  type TextureFieldMode
+} from '../core/texture/TextureFieldSettings';
+import {
+  normalizeResolvedTextureField,
+  type ResolvedTextureField,
+  type TextureFieldResource
+} from '../core/texture/ResolvedTextureField';
 import { BIOLOGICAL_SSS_LIGHT_GLSL, BIOLOGICAL_SSS_PARS_GLSL } from './BiologicalScattering';
 import { PATTERN_KIND_CODE } from './PatternShader';
 import type {
@@ -17,8 +23,10 @@ import type {
   LayerKind,
   MaterialGroup,
   MaterialLayer,
+  PhysicalSettings,
   SynthesisSettings
-} from './types';
+} from '../core/material/RuntimeMaterial';
+import { applyPhysicalSettings } from './PhysicalMaterial';
 import {
   DISPLACED_NORMAL_GLSL,
   FRAGMENT_GLSL,
@@ -66,10 +74,36 @@ const CHANNEL_CODE: Record<LayerChannel, number> = {
   emissive: 8
 };
 
+const TEXTURE_CHANNEL_CODE: Record<TextureFieldChannel, number> = {
+  r: 0,
+  g: 1,
+  b: 2,
+  a: 3,
+  luminance: 4
+};
+
+const TEXTURE_MODE_CODE: Record<TextureFieldMode, number> = {
+  replace: 1,
+  modulate: 2,
+  warp: 3,
+  detail: 4
+};
+
 const COORDINATE_SPACE_CODE: Record<MaterialCoordinateSpace, number> = {
   object: 0,
   world: 1
 };
+
+function createTextureFieldFallback(): THREE.DataTexture {
+  const texture = new THREE.DataTexture(new Uint8Array([128]), 1, 1, THREE.RedFormat, THREE.UnsignedByteType);
+  texture.name = 'PTL Texture Field Fallback';
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
 
 function effectiveGroupOpacity(
   groupId: string | null,
@@ -89,21 +123,6 @@ function effectiveGroupOpacity(
   return opacity;
 }
 
-function routesHeight(channel: LayerChannel): boolean {
-  return channel === 'surface' || channel === 'height';
-}
-
-function displacementSignalExtent(layer: Readonly<MaterialLayer>): number {
-  if (layer.kind === 'base') return 0;
-  if (layer.kind === 'pattern') {
-    if (layer.pattern?.kind === 'grass') return grassPatternConfig.rendering.geometryDisplacementGain;
-    if (layer.pattern?.kind === 'turf') return grassPatternConfig.rendering.turfGeometryDisplacementGain;
-  }
-  if (layer.kind === 'spots' || layer.kind === 'veins' || layer.kind === 'vessels' || layer.kind === 'pattern') return 1;
-  if (layer.kind === 'cellular') return PTL_CELLULAR_DEFAULTS.displacement.gain * 0.5;
-  return 0.5;
-}
-
 function numericPatternValue(
   pattern: Readonly<MaterialLayer['pattern']>,
   key: keyof typeof DEFAULT_PATTERN_SETTINGS
@@ -120,6 +139,10 @@ export class SurfaceMaterialCompiler {
 
   private displacementExtentValue = 0;
   private simulationAtlas: THREE.Texture | null = null;
+  private readonly textureFallback = createTextureFieldFallback();
+  private readonly textureIds = new Array<string | null>(PTL_MAX_LAYERS).fill(null);
+  private readonly textureRecipeChannels = new Array<number>(PTL_MAX_LAYERS).fill(0);
+  private textureFields: ReadonlyMap<string, ResolvedTextureField> = new Map();
 
   protected readonly uniforms = {
     uLabCount: { value: 0 },
@@ -167,6 +190,13 @@ export class SurfaceMaterialCompiler {
     uLabTurfFiberWidth: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberWidth) },
     uLabTurfFiberBreakup: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberBreakup) },
     uLabTurfFiberSoftness: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.fiberSoftness) },
+    uLabTextureFields: { value: Array.from({ length: PTL_MAX_LAYERS }, () => this.textureFallback as THREE.Texture) },
+    uLabTextureTransform: { value: Array.from({ length: PTL_MAX_LAYERS }, () => new THREE.Vector4(1, 1, 0, 0)) },
+    uLabTextureAdjust: { value: Array.from({ length: PTL_MAX_LAYERS }, () => new THREE.Vector4(0, 1, 0, 0)) },
+    uLabTextureChannel: { value: new Array<number>(PTL_MAX_LAYERS).fill(0) },
+    uLabTextureClamp: { value: new Array<number>(PTL_MAX_LAYERS).fill(1) },
+    uLabTextureMode: { value: new Array<number>(PTL_MAX_LAYERS).fill(0) },
+    uLabTextureModeAmount: { value: new Array<number>(PTL_MAX_LAYERS).fill(1) },
     uLabAge: { value: 0 },
     uLabWeathering: { value: 0 },
     uLabGravity: { value: -1 },
@@ -223,13 +253,16 @@ export class SurfaceMaterialCompiler {
     const groupById = new Map(groups.map((group) => [group.id, group]));
     this.uniforms.uLabCount.value = count;
     this.uniforms.uLabCoordinateSpace.value = COORDINATE_SPACE_CODE[coordinateSpace];
-    this.displacementExtentValue = 0;
+    this.displacementExtentValue = materialDisplacementExtent(layers.slice(0, count), groups);
     let hasDisplacement = false;
 
     for (let index = 0; index < PTL_MAX_LAYERS; index += 1) {
       const layer = layers[index];
       const active = layer !== undefined;
       const pattern = active ? layer.pattern ?? DEFAULT_PATTERN_SETTINGS : DEFAULT_PATTERN_SETTINGS;
+      const textureSettings = active && layer.texture !== null && layer.texture !== undefined
+        ? layer.texture
+        : DEFAULT_TEXTURE_FIELD_SETTINGS;
       const groupOpacity = active ? effectiveGroupOpacity(layer.groupId, groupById) : 1;
       const maskIndex = active && layer.maskSourceLayerId !== null
         ? layerIndexById.get(layer.maskSourceLayerId) ?? -1
@@ -280,16 +313,37 @@ export class SurfaceMaterialCompiler {
       this.uniforms.uLabTurfFiberWidth.value[index] = numericPatternValue(pattern, 'fiberWidth');
       this.uniforms.uLabTurfFiberBreakup.value[index] = numericPatternValue(pattern, 'fiberBreakup');
       this.uniforms.uLabTurfFiberSoftness.value[index] = numericPatternValue(pattern, 'fiberSoftness');
+      this.textureIds[index] = active && layer.texture !== null && layer.texture !== undefined
+        ? textureSettings.id
+        : null;
+      this.uniforms.uLabTextureFields.value[index] = this.textureIds[index] === null
+        ? this.textureFallback
+        : this.textureFields.get(this.textureIds[index]!)?.texture ?? this.textureFallback;
+      this.uniforms.uLabTextureTransform.value[index]?.set(
+        textureSettings.scaleX,
+        textureSettings.scaleY,
+        textureSettings.offsetX,
+        textureSettings.offsetY
+      );
+      this.uniforms.uLabTextureAdjust.value[index]?.set(
+        textureSettings.rotation,
+        textureSettings.contrast,
+        textureSettings.bias,
+        textureSettings.invert ? 1 : 0
+      );
+      const resolvedChannel = this.textureFields.get(textureSettings.id)?.channel ?? textureSettings.channel;
+      this.textureRecipeChannels[index] = TEXTURE_CHANNEL_CODE[textureSettings.channel];
+      this.uniforms.uLabTextureChannel.value[index] = TEXTURE_CHANNEL_CODE[resolvedChannel];
+      this.uniforms.uLabTextureClamp.value[index] = textureSettings.clamp ? 1 : 0;
+      this.uniforms.uLabTextureMode.value[index] = active && layer.texture !== null && layer.texture !== undefined
+        ? TEXTURE_MODE_CODE[textureSettings.mode]
+        : 0;
+      this.uniforms.uLabTextureModeAmount.value[index] = textureSettings.modeAmount;
       this.uniforms.uLabColorA.value[index]?.set(active ? layer.colorA : '#000000');
       this.uniforms.uLabColorB.value[index]?.set(active ? layer.colorB : '#000000');
 
-      if (
-        active && layer.enabled && routesHeight(layer.channel) && Math.abs(layer.displacement) > 1e-8 &&
-        layer.opacity > 0 && groupOpacity > 0
-      ) {
+      if (active && layer.enabled && Math.abs(layer.displacement) > 1e-8 && layer.opacity > 0 && groupOpacity > 0) {
         hasDisplacement = true;
-        this.displacementExtentValue +=
-          Math.abs(layer.displacement) * layer.opacity * groupOpacity * displacementSignalExtent(layer);
       }
     }
 
@@ -313,6 +367,26 @@ export class SurfaceMaterialCompiler {
     this.uniforms.uLabSdfEdgeSoftness.value = settings.sdf.edgeSoftness;
   }
 
+  public setPhysical(settings: Readonly<PhysicalSettings>): void {
+    applyPhysicalSettings(this.material, settings);
+  }
+
+  public setTextureFields(textures: ReadonlyMap<string, TextureFieldResource>): void {
+    this.textureFields = new Map(
+      [...textures].map(([id, resource]) => [id, normalizeResolvedTextureField(resource)] as const)
+    );
+    for (let index = 0; index < PTL_MAX_LAYERS; index += 1) {
+      const id = this.textureIds[index] ?? null;
+      const binding = id === null ? undefined : this.textureFields.get(id);
+      this.uniforms.uLabTextureFields.value[index] = id === null
+        ? this.textureFallback
+        : binding?.texture ?? this.textureFallback;
+      this.uniforms.uLabTextureChannel.value[index] = binding?.channel === undefined
+        ? this.textureRecipeChannels[index]!
+        : TEXTURE_CHANNEL_CODE[binding.channel];
+    }
+  }
+
   public setSimulationAtlas(texture: THREE.Texture | null, readyLayers: readonly boolean[] = [], cellSize = 1): void {
     if (this.simulationAtlas !== null && this.simulationAtlas !== texture) this.simulationAtlas.dispose();
     this.simulationAtlas = texture;
@@ -326,6 +400,7 @@ export class SurfaceMaterialCompiler {
   public dispose(): void {
     this.simulationAtlas?.dispose();
     this.simulationAtlas = null;
+    this.textureFallback.dispose();
     this.material.dispose();
     this.depthMaterial.dispose();
     this.distanceMaterial.dispose();
@@ -334,13 +409,17 @@ export class SurfaceMaterialCompiler {
   private configureSurfaceShader(): void {
     this.material.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.uniforms);
-      const varyings = ['varying vec3 vLabPosition;', 'varying vec3 vLabSurfacePosition;'].join('\n');
+      const varyings = [
+        'varying vec3 vLabPosition;',
+        'varying vec3 vLabSurfacePosition;',
+        'varying vec3 vLabTriplanarNormal;'
+      ].join('\n');
       shader.vertexShader = shader.vertexShader
         .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${varyings}`)
         .replace('#include <skinning_vertex>', SURFACE_VERTEX_DISPLACEMENT_GLSL);
       shader.fragmentShader = shader.fragmentShader
         .replace('#include <common>', `#include <common>\n${SHARED_GLSL}\n${FRAGMENT_GLSL}\n${BIOLOGICAL_SSS_PARS_GLSL}\n${varyings}`)
-        .replace('#include <color_fragment>', `#include <color_fragment>\nLabSurface labSurface = labEvaluateSurface(vLabPosition);\ndiffuseColor.rgb = labSurface.color;`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\nlabTriplanarNormal = normalize(vLabTriplanarNormal);\nLabSurface labSurface = labEvaluateSurface(vLabPosition);\ndiffuseColor.rgb = labSurface.color;`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\nroughnessFactor = clamp(roughnessFactor + labSurface.roughness, 0.045, 1.0);`)
         .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>\nmetalnessFactor = clamp(metalnessFactor + labSurface.metallic, 0.0, 1.0);`)
         .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\ntotalEmissiveRadiance += labSurface.emissive;`)
@@ -349,7 +428,7 @@ export class SurfaceMaterialCompiler {
         .replace('#include <lights_physical_fragment>', PHYSICAL_LAYER_GLSL)
         .replace('#include <lights_fragment_end>', `${BIOLOGICAL_SSS_LIGHT_GLSL}\nreflectedLight.indirectDiffuse *= labSurface.ao;`);
     };
-    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v24';
+    this.material.customProgramCacheKey = () => 'procedural-texture-lab-surface-v26';
   }
 
   private configureShadowShader(material: THREE.MeshDepthMaterial | THREE.MeshDistanceMaterial, pass: 'depth' | 'distance'): void {
@@ -360,6 +439,6 @@ export class SurfaceMaterialCompiler {
         .replace('#include <begin_vertex>', SHADOW_NORMAL_GLSL)
         .replace('#include <skinning_vertex>', SHADOW_VERTEX_DISPLACEMENT_GLSL);
     };
-    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v11`;
+    material.customProgramCacheKey = () => `procedural-texture-lab-${pass}-v13`;
   }
 }

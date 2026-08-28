@@ -1,3 +1,4 @@
+import type { SurfaceGraphDefinition } from '../core/graph/SurfaceGraph';
 import {
   setSurfaceGraphExposedValue,
   surfaceGraphExposedValue,
@@ -162,7 +163,11 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     structureSourceLayerId: null,
     maskInvert: false,
     maskStrength: 1,
-    pattern: kind === 'pattern' ? { ...DEFAULT_PATTERN_SETTINGS } : null
+    pattern: kind === 'pattern' ? { ...DEFAULT_PATTERN_SETTINGS } : null,
+    // normalizeMaterialLayer canonicalizes an absent texture to null, so a freshly created
+    // layer has to carry the same key or it will not compare equal to the same layer loaded
+    // back from a file.
+    texture: null
   };
 }
 
@@ -365,13 +370,10 @@ export class AppState {
   }
 
   public applyPreset(preset: MaterialPreset): void {
-    // For graph-based presets, pass the raw graph to normalizeProject which
-    // handles compilation once. Previously the graph was compiled here AND
-    // again inside normalizeProject, doubling synchronous CPU work.
-    const hasGraph = preset.graph !== undefined;
-    const material = hasGraph
-      ? { groups: [] as MaterialGroup[], layers: preset.layers.map((l) => ({ ...l })) }
-      : clonePreset(preset);
+    const graphCompilation = preset.graph === undefined
+      ? null
+      : compileSurfaceGraph(structuredClone(preset.graph));
+    const material = graphCompilation === null ? clonePreset(preset) : graphCompilation;
     const groups = material.groups.slice(0, MAX_GROUPS);
     const layers = material.layers.slice(0, MAX_LAYERS);
     const next = normalizeProject({
@@ -381,7 +383,7 @@ export class AppState {
       selectedLayerId: layers.at(-1)?.id ?? null,
       physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
       synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) },
-      surfaceGraph: hasGraph ? structuredClone(preset.graph!) : null
+      surfaceGraph: graphCompilation?.graph ?? null
     });
     this.commit();
     this.project = next;
@@ -393,27 +395,14 @@ export class AppState {
     if (current === null || current === undefined) return;
     const graph = setSurfaceGraphExposedValue(current, id, value);
     if (surfaceGraphExposedValue(current, id) === surfaceGraphExposedValue(graph, id)) return;
+    this.applySurfaceGraph(graph, `surface-graph:${id}`);
+  }
 
-    const compiled = compileSurfaceGraph(graph);
-    const requestedSelection = this.project.selectedLayerId;
-    const selectedName = requestedSelection === null
-      ? undefined
-      : this.project.layers.find((layer) => layer.id === requestedSelection)?.name;
-    const selectedLayerId = requestedSelection !== null && compiled.layers.some((layer) => layer.id === requestedSelection)
-      ? requestedSelection
-      : selectedName === undefined
-        ? compiled.layers.at(-1)?.id ?? null
-        : compiled.layers.find((layer) => layer.name === selectedName)?.id ?? compiled.layers.at(-1)?.id ?? null;
-    const next = normalizeProject({
-      ...this.project,
-      surfaceGraph: compiled.graph,
-      groups: compiled.groups,
-      layers: compiled.layers,
-      selectedLayerId
-    });
-    this.commit(`surface-graph:${id}`);
-    this.project = next;
-    this.emit('layers');
+  public setSurfaceGraph(graph: Readonly<SurfaceGraphDefinition>, coalesceKey?: string): void {
+    const current = this.project.surfaceGraph;
+    if (current === null || current === undefined) throw new Error('The current material does not have an authored surface graph.');
+    if (JSON.stringify(current) === JSON.stringify(graph)) return;
+    this.applySurfaceGraph(graph, coalesceKey);
   }
 
   public setObjectPreset(preset: ObjectPreset): void {
@@ -571,6 +560,29 @@ export class AppState {
     this.resetCoalescing();
     this.emit('project');
     return true;
+  }
+
+  private applySurfaceGraph(graph: Readonly<SurfaceGraphDefinition>, coalesceKey?: string): void {
+    const compiled = compileSurfaceGraph(structuredClone(graph));
+    const requestedSelection = this.project.selectedLayerId;
+    const selectedName = requestedSelection === null
+      ? undefined
+      : this.project.layers.find((layer) => layer.id === requestedSelection)?.name;
+    const selectedLayerId = requestedSelection !== null && compiled.layers.some((layer) => layer.id === requestedSelection)
+      ? requestedSelection
+      : selectedName === undefined
+        ? compiled.layers.at(-1)?.id ?? null
+        : compiled.layers.find((layer) => layer.name === selectedName)?.id ?? compiled.layers.at(-1)?.id ?? null;
+    const next = normalizeProject({
+      ...this.project,
+      surfaceGraph: compiled.graph,
+      groups: compiled.groups,
+      layers: compiled.layers,
+      selectedLayerId
+    });
+    this.commit(coalesceKey);
+    this.project = next;
+    this.emit('layers');
   }
 
   private invalidateSurfaceGraph(): void {

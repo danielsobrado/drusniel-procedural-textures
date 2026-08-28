@@ -1,20 +1,34 @@
 # Procedural Texture Lab
 
-A realtime Three.js material playground for building layered procedural surfaces, previewing them on 3D meshes, and exporting practical PBR assets.
+A real-time Three.js material playground for building layered procedural surfaces, previewing them on 3D meshes, and exporting practical PBR assets.
 
-**Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/drusniel-procedural-textures/)
+**Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/procedural-texture-lab/)
 
-## V0.3 — Surface Designer (WIP)
+**Current release:** V0.3.0 — Surface Designer
 
-V0.3 adds a Substance-style authored surface graph on top of the existing portable PTL material runtime. Graph-backed materials keep their node structure, reusable subgraphs, routing, and exposed controls while still compiling to the same WebGPU-first preview, portable GLSL bake/export, and `.ptl.json` runtime representation.
+**Runtime library:** See the [PTL Runtime documentation](docs/runtime-package-README.md) for installation, Three.js integration, renderer backends, texture fields, and `.ptl.json` recipes.
 
-The Surface Designer adds a typed node catalog for shape/scatter/flood-fill workflows, height filters, warps, transforms, blends, histogram and color utilities, normal/PBR conversion, SDFs, reusable subgraphs, and PBR outputs. Every catalog node family has a generic executable lowering path, while explicit runtime bindings remain authoritative for hand-authored flagship materials.
+## V0.3 — Surface Designer
 
-Native pattern layers support brick, tile, plank, grass blades, pebble scatter, roof tiles, and woven fabric with direct controls for aspect, gap, roundness, jitter, rotation, row offset, density, and edge wear. Graph-backed presets expose high-level parameters directly in the Inspector and recompile without flattening the authored graph.
+V0.3 completes the move from a layered material playground to a visual surface-authoring tool. Authored graphs stay editable from preview through baking, GLB export, project save/load, and portable runtime use instead of being flattened into a preset-only representation.
 
-Flagship v0.3 materials include old brick wall, dense grass, river gravel, clay roof tiles, weathered wood planks, ceramic tiles, woven fabric, weathered concrete, aged plaster, road asphalt, and cobblestone.
+<!-- Add the V0.3 showcase image here when ready:
+![Procedural Texture Lab V0.3 showcase](docs/images/v0-3-showcase.png)
+-->
 
-Static GLB displacement can optionally use bounded pre-displacement tessellation for finer geometric relief. It is disabled by default and configured in `config/surface-designer.yaml` with edge-length, iteration, and vertex-budget limits. 
+### Highlights
+
+- A native TypeScript graph workspace with draggable nodes, pan and zoom, fit-to-view, a searchable node browser, typed sockets, live compilation, node inspection, duplication, deletion, and project-wide undo/redo
+- A shared catalog of 64 typed nodes covering generators, scatter and flood-fill workflows, height processing, warps, transforms, blends, histogram and color operations, normal/PBR conversion, SDFs, texture fields, and material outputs
+- Validation before execution for missing or incompatible ports, cycles, ambiguous inputs, unsupported runtime routing, conflicting output routes, and multiple material outputs
+- Solid, type-colored graph routes alongside dashed legacy `structureFrom` and `maskFrom` dependencies; a formal route takes ownership when it replaces the same runtime dependency
+- Native brick, tile, plank, grass-blade, pebble, roof-tile, and woven-fabric patterns with controls for layout, gaps, roundness, jitter, rotation, density, and wear
+- 11 graph-backed flagship materials: Old Brick Wall, Dense Grass, River Gravel, Clay Roof Tiles, Weathered Wood Planks, Ceramic Tiles, Woven Fabric, Weathered Concrete, Aged Plaster, Road Asphalt, and Cobblestone
+- Version-3 `.ptl.json` recipes with in-memory migration for version-1 and version-2 materials, plus a staged `@drusniel/ptl-runtime` package for Three.js applications
+- A versioned texture-field library with 117 stable fields packed into 41 mipmapped KTX2 files, with deterministic generated fallbacks for self-contained runtime recipes
+- Optional bounded micro-geometry for static GLB displacement, controlled by edge-length, iteration, and vertex-budget limits in `config/surface-designer.yaml`
+
+V0.3 preserves existing runtime-bound subgraph references in shipped and imported graphs. Arbitrary unbound nested subgraphs are intentionally outside this release because the runtime material model does not yet expose a generic nested-graph execution interface.
 
 ## V0.2 — Structure, Simulation & Evolution
 
@@ -31,7 +45,7 @@ The interactive material preview is WebGPU-first. Texture baking and GLB export 
 ## What it does
 
 - Builds materials from stackable noise, cells, ridges, spots, veins, vessels, wet-film, subsurface, reaction-diffusion, erosion, SDF, and native pattern layers
-- Authors typed procedural surface graphs with reusable subgraphs and exposed parameters
+- Authors typed procedural surface graphs with exposed parameters and preserved runtime-bound subgraph references
 - Supports masks, shared structure sources, groups, blend modes, displacement, and physical material controls
 - Previews materials on built-in shapes or imported GLB/GLTF meshes
 - Includes graph-backed architectural/surface materials plus stone, terrain, grass, moss, and biological presets
@@ -39,7 +53,7 @@ The interactive material preview is WebGPU-first. Texture baking and GLB export 
 - Imports repeating image textures into terrain paint slots and exports deterministic `.ptlmap.json` terrain recipes plus 16-bit R16 height data
 - Bakes albedo, roughness, normal, height, clearcoat, clearcoat-roughness, metallic, AO, and emissive maps
 - Exports portable GLB files with baked PBR textures and optional bounded micro-geometry for static displacement
-- Exports small `.ptl.json` material recipes for runtime regeneration, including v0.3 surface graphs
+- Exports small `.ptl.json` material recipes for runtime regeneration, including V0.3 surface graphs
 - Saves and restores editor projects as JSON
 
 The editor runs entirely in the browser. Imported models, terrain textures, and HDR files stay local and are never fetched from remote URLs.
@@ -79,11 +93,33 @@ Pass `-- --force` to rebuild the complete thumbnail cache.
 | Undo | `Ctrl/Cmd + Z` |
 | Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
+### Surface graph controls
+
+| Action | Control |
+| --- | --- |
+| Pan graph | Drag empty canvas |
+| Zoom graph | Wheel |
+| Fit graph | `F` or **Fit** |
+| Add node | **+ Node** or right click empty canvas |
+| Connect nodes | Drag an output socket to a compatible input socket |
+| Disconnect input | Right click the input socket |
+| Inspect node | Click node |
+| Duplicate node | `Ctrl/Cmd + D` or inspector action |
+| Delete node | `Delete` / `Backspace` or inspector action |
+| Cancel connection / close node browser | `Esc` |
+| Return to material preview | **3D Preview** |
+
 ## Surface Designer
 
-Choose a Surface Designer preset to load an authored graph. High-level graph parameters appear in the Inspector and remain connected to their graph nodes. Enable **Advanced graph** to inspect node categories, runtime lowering, ports, routes, and reusable subgraphs.
+Choose a Surface Designer preset to load an authored graph. High-level graph parameters appear in the Inspector and remain connected to their graph nodes. Enable **Advanced graph** to open the full graph-authoring workspace in the viewport. The material continues to compile through the existing PTL runtime while editing; choose **3D Preview** to return to the rendered material without flattening the graph.
 
-Selecting a native `Pattern sampler` layer exposes the low-level pattern controls. Editing a low-level layer or group intentionally detaches the authored graph because that edit may no longer be representable by its high-level graph. Editing an exposed graph parameter preserves and recompiles the graph.
+<!-- Add a Surface Designer workspace image here when ready:
+![Surface Designer graph workspace](docs/images/v0-3-surface-designer.png)
+-->
+
+The graph workspace reads node and port definitions from the shared typed catalog. It does not maintain a second graph model. Connections are validated against the domain graph before state is committed, and graph edits participate in the normal project undo/redo history. Formal graph routes into runtime-bound nodes override the corresponding legacy runtime field dependency. The V0.3 runtime material model has two dependency slots per compiled node (`structure` and `mask`), so a graph edit that would require a third runtime dependency is rejected instead of being accepted as a no-op.
+
+Selecting a native `Pattern sampler` layer exposes the low-level pattern controls. Editing a low-level layer or group intentionally detaches the authored graph because that edit may no longer be representable by its high-level graph. Editing the graph or one of its exposed parameters preserves and recompiles the graph.
 
 Surface Designer configuration lives in `config/surface-designer.yaml`. The graph and pattern implementation is shared by WebGPU preview and portable baking/export paths rather than maintaining a separate preset-only renderer.
 
@@ -107,7 +143,7 @@ Height export writes little-endian unsigned 16-bit `.r16` data together with an 
 
 ## Portable runtime materials
 
-Use **Export PTL** to save the authored surface as a small, versioned `.ptl.json` recipe without project-only viewport or imported-asset state. V0.3 recipes can include the normalized surface graph and regenerate canonical PTL runtime layers. Version-1 recipes remain supported and migrate in memory.
+Use **Export PTL** to save the authored surface as a small, versioned `.ptl.json` recipe without project-only viewport or imported-asset state. V0.3 recipes can include the normalized surface graph and regenerate canonical PTL runtime layers. Version-1 and version-2 recipes remain supported and migrate in memory.
 
 ```ts
 import {
@@ -115,7 +151,7 @@ import {
   ProceduralMaterial,
   setSurfaceGraphExposedValue,
   compileSurfaceGraph
-} from 'procedural-texture-lab/runtime';
+} from '@drusniel/ptl-runtime';
 
 const recipe = await loadMaterialRecipe('/materials/brick.ptl.json');
 const procedural = new ProceduralMaterial(recipe, {
@@ -125,8 +161,8 @@ const procedural = new ProceduralMaterial(recipe, {
 await procedural.prepare();
 procedural.applyTo(mesh);
 
-if (recipe.graph) {
-  const graph = setSurfaceGraphExposedValue(recipe.graph, 'mortar-gap', 0.12);
+if (recipe.surfaceGraph) {
+  const graph = setSurfaceGraphExposedValue(recipe.surfaceGraph, 'mortar-gap', 0.12);
   const compiled = compileSurfaceGraph(graph);
   console.log(compiled.layers);
 }
@@ -141,15 +177,29 @@ procedural.setSeed(93771);
 await procedural.prepare();
 ```
 
-`applyTo()` also assigns procedural depth and distance materials so displaced geometry casts matching shadows. Call `procedural.dispose()` with the rest of the mesh resources. Build and verify the standalone ES module with:
+Call `procedural.dispose()` with the rest of the mesh resources.
+
+The default runtime backend is the TSL node-material path for `WebGPURenderer`. Three.js can run that renderer through its WebGL2 backend when WebGPU is unavailable. Consumers using the classic `WebGLRenderer` must request `{ backend: 'webgl' }`; that compatibility adapter installs matching custom depth and distance materials.
+
+Build and verify the staged npm tarball through a clean external TypeScript consumer with:
 
 ```bash
 npm run test:runtime-package
 ```
 
-Three.js remains external to the generated runtime bundle so the host game supplies the shared Three.js instance.
+The root Lab package remains private. `npm run build:runtime-package` stages only runtime JavaScript, declarations, package documentation, and the Apache-2.0 license under `dist-runtime-package/`; Three.js remains external and is declared as a peer dependency. Runtime publication is manual and independent from GitHub Pages:
 
-## Development
+```bash
+npm run publish:runtime
+```
+
+Runtime publication is enabled in `config/runtime-package.yaml` under Apache-2.0. Publishing still happens only when `npm run publish:runtime` is invoked manually. Texture-bearing recipes work with no asset installation through deterministic generated fields included as runtime code. For exact Lab fidelity, the Apache-2.0 KTX2 catalog can be hosted separately and returned through `TextureResolver.resolve()`; the runtime selects a supplied resolver automatically.
+
+### Texture-field library
+
+The texture catalog is version 2: 117 stable field IDs are stored in 41 RGBA-packed, mipmapped UASTC/Zstd KTX2 files. Referenced packs are 1024², long-tail packs are 512², and the complete encoded library is capped at 48 MiB. Generation, packing, licensing, and provenance metadata live in `config/texture-library.yaml`.
+
+## Development and release validation
 
 ```bash
 npm run test:unit
@@ -160,10 +210,24 @@ npm run test:cross-browser
 npm run test:qa
 ```
 
+For the same validation gate used before a V0.3 release:
+
+```bash
+npm run release:check
+```
+
+`npm run ci` validates release metadata, strict unit tests, the production TypeScript/Vite build, browser smoke, renderer fallback, the staged runtime package, and a clean external TypeScript runtime consumer. `npm run release:check` additionally runs production export and cross-browser smoke.
+
 The project uses TypeScript, Three.js, Vite, Vitest, and Playwright. Editor configuration lives in `config/`; portable material constraints, recipe algorithms, the material compiler, renderer, baker, exporter, terrain systems, and UI live under `src/`.
 
-CI validates unit tests, the production build, and the standalone runtime package on changes to `main`. GitHub Pages publishing remains manual:
+CI runs on pushes and pull requests to `main` and can also be started manually from GitHub Actions. GitHub Pages publishing remains manual:
 
 ```bash
 npm run deploy
+```
+
+The npm runtime is also published manually:
+
+```bash
+npm run publish:runtime
 ```

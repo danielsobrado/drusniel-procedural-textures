@@ -50,6 +50,7 @@ export class TerrainMeshPreview {
   private renderer: THREE.WebGLRenderer | null = null;
   private rendererUnavailable = false;
   private texture: THREE.CanvasTexture | null = null;
+  private terrainFields: Readonly<TerrainFields> | null = null;
   private yaw = 0.72;
   private pitch = 0.78;
   private distance = 11.5;
@@ -121,6 +122,29 @@ export class TerrainMeshPreview {
   public update(fields: Readonly<TerrainFields>, surface: HTMLCanvasElement): void {
     if (this.canvas.hidden) return;
     if (!this.ensureRenderer()) return;
+
+    if (this.terrainFields !== fields) {
+      this.updateGeometry(fields);
+      this.terrainFields = fields;
+    }
+    this.updateSurfaceTexture(surface);
+    this.render();
+  }
+
+  public dispose(): void {
+    this.player.dispose();
+    this.playerOverlay.dispose();
+    this.inputAbort.abort();
+    this.observer.disconnect();
+    this.visibilityObserver.disconnect();
+    this.texture?.dispose();
+    this.riverLayer.dispose();
+    this.geometry.dispose();
+    this.material.dispose();
+    this.renderer?.dispose();
+  }
+
+  private updateGeometry(fields: Readonly<TerrainFields>): void {
     const segments = TERRAIN_CONFIG.meshSegments;
     const position = this.geometry.attributes.position;
     const normal = this.geometry.attributes.normal;
@@ -152,29 +176,21 @@ export class TerrainMeshPreview {
     this.geometry.computeBoundingSphere();
     this.player.setFields(fields);
     this.riverLayer.update(fields);
-
-    this.texture?.dispose();
-    this.texture = new THREE.CanvasTexture(surface);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.wrapS = THREE.RepeatWrapping;
-    this.texture.wrapT = THREE.RepeatWrapping;
-    this.texture.needsUpdate = true;
-    this.material.map = this.texture;
-    this.material.needsUpdate = true;
-    this.render();
   }
 
-  public dispose(): void {
-    this.player.dispose();
-    this.playerOverlay.dispose();
-    this.inputAbort.abort();
-    this.observer.disconnect();
-    this.visibilityObserver.disconnect();
-    this.texture?.dispose();
-    this.riverLayer.dispose();
-    this.geometry.dispose();
-    this.material.dispose();
-    this.renderer?.dispose();
+  private updateSurfaceTexture(surface: HTMLCanvasElement): void {
+    if (this.texture === null) {
+      this.texture = new THREE.CanvasTexture(surface);
+      this.texture.colorSpace = THREE.SRGBColorSpace;
+      this.texture.wrapS = THREE.RepeatWrapping;
+      this.texture.wrapT = THREE.RepeatWrapping;
+      this.material.map = this.texture;
+      this.material.needsUpdate = true;
+      return;
+    }
+
+    this.texture.image = surface;
+    this.texture.needsUpdate = true;
   }
 
   private togglePlayerMode(): void {

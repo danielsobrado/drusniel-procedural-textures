@@ -54,6 +54,7 @@ export interface UiConfig {
   toastInfoMs: number;
   toastErrorMs: number;
   idleWorkTimeoutMs: number;
+  frameBudgetMs: number;
 }
 
 export interface RendererConfig {
@@ -360,7 +361,8 @@ function parseUi(value: unknown): UiConfig {
     radialEdgePaddingPx: asNumber(ui.radialEdgePaddingPx, 'ui.radialEdgePaddingPx', 20, 200),
     toastInfoMs: asInteger(ui.toastInfoMs, 'ui.toastInfoMs', 250, 30_000),
     toastErrorMs: asInteger(ui.toastErrorMs, 'ui.toastErrorMs', 250, 30_000),
-    idleWorkTimeoutMs: asInteger(ui.idleWorkTimeoutMs, 'ui.idleWorkTimeoutMs', 50, 10_000)
+    idleWorkTimeoutMs: asInteger(ui.idleWorkTimeoutMs, 'ui.idleWorkTimeoutMs', 50, 10_000),
+    frameBudgetMs: asNumber(ui.frameBudgetMs, 'ui.frameBudgetMs', 1, 50)
   };
 }
 

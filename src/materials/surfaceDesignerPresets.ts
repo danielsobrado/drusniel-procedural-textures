@@ -140,7 +140,7 @@ const BRICK_GRAPH = graph('designer-old-brick-wall', 'Designer · Old Brick Wall
     kind: 'base', channel: 'surface', blendMode: 'normal', colorA: '#4a4038', colorB: '#6b5a4b', roughness: 0.18
   }),
   node('brick-shape', 'shape', 'Rounded Brick', 0, 100, { shape: 'rounded-rectangle', roundness: 0.12 }),
-  node('brick-tiles', 'tile-sampler', 'Running Bond Tile Sampler', 190, 100, { bond: 'running', xAmount: 7, yAmount: 14 }, {
+  node('brick-tiles', 'tile-sampler', 'Running Bond Tile Sampler', 190, 100, { bond: 'running', xAmount: 7, yAmount: 14, gap: 0.095 }, {
     kind: 'pattern', channel: 'surface', blendMode: 'normal', scale: 3.8, strength: 1.55, seed: 14,
     colorA: '#6f261c', colorB: '#b25232', roughness: 0.08, displacement: 0.085,
     pattern: { kind: 'brick', aspect: 2.25, gap: 0.095, roundness: 0.14, jitter: 0.12, offset: 0.5, edgeWear: 0.18 }

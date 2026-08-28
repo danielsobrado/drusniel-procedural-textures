@@ -32,6 +32,7 @@ export class PresetThumbnailRenderer {
     private readonly renderer: THREE.WebGLRenderer,
     private readonly defaultPhysical: Readonly<PhysicalSettings>
   ) {
+    this.compiler.setTextureSupportRendererProvider(async () => this.renderer);
     this.target.texture.colorSpace = THREE.SRGBColorSpace;
     this.scene.background = new THREE.Color('#171a21');
     this.camera.position.set(0, 0.05, 3.25);

@@ -121,7 +121,12 @@ describe('surface graph generic runtime lowering', () => {
     SURFACE_GRAPH_NODE_SPECS.map((spec) => spec.kind).filter((kind) => !NON_EXECUTABLE.has(kind))
   )('lowers %s into an executable PTL material layer', (kind) => {
     const graph = graphFor(kind);
-    if (kind === 'subgraph') graph.nodes[0]!.subgraphId = 'nested';
+    if (kind === 'subgraph') {
+      // Lowering requires a subgraph node to carry an explicit runtime binding (see
+      // runtimeForNode); authored presets supply one the same way.
+      graph.nodes[0]!.subgraphId = 'nested';
+      graph.nodes[0]!.runtime = { kind: 'fbm', channel: 'roughness', opacity: 0.24, scale: 8.5, seed: 72 };
+    }
     const compiled = compileSurfaceGraph(graph);
     expect(compiled.layers.length).toBeGreaterThan(0);
     expect(compiled.layers[0]?.name).toBe(kind);

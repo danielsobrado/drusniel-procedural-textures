@@ -1,6 +1,6 @@
 import type { Node } from 'three/webgpu';
 import { abs, clamp, float, floor, fract, max, mix, pow, smoothstep, step, vec2 } from 'three/tsl';
-import { grassPatternConfig } from '../config/grassPatternConfig';
+import { RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig } from '../core/material/generated/runtimeConfig';
 import {
   DEFAULT_PATTERN_SETTINGS,
   type PatternSettings

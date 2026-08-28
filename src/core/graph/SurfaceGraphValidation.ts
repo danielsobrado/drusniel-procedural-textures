@@ -1,5 +1,10 @@
 import { normalizePatternSettings } from '../material/PatternSettings';
+import { normalizeTextureFieldSettings } from '../texture/TextureFieldSettings';
 import { SURFACE_GRAPH_NODE_SPEC_BY_KIND } from './SurfaceGraphCatalog';
+import {
+  surfaceGraphOutputTypesCompatible,
+  surfaceGraphPortTypesCompatible
+} from './SurfaceGraphCompatibility';
 import type {
   SurfaceGraphDefinition,
   SurfaceGraphEdge,
@@ -8,8 +13,7 @@ import type {
   SurfaceGraphNode,
   SurfaceGraphOutput,
   SurfaceGraphParameterValue,
-  SurfaceGraphPortRef,
-  SurfaceGraphValueType
+  SurfaceGraphPortRef
 } from './SurfaceGraph';
 
 type RuntimeBinding = NonNullable<SurfaceGraphNode['runtime']>;
@@ -41,7 +45,6 @@ const RUNTIME_BLEND_MODES = new Set<RuntimeBlendMode>([
 const OUTPUT_CHANNELS = new Set<SurfaceGraphOutput['channel']>([
   'baseColor', 'roughness', 'metallic', 'normal', 'height', 'ao', 'emissive', 'opacity', 'clearcoat', 'sss'
 ]);
-const SCALAR_TYPES = new Set<SurfaceGraphValueType>(['float', 'mask', 'height']);
 const EXPOSED_TYPES = new Set<SurfaceGraphExposedParameter['type']>(['float', 'color', 'boolean', 'enum']);
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -109,6 +112,9 @@ function runtime(value: unknown, name: string): SurfaceGraphNode['runtime'] {
   const pattern = input.pattern === undefined || input.pattern === null
     ? input.pattern as null | undefined
     : normalizePatternSettings(input.pattern);
+  const texture = input.texture === undefined || input.texture === null
+    ? input.texture as null | undefined
+    : normalizeTextureFieldSettings(input.texture);
   return {
     kind: enumId(input.kind, `${name} kind`, RUNTIME_KINDS),
     channel: input.channel === undefined ? undefined : enumId(input.channel, `${name} channel`, RUNTIME_CHANNELS),
@@ -126,7 +132,8 @@ function runtime(value: unknown, name: string): SurfaceGraphNode['runtime'] {
     structureFrom: input.structureFrom === undefined ? undefined : input.structureFrom === null ? null : id(input.structureFrom, `${name} structure source`),
     maskInvert: input.maskInvert === undefined ? undefined : boolean(input.maskInvert, `${name} mask invert`),
     maskStrength: input.maskStrength === undefined ? undefined : finite(input.maskStrength, `${name} mask strength`, 0, 1),
-    pattern
+    pattern,
+    texture
   };
 }
 
@@ -224,10 +231,6 @@ function group(value: unknown, index: number): SurfaceGraphGroup {
   };
 }
 
-function compatibleTypes(source: SurfaceGraphValueType, target: SurfaceGraphValueType): boolean {
-  return source === target || (SCALAR_TYPES.has(source) && SCALAR_TYPES.has(target));
-}
-
 function validateAcyclic(nodes: readonly SurfaceGraphNode[], edges: readonly SurfaceGraphEdge[]): void {
   const adjacency = new Map<string, string[]>();
   for (const graphEdge of edges) {
@@ -277,7 +280,10 @@ function validateEdgePorts(nodes: ReadonlyMap<string, SurfaceGraphNode>, edges: 
     if (targetPort === undefined) {
       throw new Error(`Surface graph edge references missing input port ${target.id}.${item.to.port}.`);
     }
-    if (!compatibleTypes(sourcePort.type, targetPort.type)) {
+    const compatible = target.kind === 'output'
+      ? surfaceGraphOutputTypesCompatible(sourcePort.type, targetPort.type)
+      : surfaceGraphPortTypesCompatible(sourcePort.type, targetPort.type);
+    if (!compatible) {
       throw new Error(
         `Surface graph cannot connect ${source.id}.${item.from.port} (${sourcePort.type}) to ` +
         `${target.id}.${item.to.port} (${targetPort.type}).`

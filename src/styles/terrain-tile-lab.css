@@ -57,6 +57,8 @@
 
 .terrain-tile-host {
   overflow: hidden;
+  contain: layout paint;
+  isolation: isolate;
 }
 
 .terrain-lab-grid {
@@ -72,6 +74,10 @@
 }
 
 .terrain-panel {
+  /* Containment was the half of the Tile Lab performance pass that actually landed: the
+     backdrop-filter overrides that shipped alongside it in terrain-performance.css were
+     dead, losing to this file because the panel stylesheet loads from a later lazy chunk. */
+  contain: paint;
   min-width: 0;
   min-height: 0;
   padding: 12px;
@@ -443,4 +449,50 @@
     border-top: 1px solid var(--border);
   }
   .terrain-material-list { grid-template-columns: 1fr 1fr; }
+}
+
+/* Preset bakes are serialized on one WebGL context and the first one also pays for the KTX2
+   transcoder, so the wait is long enough to need a real progress read-out rather than a
+   frozen label. Lives here, not in terrain-performance.css, so it shares this lazy chunk. */
+.terrain-material-progress {
+  margin-top: 6px;
+}
+
+.terrain-material-progress[hidden] {
+  display: none;
+}
+
+.terrain-material-progress-track {
+  position: relative;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.terrain-material-progress-bar {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #4ea3ff, #7ce0c0);
+  transition: width 180ms ease-out;
+}
+
+/* A phase can sit at one fraction for a long time; the sweep says the bake is still alive. */
+.terrain-material-slot.is-loading .terrain-material-progress-track::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.24), transparent);
+  animation: terrain-material-progress-sweep 1.15s linear infinite;
+}
+
+@keyframes terrain-material-progress-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terrain-material-progress-bar { transition: none; }
+  .terrain-material-slot.is-loading .terrain-material-progress-track::after { animation: none; }
 }

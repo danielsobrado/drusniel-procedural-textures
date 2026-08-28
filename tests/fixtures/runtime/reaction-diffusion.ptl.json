@@ -1,0 +1,15 @@
+{
+  "format": "ptl-material",
+  "version": 1,
+  "seed": 55021,
+  "coordinateSpace": "object",
+  "groups": [],
+  "layers": [{
+    "id": "reaction", "name": "Reaction diffusion", "kind": "reaction-diffusion", "enabled": true,
+    "blendMode": "normal", "channel": "surface", "opacity": 1, "scale": 2.2,
+    "strength": 1, "seed": 71, "colorA": "#071018", "colorB": "#51a6b8",
+    "roughness": 0.12, "displacement": 0.04, "groupId": null,
+    "maskSourceLayerId": null, "structureSourceLayerId": null,
+    "maskInvert": false, "maskStrength": 1
+  }]
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TerrainComputeEngine } from '../src/tile/TerrainComputeEngine';
+import { TerrainGenerator } from '../src/tile/TerrainGenerator';
 import { buildTerrainFields } from '../src/tile/TerrainHydrology';
 import { TerrainPainter } from '../src/tile/TerrainPainter';
 import {
@@ -22,6 +23,51 @@ const SETTINGS: TerrainSettings = {
 };
 
 describe('terrain tile lab', () => {
+  it('snapshots settings before asynchronous terrain generation starts', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let captured: Readonly<TerrainSettings> | null = null;
+    const generator = new TerrainGenerator();
+    const target = generator as unknown as {
+      compute: { generate: (settings: Readonly<TerrainSettings>) => Promise<{ height: Float32Array; backend: 'cpu' }> };
+    };
+    target.compute.generate = async (settings) => {
+      captured = settings;
+      await gate;
+      return { height: new Float32Array(32 * 32), backend: 'cpu' };
+    };
+    const settings = { ...SETTINGS };
+
+    const pending = generator.generate(settings, 32);
+    settings.seed = 99;
+    settings.riverDensity = 0.9;
+    release();
+    await pending;
+
+    expect(captured).not.toBe(settings);
+    expect(captured).toMatchObject({ seed: 42, riverDensity: 0.55 });
+  });
+
+  it('stops a superseded generation before hydrology work begins', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const generator = new TerrainGenerator();
+    const target = generator as unknown as {
+      compute: { generate: () => Promise<{ height: Float32Array; backend: 'cpu' }> };
+    };
+    target.compute.generate = async () => {
+      await gate;
+      return { height: new Float32Array(32 * 32), backend: 'cpu' };
+    };
+    const abort = new AbortController();
+
+    const pending = generator.generate(SETTINGS, 32, undefined, abort.signal);
+    abort.abort();
+    release();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('generates deterministic bounded terrain', async () => {
     const engine = new TerrainComputeEngine();
     const first = await engine.generate(SETTINGS, 32);

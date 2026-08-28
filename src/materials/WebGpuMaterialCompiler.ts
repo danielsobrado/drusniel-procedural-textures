@@ -9,6 +9,7 @@ import {
   mix,
   modelWorldMatrix,
   modelWorldMatrixInverse,
+  normalLocal,
   normalView,
   normalWorldGeometry,
   positionLocal,
@@ -21,8 +22,14 @@ import {
 } from 'three/tsl';
 import type { MaterialAlgorithmSettings } from '../core/material/MaterialAlgorithms';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
+import { materialDisplacementExtent } from '../core/material/MaterialDisplacement';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
-import { rendererSafetyConfig } from '../config/rendererSafetyConfig';
+import { RUNTIME_RENDERER_SAFETY_CONFIG as rendererSafetyConfig } from '../core/material/generated/runtimeConfig';
+import {
+  normalizeResolvedTextureField,
+  type ResolvedTextureField,
+  type TextureFieldResource
+} from '../core/texture/ResolvedTextureField';
 import { applyPhysicalSettings } from './PhysicalMaterial';
 import {
   buildWebGpuSurfaceNodes,
@@ -35,7 +42,7 @@ import type {
   MaterialLayer,
   PhysicalSettings,
   SynthesisSettings
-} from './types';
+} from '../core/material/RuntimeMaterial';
 
 function createFallbackTexture(): THREE.DataTexture {
   const texture = new THREE.DataTexture(
@@ -74,6 +81,7 @@ export class WebGpuMaterialCompiler {
   private readonly uniforms = new WebGpuMaterialUniforms();
   private readonly fallbackTexture = createFallbackTexture();
   private layers: MaterialLayer[] = [];
+  private textureFields: ReadonlyMap<string, ResolvedTextureField> = new Map();
   private coordinateSpace: MaterialCoordinateSpace = 'world';
   private simulation: WebGpuSimulationState = {
     texture: this.fallbackTexture,
@@ -81,6 +89,7 @@ export class WebGpuMaterialCompiler {
     cellSize: 1
   };
   private topologyFingerprint = '';
+  private displacementExtentValue = 0;
 
   public constructor() {
     this.material.name = 'Procedural Texture Lab WebGPU';
@@ -94,7 +103,12 @@ export class WebGpuMaterialCompiler {
     synthesis?: Readonly<SynthesisSettings>,
     coordinateSpace: MaterialCoordinateSpace = 'world'
   ): void {
-    this.layers = layers.slice(0, PTL_MAX_LAYERS).map((layer) => ({ ...layer }));
+    this.layers = layers.slice(0, PTL_MAX_LAYERS).map((layer) => ({
+      ...layer,
+      pattern: layer.pattern === undefined || layer.pattern === null ? layer.pattern : { ...layer.pattern },
+      texture: layer.texture === undefined || layer.texture === null ? layer.texture : { ...layer.texture }
+    }));
+    this.displacementExtentValue = materialDisplacementExtent(this.layers, groups);
     this.coordinateSpace = coordinateSpace;
     this.uniforms.sync(this.layers, groups, synthesis);
 
@@ -105,6 +119,10 @@ export class WebGpuMaterialCompiler {
     this.rebuildIfNeeded();
   }
 
+  public get displacementExtent(): number {
+    return this.displacementExtentValue;
+  }
+
   public setPhysical(settings: Readonly<PhysicalSettings>): void {
     this.uniforms.setPhysical(settings);
     applyPhysicalSettings(this.material, settings);
@@ -112,6 +130,13 @@ export class WebGpuMaterialCompiler {
 
   public setAlgorithmSettings(settings: Readonly<MaterialAlgorithmSettings>): void {
     this.uniforms.setAlgorithms(settings);
+  }
+
+  public setTextureFields(textures: ReadonlyMap<string, TextureFieldResource>): void {
+    this.textureFields = new Map(
+      [...textures].map(([id, resource]) => [id, normalizeResolvedTextureField(resource)] as const)
+    );
+    this.rebuildIfNeeded();
   }
 
   public setSimulationAtlas(
@@ -139,7 +164,8 @@ export class WebGpuMaterialCompiler {
     const fingerprint = `${webGpuTopologyFingerprint(
       this.layers,
       this.coordinateSpace,
-      this.simulation.readyLayers
+      this.simulation.readyLayers,
+      this.textureFields
     )}:${this.simulation.texture.uuid}:${this.simulation.cellSize}`;
     if (fingerprint === this.topologyFingerprint) return;
     this.topologyFingerprint = fingerprint;
@@ -151,11 +177,14 @@ export class WebGpuMaterialCompiler {
     const localPosition = positionLocal;
     const worldPosition = modelWorldMatrix.mul(vec4(localPosition, 1)).xyz;
     const vertexSample = this.coordinateSpace === 'object' ? localPosition : worldPosition;
+    const triplanarNormal = this.coordinateSpace === 'object' ? normalLocal : normalWorldGeometry;
     const vertexSurface = buildWebGpuSurfaceNodes(
       vertexSample,
       this.layers,
       this.uniforms,
-      this.simulation
+      this.simulation,
+      this.textureFields,
+      triplanarNormal
     );
 
     this.material.positionNode = Fn(() => {
@@ -173,7 +202,9 @@ export class WebGpuMaterialCompiler {
       samplePosition,
       this.layers,
       this.uniforms,
-      this.simulation
+      this.simulation,
+      this.textureFields,
+      triplanarNormal
     );
     this.material.colorNode = surface.color;
     this.material.roughnessNode = clamp(this.uniforms.baseRoughness.add(surface.roughness), 0.045, 1);

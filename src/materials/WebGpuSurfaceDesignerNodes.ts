@@ -1,33 +1,100 @@
 import type { Node } from 'three/webgpu';
-import { clamp, float, max, min, mix, smoothstep, step, vec3 } from 'three/tsl';
-import { grassPatternConfig } from '../config/grassPatternConfig';
 import {
-  isStructuredPatternKind,
-  structuredPatternConfig
-} from '../config/structuredPatternConfig';
+  abs,
+  clamp,
+  float,
+  max,
+  min,
+  mix,
+  normalWorldGeometry,
+  pow,
+  smoothstep,
+  step,
+  texture,
+  vec2,
+  vec3
+} from 'three/tsl';
+import {
+  RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig,
+  RUNTIME_STRUCTURED_PATTERN_CONFIG as structuredPatternConfig,
+  RUNTIME_TEXTURE_FIELD_CONFIG as textureFieldConfig
+} from '../core/material/generated/runtimeConfig';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
-import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
+import { DEFAULT_PATTERN_SETTINGS, isStructuredPatternKind } from '../core/material/PatternSettings';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+import {
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  type TextureFieldChannel
+} from '../core/texture/TextureFieldSettings';
+import type { ResolvedTextureField } from '../core/texture/ResolvedTextureField';
 import { buildWebGpuPatternField } from './WebGpuPatternNodes';
 import { buildWebGpuStructuredPatternField } from './WebGpuStructuredPatternNodes';
 import {
-  buildWebGpuProceduralLayerRawField,
+  buildWebGpuFieldWithSynthesis,
+  buildWebGpuProceduralLayerMesoField,
+  buildWebGpuStochasticDomain,
   buildWebGpuSurfaceNodes as buildLegacySurfaceNodes,
   webGpuTopologyFingerprint as legacyTopologyFingerprint,
   type WebGpuSimulationState,
   type WebGpuSurfaceNodes
 } from './WebGpuProceduralNodes';
-import type { BlendMode, MaterialLayer } from './types';
+import type { BlendMode, MaterialLayer } from '../core/material/RuntimeMaterial';
 import type { WebGpuMaterialUniforms } from './WebGpuMaterialUniforms';
 
-function withoutPatternLayers(layers: readonly MaterialLayer[]): MaterialLayer[] {
-  return layers.map((layer) => layer.kind === 'pattern'
-    ? { ...layer, kind: 'base', enabled: false, pattern: null }
+function isDesignerSourceLayer(layer: Readonly<MaterialLayer>): boolean {
+  return layer.kind === 'pattern' || layer.texture !== null && layer.texture !== undefined;
+}
+
+function designerLayerIndices(layers: readonly MaterialLayer[]): Set<number> {
+  const indexById = new Map(layers.map((layer, index) => [layer.id, index]));
+  const indices = new Set<number>();
+
+  layers.forEach((layer, index) => {
+    if (isDesignerSourceLayer(layer)) indices.add(index);
+  });
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    layers.forEach((layer, index) => {
+      if (indices.has(index)) return;
+      const dependencies = [layer.maskSourceLayerId, layer.structureSourceLayerId];
+      for (const dependencyId of dependencies) {
+        if (dependencyId === null || dependencyId === undefined) continue;
+        const dependencyIndex = indexById.get(dependencyId);
+        if (dependencyIndex === undefined || !indices.has(dependencyIndex)) continue;
+        indices.add(index);
+        changed = true;
+        break;
+      }
+    });
+  }
+
+  return indices;
+}
+
+function withoutDesignerLayers(
+  layers: readonly MaterialLayer[],
+  designerIndices: ReadonlySet<number>
+): MaterialLayer[] {
+  return layers.map((layer, index) => designerIndices.has(index)
+    ? { ...layer, kind: 'base', enabled: false, pattern: null, texture: null }
     : layer
   );
 }
 
-function patternDisplacementGain(layer: Readonly<MaterialLayer>): number {
+function withoutSynthesis(uniforms: WebGpuMaterialUniforms): WebGpuMaterialUniforms {
+  const zero = float(0);
+  return new Proxy(uniforms, {
+    get(target, property, receiver) {
+      if (property === 'age' || property === 'weathering') return zero;
+      return Reflect.get(target, property, receiver) as unknown;
+    }
+  });
+}
+
+function designerDisplacementGain(layer: Readonly<MaterialLayer>): number {
+  if (layer.kind !== 'pattern') return 1;
   const kind = layer.pattern?.kind;
   if (kind === 'grass') return grassPatternConfig.rendering.geometryDisplacementGain;
   if (kind === 'turf') return grassPatternConfig.rendering.turfGeometryDisplacementGain;
@@ -35,6 +102,34 @@ function patternDisplacementGain(layer: Readonly<MaterialLayer>): number {
     return structuredPatternConfig.displacementGain[kind];
   }
   return 1;
+}
+
+function designerCoverage(
+  layer: Readonly<MaterialLayer>,
+  shaped: Node<'float'>,
+  textureField: boolean
+): Node<'float'> {
+  if (textureField || layer.kind === 'base') return float(1);
+  if (layer.kind === 'pattern') return smoothstep(0.04, 0.92, shaped);
+  if (layer.kind === 'spots' || layer.kind === 'veins' || layer.kind === 'vessels') {
+    return smoothstep(0.03, 0.92, shaped);
+  }
+  if (layer.kind === 'ridges') return mix(0.24, 1, shaped);
+  return mix(0.48, 1, shaped);
+}
+
+function designerDisplacementSignal(
+  layer: Readonly<MaterialLayer>,
+  shaped: Node<'float'>,
+  textureField: boolean
+): Node<'float'> {
+  if (textureField) return shaped.sub(0.5);
+  return layer.kind === 'spots' ||
+    layer.kind === 'veins' ||
+    layer.kind === 'vessels' ||
+    layer.kind === 'pattern'
+    ? shaped
+    : shaped.sub(0.5);
 }
 
 function blendColor(
@@ -55,13 +150,95 @@ function blendColor(
   return mix(base, blended, clamp(opacity, 0, 1));
 }
 
+function textureChannel(value: Node<'vec4'>, channel: TextureFieldChannel): Node<'float'> {
+  if (channel === 'g') return value.g;
+  if (channel === 'b') return value.b;
+  if (channel === 'a') return value.a;
+  if (channel === 'luminance') return value.rgb.dot(vec3(0.2126, 0.7152, 0.0722));
+  return value.r;
+}
+
+function textureFieldForLayer(
+  index: number,
+  position: Node<'vec3'>,
+  triplanarNormal: Node<'vec3'>,
+  layer: Readonly<MaterialLayer>,
+  uniforms: WebGpuMaterialUniforms,
+  textures: ReadonlyMap<string, ResolvedTextureField>
+): Node<'float'> {
+  const settings = layer.texture ?? DEFAULT_TEXTURE_FIELD_SETTINGS;
+  const resolved = textures.get(settings.id);
+  if (resolved === undefined) return float(0.5);
+
+  const c = Math.cos(settings.rotation);
+  const s = Math.sin(settings.rotation);
+  const transformUv = (uv: Node<'vec2'>): Node<'vec2'> => {
+    const centered = uv.sub(vec2(0.5));
+    return vec2(
+      centered.x.mul(c).sub(centered.y.mul(s)),
+      centered.x.mul(s).add(centered.y.mul(c))
+    ).mul(vec2(settings.scaleX, settings.scaleY))
+      .add(vec2(0.5 + settings.offsetX, 0.5 + settings.offsetY));
+  };
+  const sample = (uv: Node<'vec2'>): Node<'float'> => textureChannel(
+    texture(resolved.texture, transformUv(uv)) as unknown as Node<'vec4'>,
+    resolved.channel ?? settings.channel
+  );
+  const seed = uniforms.seed[index]!.add(17);
+  const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
+  const domain = buildWebGpuStochasticDomain(position, seedOffset, uniforms.stochasticTiling)
+    .mul(max(uniforms.scale[index]!.mul(max(uniforms.meso, 0.1)), 0.001))
+    .add(seedOffset);
+  const minimum = textureFieldConfig.projection.minWeight;
+  const sharpness = textureFieldConfig.projection.sharpness;
+  const normal = triplanarNormal.normalize();
+  const wx = pow(abs(normal.x), sharpness).mul(step(minimum, pow(abs(normal.x), sharpness)));
+  const wy = pow(abs(normal.y), sharpness).mul(step(minimum, pow(abs(normal.y), sharpness)));
+  const wz = pow(abs(normal.z), sharpness).mul(step(minimum, pow(abs(normal.z), sharpness)));
+  const total = max(wx.add(wy).add(wz), 0.000001);
+  let field = sample(domain.yz).mul(wx)
+    .add(sample(domain.xz).mul(wy))
+    .add(sample(domain.xy).mul(wz))
+    .div(total);
+  field = float(0.5).add(field.sub(0.5).mul(settings.contrast)).add(settings.bias);
+  if (settings.invert) field = field.oneMinus();
+  return settings.clamp ? clamp(field, 0, 1) : field;
+}
+
+function designerGeneratorMesoField(
+  index: number,
+  position: Node<'vec3'>,
+  layer: Readonly<MaterialLayer>,
+  layers: readonly MaterialLayer[],
+  uniforms: WebGpuMaterialUniforms,
+  simulation: Readonly<WebGpuSimulationState>
+): Node<'float'> {
+  if (layer.kind !== 'pattern') {
+    return buildWebGpuProceduralLayerMesoField(index, position, layers, uniforms, simulation);
+  }
+
+  const settings = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
+  const seed = uniforms.seed[index]!.add(17);
+  const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
+  const domain = buildWebGpuStochasticDomain(position, seedOffset, uniforms.stochasticTiling)
+    .mul(max(uniforms.scale[index]!.mul(max(uniforms.meso, 0.1)), 0.001))
+    .add(seedOffset);
+  const params = uniforms.patternParams(index);
+  if (isStructuredPatternKind(settings.kind)) {
+    return buildWebGpuStructuredPatternField(domain, settings, params, seed);
+  }
+  return buildWebGpuPatternField(domain, settings, params, seed);
+}
+
 function designerFieldForLayer(
   index: number,
   position: Node<'vec3'>,
+  triplanarNormal: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
   simulation: Readonly<WebGpuSimulationState>,
+  textures: ReadonlyMap<string, ResolvedTextureField>,
   visited = new Set<number>()
 ): Node<'float'> {
   if (visited.has(index)) return float(0.5);
@@ -75,38 +252,64 @@ function designerFieldForLayer(
       return designerFieldForLayer(
         sourceIndex,
         position,
+        triplanarNormal,
         layers,
         indexById,
         uniforms,
         simulation,
+        textures,
         visited
       );
     }
   }
 
-  if (layer.kind !== 'pattern') {
-    return buildWebGpuProceduralLayerRawField(index, position, layers, uniforms, simulation);
+  const textureSettings = layer.texture;
+  let meso: Node<'float'>;
+  if (textureSettings === null || textureSettings === undefined) {
+    meso = designerGeneratorMesoField(index, position, layer, layers, uniforms, simulation);
+  } else {
+    const textureField = textureFieldForLayer(index, position, triplanarNormal, layer, uniforms, textures);
+    if (textureSettings.mode === 'replace') {
+      meso = textureField;
+    } else {
+      const safeScale = max(uniforms.scale[index]!.mul(max(uniforms.meso, 0.1)), 0.001);
+      const generatorPosition = textureSettings.mode === 'warp'
+        ? position.add(vec3(textureField.sub(0.5).mul(textureSettings.modeAmount).div(safeScale)))
+        : position;
+      const generator = designerGeneratorMesoField(
+        index,
+        generatorPosition,
+        layer,
+        layers,
+        uniforms,
+        simulation
+      );
+      if (textureSettings.mode === 'modulate') {
+        meso = clamp(
+          generator.mul(mix(1, textureField.mul(2), textureSettings.modeAmount)),
+          0,
+          1
+        );
+      } else if (textureSettings.mode === 'detail') {
+        meso = clamp(generator.add(textureField.sub(0.5).mul(textureSettings.modeAmount)), 0, 1);
+      } else {
+        meso = generator;
+      }
+    }
   }
-
-  const settings = layer.pattern ?? DEFAULT_PATTERN_SETTINGS;
-  const seed = uniforms.seed[index]!.add(17);
-  const seedOffset = vec3(seed.mul(0.71), seed.mul(1.17), seed.mul(1.91));
-  const domain = position.mul(uniforms.scale[index]!).mul(max(uniforms.meso, 0.1)).add(seedOffset);
-  const params = uniforms.patternParams(index);
-  if (isStructuredPatternKind(settings.kind)) {
-    return buildWebGpuStructuredPatternField(domain, settings, params, seed);
-  }
-  return buildWebGpuPatternField(domain, settings, params, seed);
+  return buildWebGpuFieldWithSynthesis(meso, index, position, uniforms);
 }
 
-function patternMaskForLayer(
+function designerMaskForLayer(
   layerIndex: number,
   layer: Readonly<MaterialLayer>,
   position: Node<'vec3'>,
+  triplanarNormal: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   indexById: ReadonlyMap<string, number>,
   uniforms: WebGpuMaterialUniforms,
-  simulation: Readonly<WebGpuSimulationState>
+  simulation: Readonly<WebGpuSimulationState>,
+  textures: ReadonlyMap<string, ResolvedTextureField>
 ): Node<'float'> {
   if (layer.maskSourceLayerId === null) return float(1);
   const sourceIndex = indexById.get(layer.maskSourceLayerId);
@@ -114,10 +317,12 @@ function patternMaskForLayer(
   const sourceField = designerFieldForLayer(
     sourceIndex,
     position,
+    triplanarNormal,
     layers,
     indexById,
     uniforms,
-    simulation
+    simulation,
+    textures
   );
   const source = clamp(
     float(0.5).add(sourceField.sub(0.5).mul(max(uniforms.strength[sourceIndex]!, 0))),
@@ -132,35 +337,65 @@ export function buildWebGpuSurfaceNodes(
   position: Node<'vec3'>,
   layers: readonly MaterialLayer[],
   uniforms: WebGpuMaterialUniforms,
-  simulation: Readonly<WebGpuSimulationState>
+  simulation: Readonly<WebGpuSimulationState>,
+  textures: ReadonlyMap<string, ResolvedTextureField> = new Map(),
+  triplanarNormal: Node<'vec3'> = normalWorldGeometry
 ): WebGpuSurfaceNodes {
   const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
-  const base = buildLegacySurfaceNodes(position, withoutPatternLayers(activeLayers), uniforms, simulation);
-  if (!activeLayers.some((layer) => layer.kind === 'pattern')) return base;
+  const designerIndices = designerLayerIndices(activeLayers);
+  if (designerIndices.size === 0) {
+    return buildLegacySurfaceNodes(position, activeLayers, uniforms, simulation);
+  }
 
+  const neutralUniforms = withoutSynthesis(uniforms);
+  const base = buildLegacySurfaceNodes(
+    position,
+    withoutDesignerLayers(activeLayers, designerIndices),
+    neutralUniforms,
+    simulation
+  );
+  const synthesisBase = buildLegacySurfaceNodes(position, [], neutralUniforms, simulation);
+  const synthesis = buildLegacySurfaceNodes(position, [], uniforms, simulation);
+  const synthesisColor = synthesis.color.div(max(synthesisBase.color, vec3(0.0001)));
+  const synthesisRoughness = synthesis.roughness.sub(synthesisBase.roughness);
+  const synthesisAo = synthesis.ao.div(max(synthesisBase.ao, 0.0001));
   const indexById = new Map(activeLayers.map((layer, index) => [layer.id, index]));
   let color = base.color;
   let roughness = base.roughness;
   let clearcoat = base.clearcoat;
   let clearcoatRoughness = base.clearcoatRoughness;
+  let sss = base.sss;
+  let sssColor = base.sssColor.mul(base.sss);
   let metallic = base.metallic;
   let ao = base.ao;
   let emissive = base.emissive;
   let displacement = base.displacement;
 
   activeLayers.forEach((layer, index) => {
-    if (layer.kind !== 'pattern') return;
-    const field = designerFieldForLayer(index, position, activeLayers, indexById, uniforms, simulation);
-    const shaped = clamp(float(0.5).add(field.sub(0.5).mul(max(uniforms.strength[index]!, 0))), 0, 1);
-    const coverage = smoothstep(0.04, 0.92, shaped);
-    const mask = patternMaskForLayer(
+    if (!designerIndices.has(index)) return;
+    const textureField = layer.texture?.mode === 'replace';
+    const field = designerFieldForLayer(
       index,
-      layer,
       position,
+      triplanarNormal,
       activeLayers,
       indexById,
       uniforms,
-      simulation
+      simulation,
+      textures
+    );
+    const shaped = clamp(float(0.5).add(field.sub(0.5).mul(max(uniforms.strength[index]!, 0))), 0, 1);
+    const coverage = designerCoverage(layer, shaped, textureField);
+    const mask = designerMaskForLayer(
+      index,
+      layer,
+      position,
+      triplanarNormal,
+      activeLayers,
+      indexById,
+      uniforms,
+      simulation,
+      textures
     );
     const opacity = clamp(
       uniforms.enabled[index]!
@@ -175,17 +410,27 @@ export function buildWebGpuSurfaceNodes(
 
     if (layer.channel === 'surface' || layer.channel === 'height') {
       displacement = displacement.add(
-        shaped.mul(uniforms.displacement[index]!).mul(opacity).mul(patternDisplacementGain(layer))
+        designerDisplacementSignal(layer, shaped, textureField)
+          .mul(uniforms.displacement[index]!)
+          .mul(opacity)
+          .mul(designerDisplacementGain(layer))
       );
     }
     if (layer.channel === 'surface' || layer.channel === 'color') {
       color = blendColor(color, layerColor, layer.blendMode, opacity);
     }
     if (layer.channel === 'surface' || layer.channel === 'roughness') {
-      roughness = roughness.add(uniforms.roughness[index]!.mul(opacity).mul(mix(0.45, 1, shaped)));
+      const weight = layer.kind === 'base' && !textureField
+        ? float(1)
+        : mix(0.4, 1, shaped);
+      roughness = roughness.add(uniforms.roughness[index]!.mul(opacity).mul(weight));
     }
     if (layer.channel === 'clearcoat') {
-      const wetness = clamp(opacity.mul(shaped), 0, 1);
+      const wetness = clamp(
+        opacity.mul(shaped).mul(max(uniforms.strength[index]!, 0)),
+        0,
+        1
+      );
       clearcoat = max(clearcoat, wetness);
       clearcoatRoughness = mix(
         clearcoatRoughness,
@@ -193,21 +438,50 @@ export function buildWebGpuSurfaceNodes(
         wetness
       );
     }
+    if (layer.channel === 'sss') {
+      const scatter = clamp(opacity.mul(mix(0.45, 1, shaped)), 0, 1);
+      sssColor = sssColor.add(layerColor.mul(scatter));
+      sss = sss.add(scatter);
+    }
     if (layer.channel === 'metallic') metallic = mix(metallic, shaped, opacity);
     if (layer.channel === 'ao') ao = ao.mul(mix(1, mix(0.35, 1, shaped), opacity));
     if (layer.channel === 'emissive') emissive = emissive.add(layerColor.mul(shaped).mul(opacity));
   });
 
-  return { ...base, color, roughness, clearcoat, clearcoatRoughness, metallic, ao, emissive, displacement };
+  return {
+    ...base,
+    color: color.mul(synthesisColor),
+    roughness: roughness.add(synthesisRoughness),
+    clearcoat,
+    clearcoatRoughness,
+    sss: clamp(sss, 0, 1),
+    sssColor: sssColor.div(max(sss, 0.0001)),
+    metallic,
+    ao: ao.mul(synthesisAo),
+    emissive,
+    displacement
+  };
 }
 
 export function webGpuTopologyFingerprint(
   layers: readonly MaterialLayer[],
   coordinateSpace: MaterialCoordinateSpace,
-  readyLayers: readonly boolean[]
+  readyLayers: readonly boolean[],
+  textures: ReadonlyMap<string, ResolvedTextureField> = new Map()
 ): string {
   return `${legacyTopologyFingerprint(layers, coordinateSpace, readyLayers)}:${JSON.stringify(
-    layers.slice(0, PTL_MAX_LAYERS).map((layer) => layer.pattern?.kind ?? null)
+    layers.slice(0, PTL_MAX_LAYERS).map((layer) => ({
+      pattern: layer.pattern?.kind ?? null,
+      texture: layer.texture ?? null,
+      maskSourceLayerId: layer.maskSourceLayerId,
+      structureSourceLayerId: layer.structureSourceLayerId,
+      resolved: layer.texture === undefined || layer.texture === null
+        ? null
+        : {
+            uuid: textures.get(layer.texture.id)?.texture.uuid ?? null,
+            channel: textures.get(layer.texture.id)?.channel ?? layer.texture.channel
+          }
+    }))
   )}`;
 }
 

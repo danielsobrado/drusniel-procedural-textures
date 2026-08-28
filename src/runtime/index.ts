@@ -6,46 +6,53 @@ export {
   PTL_MATERIAL_FILE_SUFFIX,
   PTL_MATERIAL_FORMAT,
   PTL_MATERIAL_VERSION,
-  type MaterialRecipe
+  type MaterialRecipe,
+  type MaterialRecipeDependencies,
+  type MaterialTextureDependency
 } from './MaterialRecipe';
 export {
   ProceduralMaterial,
-  type ProceduralMaterialOptions
+  type ProceduralMaterialBackend,
+  type ProceduralMaterialOptions,
+  type TextureFieldSource
 } from './ProceduralMaterial';
 export {
-  DEFAULT_MATERIAL_ALGORITHMS,
+  GeneratedTextureResolver,
+  PTL_GENERATED_TEXTURE_FIELD_FAMILIES,
+  PTL_GENERATED_TEXTURE_FIELD_VERSION,
+  type GeneratedTextureResolverOptions
+} from './GeneratedTextureResolver';
+export type { TextureResolver } from './TextureResolver';
+export type { ResolvedTextureField, TextureFieldResource } from '../core/texture/ResolvedTextureField';
+export {
   PTL_ALGORITHM_VERSION,
-  normalizeMaterialAlgorithms,
-  type MaterialAlgorithmSettings,
-  type ReactionDiffusionAlgorithm,
-  type SdfAlgorithm,
-  type ThermalErosionAlgorithm
+  type MaterialAlgorithmSettings
 } from '../core/material/MaterialAlgorithms';
+export type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
+export type { PatternKind, PatternSettings } from '../core/material/PatternSettings';
 export {
-  normalizeMaterialCoordinateSpace,
-  type MaterialCoordinateSpace
-} from '../core/material/MaterialCoordinates';
-export {
-  DEFAULT_PATTERN_SETTINGS,
-  PATTERN_LIMITS,
-  normalizePatternSettings,
-  type PatternKind,
-  type PatternSettings
-} from '../core/material/PatternSettings';
-export {
-  SURFACE_GRAPH_NODE_SPECS,
-  SURFACE_GRAPH_NODE_SPEC_BY_KIND,
-  type SurfaceGraphNodeCategory,
-  type SurfaceGraphNodeSpec,
-  type SurfaceGraphPortSpec
-} from '../core/graph/SurfaceGraphCatalog';
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  TEXTURE_FIELD_MODES,
+  TEXTURE_FIELD_CHANNELS,
+  type TextureFieldChannel,
+  type TextureFieldMode,
+  type TextureFieldSettings
+} from '../core/texture/TextureFieldSettings';
+export type {
+  BlendMode,
+  LayerChannel,
+  LayerKind,
+  MaterialGroup,
+  MaterialLayer,
+  PhysicalSettings,
+  RuntimeMaterialDefinition,
+  SynthesisSettings
+} from '../core/material/RuntimeMaterial';
 export { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
 export {
   setSurfaceGraphExposedValue,
-  surfaceGraphExposedValue,
   type SurfaceGraphExposedValue
 } from '../core/graph/SurfaceGraphParameters';
-export { lowerSurfaceGraphRuntimeNodes } from '../core/graph/SurfaceGraphRuntimeLowering';
 export {
   compileSurfaceGraph,
   type SurfaceGraphCompilation

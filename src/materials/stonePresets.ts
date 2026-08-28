@@ -1,15 +1,40 @@
+import {
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  type TextureFieldSettings
+} from '../core/texture/TextureFieldSettings';
 import { createPresetLayer as layer } from './presetLayer';
 import type { MaterialPreset } from './types';
 
 const CUT_COBBLE_STRUCTURE_ID = 'preset-stone-cut-cobble-structure';
 const FLAGSTONE_STRUCTURE_ID = 'preset-stone-weathered-flagstone-structure';
 
+const STONE_TEXTURE_FIELDS = {
+  cobbleMeso: 'stone.02',
+  cobbleCracks: 'cracks.04',
+  cobbleRoughness: 'super-noise.04',
+  flagstoneMineral: 'stone.03',
+  flagstoneGrain: 'grainy.05',
+  flagstoneRoughness: 'super-noise.05'
+} as const;
+
+function textureField(
+  id: string,
+  overrides: Partial<TextureFieldSettings> = {}
+): TextureFieldSettings {
+  return {
+    ...DEFAULT_TEXTURE_FIELD_SETTINGS,
+    mode: 'modulate',
+    id,
+    ...overrides
+  };
+}
+
 export const STONE_PRESETS: readonly MaterialPreset[] = [
   {
     id: 'cut-cobble-stone',
     name: 'Cut Cobble Stone',
-    description: 'Blue-grey cut stone blocks with recessed mortar joints, chipped edges and dry weathered variation.',
-    tags: ['stone', 'mineral', 'masonry', 'cobble', 'pavement'],
+    description: 'Blue-grey cut stone blocks with recessed mortar joints, chipped edges and hybrid mineral surface variation.',
+    tags: ['stone', 'mineral', 'masonry', 'cobble', 'pavement', 'hybrid'],
     physical: {
       roughness: 0.58,
       metalness: 0,
@@ -52,16 +77,25 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
         roughness: 0.04,
         displacement: 0.088
       }),
-      layer('preset-stone-cut-cobble-tone', 'Stone tone breakup', 'fbm', {
+      layer('preset-stone-cut-cobble-tone', 'Hybrid stone breakup', 'fbm', {
         blendMode: 'overlay',
-        opacity: 0.34,
-        scale: 2.3,
-        strength: 1.22,
+        opacity: 0.3,
+        scale: 2.45,
+        strength: 1.08,
         seed: 31,
         colorA: '#42484b',
         colorB: '#9ea4a8',
-        roughness: 0.03,
-        displacement: 0.008
+        roughness: 0.025,
+        displacement: 0.012,
+        texture: textureField(STONE_TEXTURE_FIELDS.cobbleMeso, {
+          scaleX: 1.14,
+          scaleY: 0.87,
+          rotation: 0.31,
+          offsetX: 0.17,
+          offsetY: 0.43,
+          contrast: 1.18,
+          bias: -0.02
+        })
       }),
       layer('preset-stone-cut-cobble-joints', 'Mortar joints', 'sdf', {
         blendMode: 'screen',
@@ -111,21 +145,50 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
         roughness: 0.04,
         displacement: -0.01
       }),
-      layer('preset-stone-cut-cobble-roughness', 'Dry stone roughness', 'fbm', {
+      layer('preset-stone-cut-cobble-cracks', 'Stone crack breakup', 'veins', {
+        channel: 'height',
+        opacity: 0.11,
+        scale: 7.4,
+        strength: 1.34,
+        seed: 67,
+        displacement: -0.009,
+        maskSourceLayerId: CUT_COBBLE_STRUCTURE_ID,
+        maskStrength: 0.9,
+        texture: textureField(STONE_TEXTURE_FIELDS.cobbleCracks, {
+          scaleX: 0.96,
+          scaleY: 1.23,
+          rotation: 0.69,
+          offsetX: 0.38,
+          offsetY: 0.11,
+          contrast: 1.42,
+          bias: -0.06
+        })
+      }),
+      layer('preset-stone-cut-cobble-roughness', 'Hybrid dry stone roughness', 'fbm', {
         channel: 'roughness',
-        opacity: 0.34,
-        scale: 11.6,
-        strength: 1.18,
+        opacity: 0.3,
+        scale: 11.8,
+        strength: 1.05,
         seed: 73,
-        roughness: 0.18
+        roughness: 0.16,
+        texture: textureField(STONE_TEXTURE_FIELDS.cobbleRoughness, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.37,
+          scaleY: 0.91,
+          rotation: -0.48,
+          offsetX: 0.29,
+          offsetY: 0.57,
+          contrast: 0.92,
+          bias: 0.03
+        })
       })
     ]
   },
   {
     id: 'weathered-flagstone',
     name: 'Weathered Flagstone',
-    description: 'Weathered warm sandstone with irregular fractured plates, dark recessed cavities, secondary cracks and granular erosion.',
-    tags: ['stone', 'mineral', 'rock', 'flagstone', 'weathered', 'sandstone'],
+    description: 'Weathered warm sandstone with irregular fractured plates, hybrid mineral breakup, dark cavities and granular erosion.',
+    tags: ['stone', 'mineral', 'rock', 'flagstone', 'weathered', 'sandstone', 'hybrid'],
     physical: {
       roughness: 0.72,
       metalness: 0,
@@ -165,15 +228,24 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
         seed: 22,
         displacement: 0.104
       }),
-      layer('preset-stone-weathered-flagstone-tone', 'Mineral tone clouding', 'fbm', {
+      layer('preset-stone-weathered-flagstone-tone', 'Hybrid mineral clouding', 'fbm', {
         blendMode: 'overlay',
         channel: 'color',
-        opacity: 0.26,
-        scale: 1.75,
-        strength: 1.18,
+        opacity: 0.25,
+        scale: 1.9,
+        strength: 1.1,
         seed: 34,
         colorA: '#664430',
-        colorB: '#c49370'
+        colorB: '#c49370',
+        texture: textureField(STONE_TEXTURE_FIELDS.flagstoneMineral, {
+          scaleX: 1.18,
+          scaleY: 0.82,
+          rotation: -0.27,
+          offsetX: 0.41,
+          offsetY: 0.19,
+          contrast: 1.12,
+          bias: -0.01
+        })
       }),
       layer('preset-stone-weathered-flagstone-seams', 'Recessed fracture color', 'cellular', {
         blendMode: 'multiply',
@@ -233,16 +305,25 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
         roughness: 0.07,
         displacement: -0.012
       }),
-      layer('preset-stone-weathered-flagstone-grain', 'Sandstone grain and pits', 'spots', {
+      layer('preset-stone-weathered-flagstone-grain', 'Hybrid sandstone grain', 'spots', {
         blendMode: 'multiply',
-        opacity: 0.11,
-        scale: 19.6,
-        strength: 1.3,
+        opacity: 0.12,
+        scale: 18.2,
+        strength: 1.12,
         seed: 94,
         colorA: '#604231',
         colorB: '#b88464',
-        roughness: 0.07,
-        displacement: -0.003
+        roughness: 0.065,
+        displacement: -0.004,
+        texture: textureField(STONE_TEXTURE_FIELDS.flagstoneGrain, {
+          scaleX: 1.42,
+          scaleY: 0.88,
+          rotation: 0.52,
+          offsetX: 0.13,
+          offsetY: 0.61,
+          contrast: 1.08,
+          bias: -0.025
+        })
       }),
       layer('preset-stone-weathered-flagstone-cavity-ao', 'Fracture cavity occlusion', 'cellular', {
         channel: 'ao',
@@ -255,13 +336,23 @@ export const STONE_PRESETS: readonly MaterialPreset[] = [
         maskInvert: true,
         maskStrength: 1
       }),
-      layer('preset-stone-weathered-flagstone-roughness', 'Dry granular roughness', 'fbm', {
+      layer('preset-stone-weathered-flagstone-roughness', 'Hybrid dry granular roughness', 'fbm', {
         channel: 'roughness',
         opacity: 0.3,
         scale: 16.8,
-        strength: 1.16,
+        strength: 1.08,
         seed: 79,
-        roughness: 0.15
+        roughness: 0.15,
+        texture: textureField(STONE_TEXTURE_FIELDS.flagstoneRoughness, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.29,
+          scaleY: 0.93,
+          rotation: -0.41,
+          offsetX: 0.54,
+          offsetY: 0.27,
+          contrast: 0.96,
+          bias: 0.02
+        })
       })
     ]
   }

@@ -1,5 +1,11 @@
-import { MAX_LAYERS } from '../app/constants';
-import { cellularConfig, glslFloat } from './CellularConfig';
+import { RUNTIME_CELLULAR_CONFIG } from '../core/material/generated/runtimeConfig';
+import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+
+function glslFloat(value: number): string {
+  return Number.isInteger(value) ? `${value}.0` : String(value);
+}
+
+const cellularConfig = RUNTIME_CELLULAR_CONFIG;
 
 const CELLULAR_JITTER = glslFloat(cellularConfig.sampling.jitter);
 const CELLULAR_WARP_SCALE = glslFloat(cellularConfig.warp.scale);
@@ -16,7 +22,7 @@ const CELLULAR_OUTPUT_FLOOR = glslFloat(cellularConfig.output.floor);
 const CELLULAR_OUTPUT_GAIN = glslFloat(cellularConfig.output.gain);
 
 export const SHARED_GLSL = /* glsl */ `
-#define LAB_MAX_LAYERS ${MAX_LAYERS}
+#define LAB_MAX_LAYERS ${PTL_MAX_LAYERS}
 
 uniform int uLabCount;
 uniform float uLabEnabled[LAB_MAX_LAYERS];
@@ -42,6 +48,8 @@ uniform float uLabMeso;
 uniform float uLabMicro;
 uniform float uLabVariation;
 uniform float uLabStochasticTiling;
+
+vec3 labTriplanarNormal;
 
 float labHash31(vec3 p) {
   p = fract(p * 0.1031);

@@ -19,6 +19,8 @@ const PRESET_TAGS = [...new Set(MATERIAL_PRESETS.flatMap((preset) => preset.tags
   .sort((left, right) => left.localeCompare(right));
 const PRESET_FILE_SUFFIX = '.ptlpreset.json';
 const BYTES_PER_MIB = 1024 * 1024;
+const FALLBACK_SWATCH_A = '#33383f';
+const FALLBACK_SWATCH_B = '#a4adb8';
 
 export function presetThumbnailUrl(id: string): string {
   return `${import.meta.env.BASE_URL}thumbnails/presets/${encodeURIComponent(id)}.png`;
@@ -50,9 +52,9 @@ export class LibraryPanel {
   }
 
   /**
-   * The 48 preset cards come from a module constant and never depend on project state,
-   * so only the first render builds markup. Re-rendering everything tore down and
-   * recreated all 48 thumbnail <img> elements on each undo/redo and object change.
+   * The preset cards come from a module constant and never depend on project state,
+   * so only the first render builds markup. Preset layers are deliberately not read
+   * here because graph-backed presets compile lazily when they are applied.
    */
   public render(state: Readonly<ProjectState>): void {
     if (this.built) {
@@ -164,7 +166,7 @@ export class LibraryPanel {
           class="preset-swatch has-thumbnail"
           data-role="preset-thumb"
           aria-hidden="true"
-          style="--swatch-a:${preset.layers[0]?.colorA ?? '#333'};--swatch-b:${preset.layers.at(-1)?.colorB ?? '#aaa'}"
+          style="--swatch-a:${FALLBACK_SWATCH_A};--swatch-b:${FALLBACK_SWATCH_B}"
         ><img src="${escapeHtml(presetThumbnailUrl(preset.id))}" width="144" height="144" loading="lazy" decoding="async" alt="" aria-hidden="true" data-preset-thumbnail></span>
         <span class="preset-copy">
           <strong>${escapeHtml(preset.name)}</strong>

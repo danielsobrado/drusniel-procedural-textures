@@ -3,7 +3,7 @@ import { createDefaultProject, createDefaultLayer } from '../src/app/AppState';
 import { normalizeProject } from '../src/app/ProjectFile';
 import { MaterialComputeEngine } from '../src/engine/MaterialComputeEngine';
 import { mutateGenome } from '../src/materials/MaterialGenome';
-import { compileMaterialGraph, materialGraphHasCycle } from '../src/materials/MaterialGraph';
+import { compileMaterialGraph, materialGraphHasCycle } from '../src/core/material/MaterialGraph';
 
 describe('V0.2 material synthesis', () => {
   it('compiles shared structure, masks and outputs into a graph', () => {

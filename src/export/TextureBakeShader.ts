@@ -9,6 +9,9 @@ import {
 } from '../materials/PortableProceduralShader';
 
 export type BakeShaderProfile = 'compact' | 'portable';
+export type BakeShaderPass = 'surface' | 'displacement';
+
+const LAYER_LIMIT_DIRECTIVE = /^#define LAB_MAX_LAYERS \d+$/m;
 
 export const BAKE_VERTEX_GLSL = /* glsl */ `
 uniform int uLabCoordinateSpace;
@@ -16,6 +19,7 @@ uniform int uLabCoordinateSpace;
 varying vec3 vBakePosition;
 varying vec3 vBakeWorldPosition;
 varying vec3 vBakeWorldNormal;
+varying vec3 vBakeTriplanarNormal;
 
 void main() {
   vec4 worldPosition = modelMatrix * vec4(position, 1.0);
@@ -28,26 +32,12 @@ void main() {
   vBakePosition = uLabCoordinateSpace == 0 ? position : worldPosition.xyz;
   vBakeWorldPosition = worldPosition.xyz;
   vBakeWorldNormal = normalize(labInverseViewRotation * (normalMatrix * normal));
+  vBakeTriplanarNormal = uLabCoordinateSpace == 0 ? normalize(normal) : vBakeWorldNormal;
   gl_Position = vec4(uv * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
 
-function buildBakeFragmentGlsl(shared: string, fragment: string): string {
-  return /* glsl */ `
-${shared}
-${fragment}
-
-uniform int uBakeMode;
-uniform float uBakeBaseRoughness;
-uniform float uBakeBaseMetalness;
-uniform float uBakeBaseClearcoat;
-uniform float uBakeBaseClearcoatRoughness;
-uniform float uBakeHeightExtent;
-
-varying vec3 vBakePosition;
-varying vec3 vBakeWorldPosition;
-varying vec3 vBakeWorldNormal;
-
+const COLOR_SPACE_GLSL = /* glsl */ `
 float labLinearChannelToSrgb(float value) {
   float safeValue = max(value, 0.0);
   return safeValue <= 0.0031308
@@ -62,7 +52,9 @@ vec3 labLinearToSrgb(vec3 color) {
     labLinearChannelToSrgb(color.b)
   );
 }
+`;
 
+const TANGENT_NORMAL_GLSL = /* glsl */ `
 vec3 labBakeTangentNormal(vec3 baseNormal, float height) {
   vec3 displacedPosition = vBakeWorldPosition + baseNormal * height;
   vec3 displacedDx = dFdx(displacedPosition);
@@ -87,10 +79,28 @@ vec3 labBakeTangentNormal(vec3 baseNormal, float height) {
     dot(displacedNormal, baseNormal)
   ));
 }
+`;
+
+function buildSurfaceBakeFragmentGlsl(shared: string, fragment: string): string {
+  return /* glsl */ `
+${shared}
+${fragment}
+
+uniform int uBakeMode;
+uniform float uBakeBaseRoughness;
+uniform float uBakeBaseMetalness;
+uniform float uBakeBaseClearcoat;
+uniform float uBakeBaseClearcoatRoughness;
+
+varying vec3 vBakePosition;
+varying vec3 vBakeWorldNormal;
+varying vec3 vBakeTriplanarNormal;
+
+${COLOR_SPACE_GLSL}
 
 void main() {
+  labTriplanarNormal = normalize(vBakeTriplanarNormal);
   LabSurface surface = labEvaluateSurface(vBakePosition);
-  float height = labEvaluateDisplacement(vBakePosition);
 
   vec3 outputColor;
   if (uBakeMode == 0) {
@@ -101,12 +111,6 @@ void main() {
   } else if (uBakeMode == 1) {
     float roughness = clamp(uBakeBaseRoughness + surface.roughness, 0.045, 1.0);
     outputColor = vec3(roughness);
-  } else if (uBakeMode == 2) {
-    vec3 tangentNormal = labBakeTangentNormal(normalize(vBakeWorldNormal), height);
-    outputColor = tangentNormal * 0.5 + 0.5;
-  } else if (uBakeMode == 3) {
-    float extent = max(uBakeHeightExtent, 0.000001);
-    outputColor = vec3(clamp(0.5 + height / (extent * 2.0), 0.0, 1.0));
   } else if (uBakeMode == 4) {
     outputColor = vec3(max(uBakeBaseClearcoat, surface.clearcoat));
   } else if (uBakeMode == 5) {
@@ -129,18 +133,56 @@ void main() {
 `;
 }
 
-function specializeLayerLimit(source: string, layerCount: number): string {
-  const count = Math.max(1, Math.min(PTL_MAX_LAYERS, Math.floor(layerCount)));
-  return source.replace(
-    `#define LAB_MAX_LAYERS ${PTL_MAX_LAYERS}`,
-    `#define LAB_MAX_LAYERS ${count}`
-  );
+function buildDisplacementBakeFragmentGlsl(shared: string): string {
+  return /* glsl */ `
+${shared}
+
+uniform int uBakeMode;
+uniform float uBakeHeightExtent;
+
+varying vec3 vBakePosition;
+varying vec3 vBakeWorldPosition;
+varying vec3 vBakeWorldNormal;
+varying vec3 vBakeTriplanarNormal;
+
+${TANGENT_NORMAL_GLSL}
+
+void main() {
+  labTriplanarNormal = normalize(vBakeTriplanarNormal);
+  float height = labEvaluateDisplacement(vBakePosition);
+
+  vec3 outputColor;
+  if (uBakeMode == 2) {
+    vec3 tangentNormal = labBakeTangentNormal(normalize(vBakeWorldNormal), height);
+    outputColor = tangentNormal * 0.5 + 0.5;
+  } else {
+    float extent = max(uBakeHeightExtent, 0.000001);
+    outputColor = vec3(clamp(0.5 + height / (extent * 2.0), 0.0, 1.0));
+  }
+
+  gl_FragColor = vec4(outputColor, 1.0);
+}
+`;
 }
 
-export function createBakeFragmentGlsl(profile: BakeShaderProfile, layerCount: number): string {
-  const source = profile === 'compact'
-    ? buildBakeFragmentGlsl(COMPACT_SHARED_GLSL, COMPACT_FRAGMENT_GLSL)
-    : buildBakeFragmentGlsl(PORTABLE_SHARED_GLSL, PORTABLE_FRAGMENT_GLSL);
+function specializeLayerLimit(source: string, layerCount: number): string {
+  const count = Math.max(1, Math.min(PTL_MAX_LAYERS, Math.floor(layerCount)));
+  if (!LAYER_LIMIT_DIRECTIVE.test(source)) {
+    throw new Error('Bake shader is missing its layer limit directive.');
+  }
+  return source.replace(LAYER_LIMIT_DIRECTIVE, `#define LAB_MAX_LAYERS ${count}`);
+}
+
+export function createBakeFragmentGlsl(
+  profile: BakeShaderProfile,
+  layerCount: number,
+  pass: BakeShaderPass = 'surface'
+): string {
+  const shared = profile === 'compact' ? COMPACT_SHARED_GLSL : PORTABLE_SHARED_GLSL;
+  const fragment = profile === 'compact' ? COMPACT_FRAGMENT_GLSL : PORTABLE_FRAGMENT_GLSL;
+  const source = pass === 'displacement'
+    ? buildDisplacementBakeFragmentGlsl(shared)
+    : buildSurfaceBakeFragmentGlsl(shared, fragment);
   return specializeLayerLimit(source, layerCount);
 }
 

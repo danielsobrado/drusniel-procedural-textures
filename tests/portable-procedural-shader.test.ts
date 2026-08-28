@@ -25,5 +25,24 @@ describe('portable procedural shader', () => {
       'uLabCoordinateSpace == 0 ? transformed : labPosition'
     );
     expect(SURFACE_VERTEX_DISPLACEMENT_GLSL).toContain('vLabPosition = labSamplePosition;');
+    expect(SURFACE_VERTEX_DISPLACEMENT_GLSL).toContain('vLabTriplanarNormal = labTriplanarNormal;');
+    expect(SURFACE_VERTEX_DISPLACEMENT_GLSL).toContain('uLabCoordinateSpace != 0');
+    expect(SURFACE_VERTEX_DISPLACEMENT_GLSL).toContain('labWorldSamplingNormal');
+  });
+
+  it('normal-weights seeded texture fields and combines them by explicit role', () => {
+    expect(SHARED_GLSL).toContain('vec3 labTriplanarNormal;');
+    expect(SHARED_GLSL).toContain('weights *= step(');
+    expect(SHARED_GLSL).toContain('domain * safeScale + seedOffset');
+    expect(SHARED_GLSL).toContain('uniform int uLabTextureMode[LAB_MAX_LAYERS];');
+    expect(SHARED_GLSL).toContain('if (textureMode == 1) return textureField;');
+    expect(SHARED_GLSL).toContain('generatorField * mix(1.0, textureField * 2.0, amount)');
+    expect(SHARED_GLSL).toContain('generatorField + (textureField - 0.5) * amount');
+    expect(SHARED_GLSL).not.toContain('kind == 14');
+  });
+
+  it('rotates texture coordinates before applying non-uniform scale', () => {
+    expect(SHARED_GLSL).toContain('vec2 centered = uv - 0.5;');
+    expect(SHARED_GLSL).toContain('return rotated * transform.xy + 0.5 + transform.zw;');
   });
 });

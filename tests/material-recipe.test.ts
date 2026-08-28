@@ -45,6 +45,7 @@ describe('portable material recipes', () => {
     delete legacy.coordinateSpace;
     delete legacy.algorithms;
     delete legacy.surfaceGraph;
+    delete legacy.dependencies;
 
     const parsed = parseMaterialRecipe(legacy);
     expect(parsed.version).toBe(PTL_MATERIAL_VERSION);
@@ -52,6 +53,21 @@ describe('portable material recipes', () => {
     expect(parsed.algorithms.version).toBe(PTL_ALGORITHM_VERSION);
     expect(parsed.algorithms.reactionDiffusion.iterations).toBeGreaterThan(0);
     expect(parsed.surfaceGraph).toBeNull();
+  });
+
+  it('migrates version-two graph recipes to the current format', () => {
+    const preset = SURFACE_DESIGNER_CATALOG.find((item) => item.id === 'designer-old-brick-wall');
+    if (preset === undefined) throw new Error('Brick designer preset is missing.');
+    const state = new AppState(createDefaultProject());
+    state.applyPreset(preset);
+    const current = createMaterialRecipe(state.snapshot, 42);
+    const legacy = { ...current, version: 2 } as Record<string, unknown>;
+    delete legacy.dependencies;
+
+    const parsed = parseMaterialRecipe(legacy);
+    expect(parsed.version).toBe(PTL_MATERIAL_VERSION);
+    expect(parsed.surfaceGraph?.id).toBe('designer-old-brick-wall');
+    expect(parsed.layers.some((layer) => layer.kind === 'pattern')).toBe(true);
   });
 
   it('exports graph-backed presets and regenerates canonical runtime layers', () => {
@@ -82,7 +98,7 @@ describe('portable material recipes', () => {
   it('rejects unsupported formats, versions, algorithms and non-portable seeds', () => {
     const recipe = createMaterialRecipe(createDefaultProject());
     expect(() => parseMaterialRecipe({ ...recipe, format: 'other' })).toThrow(/not a Procedural Texture Lab/u);
-    expect(() => parseMaterialRecipe({ ...recipe, version: 3 })).toThrow(/unsupported material recipe version/iu);
+    expect(() => parseMaterialRecipe({ ...recipe, version: PTL_MATERIAL_VERSION + 1 })).toThrow(/unsupported material recipe version/iu);
     expect(() => parseMaterialRecipe({ ...recipe, seed: -1 })).toThrow(/seed must be an integer/u);
     expect(() => parseMaterialRecipe({ ...recipe, seed: 1.5 })).toThrow(/seed must be an integer/u);
     expect(() => parseMaterialRecipe({

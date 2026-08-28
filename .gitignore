@@ -1,8 +1,11 @@
 node_modules/
 dist/
 dist-runtime/
+dist-runtime-package/
 .vite/
 artifacts/
+public/basis/
 .DS_Store
 *.log
 .history/
+.playwright-mcp/

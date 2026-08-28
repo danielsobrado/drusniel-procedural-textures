@@ -1,0 +1,15 @@
+{
+  "format": "ptl-material",
+  "version": 1,
+  "seed": 7734,
+  "coordinateSpace": "world",
+  "groups": [],
+  "layers": [{
+    "id": "grass", "name": "Grass", "kind": "pattern", "enabled": true,
+    "blendMode": "normal", "channel": "surface", "opacity": 1, "scale": 5,
+    "strength": 1, "seed": 39, "colorA": "#173218", "colorB": "#6f953b",
+    "roughness": 0.2, "displacement": 0.05, "groupId": null,
+    "maskSourceLayerId": null, "structureSourceLayerId": null,
+    "maskInvert": false, "maskStrength": 1, "pattern": { "kind": "grass" }
+  }]
+}

@@ -6,7 +6,7 @@ import {
   remapGeometryUvToAtlas
 } from '../src/export/TextureAtlas';
 
-function solidHeight(red: number): { canvas: HTMLCanvasElement; blob: Blob } {
+function solidHeight(red: number): { canvas: HTMLCanvasElement } {
   const image = {
     width: 1,
     height: 1,
@@ -17,7 +17,7 @@ function solidHeight(red: number): { canvas: HTMLCanvasElement; blob: Blob } {
     height: 1,
     getContext: () => ({ getImageData: () => image })
   } as unknown as HTMLCanvasElement;
-  return { canvas, blob: new Blob() };
+  return { canvas };
 }
 
 describe('shared texture atlas', () => {

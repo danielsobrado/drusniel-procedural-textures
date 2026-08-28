@@ -1,0 +1,15 @@
+{
+  "format": "ptl-material",
+  "version": 1,
+  "seed": 19073,
+  "coordinateSpace": "object",
+  "groups": [],
+  "layers": [{
+    "id": "vessels", "name": "Vessels", "kind": "vessels", "enabled": true,
+    "blendMode": "normal", "channel": "sss", "opacity": 0.8, "scale": 4.2,
+    "strength": 1.3, "seed": 63, "colorA": "#24070b", "colorB": "#d75b67",
+    "roughness": -0.08, "displacement": 0.025, "groupId": null,
+    "maskSourceLayerId": null, "structureSourceLayerId": null,
+    "maskInvert": false, "maskStrength": 1
+  }]
+}

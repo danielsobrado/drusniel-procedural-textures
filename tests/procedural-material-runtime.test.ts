@@ -1,20 +1,23 @@
 import * as THREE from 'three';
+import { MeshSSSNodeMaterial } from 'three/webgpu';
 import { describe, expect, it } from 'vitest';
 import { createDefaultLayer, createDefaultProject } from '../src/app/AppState';
 import { createMaterialRecipe } from '../src/runtime/MaterialRecipe';
 import { ProceduralMaterial, runtimeSeedOffset } from '../src/runtime/ProceduralMaterial';
 
 describe('ProceduralMaterial runtime', () => {
-  it('compiles recipe settings into a Three.js physical material', () => {
+  it('compiles recipe settings into a WebGPU node material by default', () => {
     const project = createDefaultProject();
     project.physical.metalness = 0.64;
     project.physical.roughness = 0.28;
     project.layers[1]!.displacement = 0.12;
     const runtime = new ProceduralMaterial(createMaterialRecipe(project, 1234));
     try {
-      expect(runtime.material).toBeInstanceOf(THREE.MeshPhysicalMaterial);
-      expect(runtime.material.metalness).toBe(0.64);
-      expect(runtime.material.roughness).toBe(0.28);
+      const material = runtime.material;
+      expect(material).toBeInstanceOf(MeshSSSNodeMaterial);
+      if (!(material instanceof MeshSSSNodeMaterial)) throw new Error('Expected WebGPU node material.');
+      expect(material.metalness).toBe(0.64);
+      expect(material.roughness).toBe(0.28);
       expect(runtime.displacementExtent).toBeGreaterThan(0);
       expect(runtime.seed).toBe(1234);
     } finally {
@@ -28,15 +31,18 @@ describe('ProceduralMaterial runtime', () => {
     expect(runtimeSeedOffset(0xffffffff)).toBeLessThan(100);
   });
 
-  it('installs surface and shadow materials on a mesh', () => {
-    const runtime = new ProceduralMaterial(createMaterialRecipe(createDefaultProject()));
+  it('retains the GLSL material and displaced shadow adapter for classic WebGLRenderer consumers', () => {
+    const runtime = new ProceduralMaterial(
+      createMaterialRecipe(createDefaultProject()),
+      { backend: 'webgl' }
+    );
     const mesh = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial());
     const previous = mesh.material;
     try {
       runtime.applyTo(mesh);
       expect(mesh.material).toBe(runtime.material);
-      expect(mesh.customDepthMaterial).toBe(runtime.depthMaterial);
-      expect(mesh.customDistanceMaterial).toBe(runtime.distanceMaterial);
+      expect(mesh.customDepthMaterial).toBeInstanceOf(THREE.MeshDepthMaterial);
+      expect(mesh.customDistanceMaterial).toBeInstanceOf(THREE.MeshDistanceMaterial);
     } finally {
       previous.dispose();
       mesh.geometry.dispose();

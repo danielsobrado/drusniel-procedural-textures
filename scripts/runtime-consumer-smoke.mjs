@@ -39,7 +39,8 @@ assert.equal(parsed.algorithms.version, runtime.PTL_ALGORITHM_VERSION);
 
 const material = new runtime.ProceduralMaterial(parsed);
 try {
-  assert.equal(material.material.isMeshPhysicalMaterial, true);
+  assert.equal(material.material.isNodeMaterial, true);
+  assert.equal(material.backend, 'webgpu');
   assert.equal(material.seed, 42);
 } finally {
   material.dispose();

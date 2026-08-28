@@ -1,3 +1,5 @@
+import { createFrameBudget } from '../core/scheduling/FrameBudget';
+
 export type ComputeBackend = 'webgpu' | 'webgl-fallback';
 export type SimulationKind = 'reaction-diffusion' | 'thermal-erosion';
 
@@ -33,11 +35,10 @@ export interface SimulationField {
 }
 
 const CPU_WORK_BUDGET = 32 * 1024 * 1024;
-// One simulation iteration touches size*size cells, so at the default 128 grid the old
-// interval of 8 meant ~131k tight-loop iterations between yields - long enough to drop
-// frames. Yielding every iteration keeps the main thread responsive; the simulation is
-// already off the critical path.
-const CPU_YIELD_INTERVAL = 1;
+// A simulation iteration touches size*size cells, so yielding once per iteration meant the
+// yield often cost more than the work it broke up. A time budget keeps the main thread just
+// as responsive while letting a fast machine run many iterations per slice.
+const CPU_SIMULATION_BUDGET_MS = 5;
 const GPU_DISPATCH_BATCH = 128;
 const SIMULATION_KINDS = new Set<SimulationKind>(['reaction-diffusion', 'thermal-erosion']);
 const DEFAULT_REACTION_DIFFUSION: Readonly<ReactionDiffusionParameters> = {
@@ -47,6 +48,14 @@ const DEFAULT_REACTION_DIFFUSION: Readonly<ReactionDiffusionParameters> = {
   diffusionB: 0.09
 };
 const DEFAULT_EROSION_RATE = 0.22;
+
+function cpuFallbackStatus(): ComputeStatus {
+  return {
+    backend: 'webgl-fallback',
+    available: false,
+    label: 'CPU simulation fallback'
+  };
+}
 
 export const REACTION_DIFFUSION_WGSL = /* wgsl */ `
 struct Params {
@@ -113,6 +122,8 @@ interface GpuDeviceLike {
   createBuffer(descriptor: { size: number; usage: number; mappedAtCreation?: boolean }): GpuBufferLike;
   createBindGroup(descriptor: unknown): unknown;
   createCommandEncoder(): GpuCommandEncoderLike;
+  destroy?(): void;
+  lost?: Promise<unknown>;
   queue: {
     writeBuffer(buffer: GpuBufferLike, offset: number, data: ArrayBufferView): void;
     submit(commands: unknown[]): void;
@@ -130,11 +141,12 @@ function analyze(values: Float32Array): Pick<SimulationField, 'min' | 'max' | 'h
   let min = Number.POSITIVE_INFINITY;
   let max = Number.NEGATIVE_INFINITY;
   const histogram = new Uint32Array(64);
-  for (const value of values) {
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-    const index = Math.max(0, Math.min(63, Math.floor(value * 64)));
-    histogram[index] = (histogram[index] ?? 0) + 1;
+  for (let index = 0; index < values.length; index += 1) {
+    const value = values[index] ?? 0;
+    if (value < min) min = value;
+    if (value > max) max = value;
+    const bin = Math.max(0, Math.min(63, Math.floor(value * 64)));
+    histogram[bin] = (histogram[bin] ?? 0) + 1;
   }
   return { min, max, histogram };
 }
@@ -146,38 +158,13 @@ function finite(value: number, label: string, min: number, max: number): number 
   return value;
 }
 
-/**
- * setTimeout(0) is clamped to 4ms once nesting passes five levels, which serialised
- * badly across thousands of yields. A message-channel task has no such clamp.
- *
- * Each call creates its own channel so that rapid concurrent yields don't race
- * on a shared port (the old singleton design could stall if messages arrived
- * before or after listeners were attached).
- */
-function waitForTask(): Promise<void> {
-  if (typeof MessageChannel !== 'function') {
-    return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
-  }
-  return new Promise((resolve) => {
-    const channel = new MessageChannel();
-    channel.port1.onmessage = () => {
-      channel.port1.close();
-      channel.port2.close();
-      resolve();
-    };
-    channel.port2.postMessage(null);
-  });
-}
-
 export class MaterialComputeEngine {
   private readonly pipelineCache = new Map<string, GpuPipelineLike>();
   private device: GpuDeviceLike | null = null;
   private initializationPromise: Promise<Readonly<ComputeStatus>> | null = null;
-  private statusValue: ComputeStatus = {
-    backend: 'webgl-fallback',
-    available: false,
-    label: 'CPU simulation fallback'
-  };
+  private statusValue: ComputeStatus = cpuFallbackStatus();
+  private initializationSequence = 0;
+  private disposed = false;
 
   public get status(): Readonly<ComputeStatus> {
     return this.statusValue;
@@ -188,14 +175,17 @@ export class MaterialComputeEngine {
   }
 
   public async initialize(): Promise<Readonly<ComputeStatus>> {
+    this.assertUsable();
     if (this.device !== null) return this.status;
-    this.initializationPromise ??= this.initializeGpu();
+    const sequence = this.initializationSequence;
+    this.initializationPromise ??= this.initializeGpu(sequence);
     const status = await this.initializationPromise;
-    if (!status.available) this.initializationPromise = null;
+    if (!status.available && !this.disposed) this.initializationPromise = null;
     return status;
   }
 
   public async simulate(request: Readonly<SimulationRequest>): Promise<SimulationField> {
+    this.assertUsable();
     this.validateRequest(request);
     const values = request.kind === 'reaction-diffusion'
       ? await this.runReactionDiffusion(request)
@@ -203,7 +193,23 @@ export class MaterialComputeEngine {
     return { width: request.size, height: request.size, values, ...analyze(values) };
   }
 
-  private async initializeGpu(): Promise<Readonly<ComputeStatus>> {
+  public dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.initializationSequence += 1;
+    this.initializationPromise = null;
+    const device = this.device;
+    this.device = null;
+    this.pipelineCache.clear();
+    this.statusValue = cpuFallbackStatus();
+    device?.destroy?.();
+  }
+
+  private assertUsable(): void {
+    if (this.disposed) throw new Error('Material compute engine has been disposed.');
+  }
+
+  private async initializeGpu(sequence: number): Promise<Readonly<ComputeStatus>> {
     if (typeof globalThis.navigator === 'undefined') return this.status;
     const navigatorWithGpu = globalThis.navigator as Navigator & {
       gpu?: { requestAdapter(): Promise<unknown> };
@@ -211,35 +217,54 @@ export class MaterialComputeEngine {
     const gpu = navigatorWithGpu.gpu;
     if (gpu === undefined) return this.status;
 
+    let requestedDevice: GpuDeviceLike | null = null;
     try {
       const adapter = await gpu.requestAdapter() as {
         requestDevice?: () => Promise<GpuDeviceLike>;
       } | null;
       if (adapter?.requestDevice === undefined) return this.status;
 
-      const device = await adapter.requestDevice();
-      const module = device.createShaderModule({
+      requestedDevice = await adapter.requestDevice();
+      const module = requestedDevice.createShaderModule({
         code: REACTION_DIFFUSION_WGSL,
         label: 'PTL reaction diffusion'
       });
-      const pipeline = await device.createComputePipelineAsync({
+      const pipeline = await requestedDevice.createComputePipelineAsync({
         label: 'PTL reaction diffusion pipeline',
         layout: 'auto',
         compute: { module, entryPoint: 'main' }
       });
-      this.device = device;
+      if (this.disposed || sequence !== this.initializationSequence) {
+        requestedDevice.destroy?.();
+        return this.status;
+      }
+      const activeDevice = requestedDevice;
+      this.device = activeDevice;
+      requestedDevice = null;
       this.pipelineCache.set('reaction-diffusion', pipeline);
       this.statusValue = { backend: 'webgpu', available: true, label: 'WebGPU compute' };
+      this.watchDeviceLoss(activeDevice, sequence);
     } catch {
-      this.device = null;
-      this.pipelineCache.clear();
-      this.statusValue = {
-        backend: 'webgl-fallback',
-        available: false,
-        label: 'CPU simulation fallback'
-      };
+      requestedDevice?.destroy?.();
+      if (!this.disposed && sequence === this.initializationSequence) {
+        this.device = null;
+        this.pipelineCache.clear();
+        this.statusValue = cpuFallbackStatus();
+      }
     }
     return this.status;
+  }
+
+  private watchDeviceLoss(device: GpuDeviceLike, sequence: number): void {
+    const lost = device.lost;
+    if (lost === undefined) return;
+    void lost.then(() => {
+      if (this.disposed || sequence !== this.initializationSequence || this.device !== device) return;
+      this.device = null;
+      this.initializationPromise = null;
+      this.pipelineCache.clear();
+      this.statusValue = cpuFallbackStatus();
+    });
   }
 
   private validateRequest(request: Readonly<SimulationRequest>): void {
@@ -275,19 +300,18 @@ export class MaterialComputeEngine {
 
   private async runReactionDiffusion(request: Readonly<SimulationRequest>): Promise<Float32Array> {
     if (this.device !== null) {
+      const failedDevice = this.device;
       try {
         return await this.reactionDiffusionGpu(request);
       } catch {
-        this.device = null;
+        if (this.device === failedDevice) this.device = null;
         this.initializationPromise = null;
         this.pipelineCache.clear();
-        this.statusValue = {
-          backend: 'webgl-fallback',
-          available: false,
-          label: 'CPU simulation fallback'
-        };
+        this.statusValue = cpuFallbackStatus();
+        failedDevice.destroy?.();
       }
     }
+    this.assertUsable();
     this.assertCpuBudget(request);
     return this.reactionDiffusionCpu(request);
   }
@@ -380,10 +404,11 @@ export class MaterialComputeEngine {
       const mapped = new Float32Array(readbackBuffer.getMappedRange().slice(0));
       readbackBuffer.unmap();
       readbackMapped = false;
-      return Float32Array.from(
-        { length: itemCount },
-        (_, index) => mapped[index * 2 + 1] ?? 0
-      );
+      const values = new Float32Array(itemCount);
+      for (let index = 0; index < itemCount; index += 1) {
+        values[index] = mapped[index * 2 + 1] ?? 0;
+      }
+      return values;
     } finally {
       if (readbackMapped) readback?.unmap();
       first?.destroy();
@@ -405,6 +430,7 @@ export class MaterialComputeEngine {
     }
     const sample = (field: Float32Array, x: number, y: number): number =>
       field[((y + size) % size) * size + ((x + size) % size)] ?? 0;
+    const budget = createFrameBudget(CPU_SIMULATION_BUDGET_MS);
 
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       for (let y = 0; y < size; y += 1) {
@@ -430,7 +456,7 @@ export class MaterialComputeEngine {
       }
       [a, nextA] = [nextA, a];
       [b, nextB] = [nextB, b];
-      if ((iteration + 1) % CPU_YIELD_INTERVAL === 0) await waitForTask();
+      if (budget.isDue()) await budget.yieldIfDue();
     }
     return b;
   }
@@ -443,6 +469,7 @@ export class MaterialComputeEngine {
       (_, index) => hash(index + seed * 3571)
     );
     let next = new Float32Array(field.length);
+    const budget = createFrameBudget(CPU_SIMULATION_BUDGET_MS);
 
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       for (let y = 0; y < size; y += 1) {
@@ -463,7 +490,7 @@ export class MaterialComputeEngine {
         }
       }
       [field, next] = [next, field];
-      if ((iteration + 1) % CPU_YIELD_INTERVAL === 0) await waitForTask();
+      if (budget.isDue()) await budget.yieldIfDue();
     }
     return field;
   }

@@ -128,12 +128,9 @@ export class LabRenderer {
   private compiledMaterialVersion = -1;
   private compiledSceneRevision = -1;
   private sceneRevision = 0;
-  private materialCompileAttempts = 0;
   private animationFrame = 0;
   private needsRender = true;
   private disposed = false;
-
-  private static readonly MAX_COMPILE_RETRIES = 3;
 
   public constructor(container: HTMLElement, compiler: MaterialCompiler) {
     this.container = container;
@@ -143,6 +140,7 @@ export class LabRenderer {
       alpha: false,
       powerPreference: 'high-performance'
     });
+    this.renderer.onDeviceLost = (info) => this.handleRendererDeviceLost(info);
     this.canvas = requireHtmlCanvas(this.renderer);
     this.canvas.className = 'lab-canvas';
     container.append(this.canvas);
@@ -176,6 +174,7 @@ export class LabRenderer {
     this.resizeObserver.observe(container);
     this.resize();
     this.rendererReady = this.initializeRenderer();
+    this.compiler.setTextureSupportRendererProvider(() => this.requireTextureSupportRenderer());
     this.scheduleEnvironmentWarmup();
   }
 
@@ -401,6 +400,7 @@ export class LabRenderer {
       this.environmentWarmupFrame = null;
     }
     cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = 0;
     this.interactionAbort.abort();
     this.resizeObserver.disconnect();
     this.smoothZoom.dispose();
@@ -415,7 +415,7 @@ export class LabRenderer {
     this.key.shadow.mapPass = null;
     this.compiler.dispose();
     this.renderer.dispose();
-    this.bakeRenderer?.dispose();
+    this.releaseBakeRenderer();
     this.container.querySelector('[data-role="renderer-fallback"]')?.remove();
     delete this.container.dataset.rendererState;
     delete this.container.dataset.bakeBackend;
@@ -460,7 +460,12 @@ export class LabRenderer {
    * WebGL2 should be asked exactly once.
    */
   private ensureBakeRenderer(): WebGLRenderer | null {
-    if (this.bakeRendererResolved) return this.bakeRenderer;
+    if (this.bakeRendererResolved) {
+      const current = this.bakeRenderer;
+      if (current === null) return null;
+      if (!current.getContext().isContextLost()) return current;
+      this.releaseBakeRenderer();
+    }
     this.bakeRendererResolved = true;
 
     const renderer = createOptionalWebGlRenderer({
@@ -482,6 +487,15 @@ export class LabRenderer {
     return renderer;
   }
 
+  private releaseBakeRenderer(): void {
+    const renderer = this.bakeRenderer;
+    this.bakeRenderer = null;
+    this.bakeRendererResolved = false;
+    this.baker = null;
+    this.glbExporter = null;
+    renderer?.dispose();
+  }
+
   private requireBakeRenderer(): WebGLRenderer {
     const renderer = this.ensureBakeRenderer();
     if (renderer === null) throw new Error(WEBGL2_UNAVAILABLE_MESSAGE);
@@ -494,8 +508,8 @@ export class LabRenderer {
    * which never exports should not download. Both entry points are already async.
    */
   private async requireBaker(): Promise<TextureBaker> {
+    const renderer = this.requireBakeRenderer();
     if (this.baker === null) {
-      const renderer = this.requireBakeRenderer();
       const { TextureBaker: Baker } = await import('../export/TextureBaker');
       this.baker ??= new Baker(renderer, this.compiler);
     }
@@ -654,7 +668,7 @@ export class LabRenderer {
     this.updateBusyIndicator();
     try {
       await this.environments.prepareStudio();
-      if (this.disposed) return;
+      if (this.disposed || this.rendererInitializationError !== null) return;
       this.setEnvironment(this.currentEnvironment, this.currentEnvironmentName);
     } catch (error) {
       console.error('Studio environment warmup failed.', error);
@@ -669,7 +683,7 @@ export class LabRenderer {
   private async initializeRenderer(): Promise<void> {
     try {
       await this.renderer.init();
-      if (!this.disposed) {
+      if (!this.disposed && this.rendererInitializationError === null) {
         this.container.dataset.rendererState = 'ready';
         reportBootStage('Compiling material');
         this.start();
@@ -681,6 +695,29 @@ export class LabRenderer {
       this.updateBusyIndicator();
       finishBoot();
     }
+  }
+
+  private async requireTextureSupportRenderer(): Promise<THREE.WebGPURenderer> {
+    await this.rendererReady;
+    if (this.disposed) throw new Error('Renderer is no longer available for KTX2 texture fields.');
+    if (this.rendererInitializationError !== null) {
+      throw new Error('WebGPU renderer is unavailable for KTX2 texture fields.', {
+        cause: this.rendererInitializationError
+      });
+    }
+    return this.renderer;
+  }
+
+  private handleRendererDeviceLost(info: unknown): void {
+    if (this.disposed || this.rendererInitializationError !== null) return;
+    this.rendererInitializationError = new Error('WebGPU renderer device was lost.', { cause: info });
+    cancelAnimationFrame(this.animationFrame);
+    this.animationFrame = 0;
+    this.environments.cancelPending();
+    console.warn('GPU renderer device lost; disabling the 3D preview.', this.rendererInitializationError);
+    this.showRendererFallback();
+    this.updateBusyIndicator();
+    finishBoot();
   }
 
   private showRendererFallback(): void {
@@ -697,7 +734,7 @@ export class LabRenderer {
     const title = document.createElement('strong');
     title.textContent = '3D preview unavailable';
     const detail = document.createElement('span');
-    detail.textContent = 'The editor remains available. Enable WebGPU or WebGL2 to restore the live preview.';
+    detail.textContent = 'The editor remains available. Reload the page after a GPU device loss to restore the live preview.';
     fallback.append(title, detail);
     this.container.append(fallback);
   }
@@ -731,26 +768,20 @@ export class LabRenderer {
       this.currentMaterialCompileFailure() !== null
     ) return;
 
+    const materialVersion = this.compiler.renderMaterial.version;
     const sceneRevision = this.sceneRevision;
     this.profiler.reset();
     let compilation: Promise<void>;
     compilation = this.renderer.compileAsync(this.scene, this.camera)
       .then(() => {
-        // Record the material version at resolution time rather than at call time.
-        // The compiled pipeline is valid for the current node graph; recording the
-        // live version prevents a stale-version loop when simulation atlas callbacks
-        // or other async paths bump material.version during compilation.
-        this.compiledMaterialVersion = this.compiler.renderMaterial.version;
+        this.compiledMaterialVersion = materialVersion;
         this.compiledSceneRevision = sceneRevision;
         this.materialCompileFailure = null;
-        this.materialCompileAttempts = 0;
       })
       .catch((error: unknown) => {
         const compileError = normalizeError(error, 'Asynchronous material compilation failed.');
-        const materialVersion = this.compiler.renderMaterial.version;
         this.materialCompileFailure = { materialVersion, sceneRevision, error: compileError };
         console.error('Asynchronous material compilation failed.', compileError);
-        this.materialCompileAttempts = 0;
       })
       .finally(() => {
         if (this.materialCompilePromise === compilation) this.materialCompilePromise = null;
@@ -760,17 +791,7 @@ export class LabRenderer {
           !this.disposed &&
           this.materialNeedsCompilation() &&
           this.currentMaterialCompileFailure() === null
-        ) {
-          if (this.materialCompileAttempts >= LabRenderer.MAX_COMPILE_RETRIES) {
-            console.warn('Material compilation retry limit reached; rendering with current state.');
-            this.compiledMaterialVersion = this.compiler.renderMaterial.version;
-            this.compiledSceneRevision = this.sceneRevision;
-            this.materialCompileAttempts = 0;
-          } else {
-            this.materialCompileAttempts += 1;
-            this.startMaterialCompilation();
-          }
-        }
+        ) this.startMaterialCompilation();
         this.updateBusyIndicator();
       });
     this.materialCompilePromise = compilation;
@@ -780,7 +801,7 @@ export class LabRenderer {
   private async ensureMaterialReady(): Promise<void> {
     await this.rendererReady;
     if (this.rendererInitializationError !== null) {
-      throw new Error('Renderer initialization failed.', { cause: this.rendererInitializationError });
+      throw new Error('Renderer is unavailable.', { cause: this.rendererInitializationError });
     }
     while (!this.disposed && this.materialNeedsCompilation()) {
       const failure = this.currentMaterialCompileFailure();
@@ -816,6 +837,7 @@ export class LabRenderer {
   }
 
   private resize(): void {
+    if (this.disposed || this.rendererInitializationError !== null) return;
     const parent = this.canvas.parentElement;
     if (parent === null) return;
     const width = Math.max(parent.clientWidth, 1);
@@ -836,7 +858,7 @@ export class LabRenderer {
   private start(): void {
     let previousFrameTime = performance.now();
     const render = (frameTime: number): void => {
-      if (this.disposed) return;
+      if (this.disposed || this.rendererInitializationError !== null) return;
       this.animationFrame = requestAnimationFrame(render);
 
       const deltaSeconds = Math.min(Math.max((frameTime - previousFrameTime) / 1000, 0), 0.05);
@@ -856,8 +878,8 @@ export class LabRenderer {
       }
 
       // No material in this app is time-driven, so an unchanged scene re-rendered at
-      // 60 Hz was pure waste - it saturated the GPU and made every backdrop-filtered
-      // panel re-blur on each frame.
+      // 60 Hz was pure waste - it saturated the GPU and made every compositor overlay
+      // refresh on each frame.
       if (!this.needsRender && cameraMoved !== true) return;
       if (typeof document !== 'undefined' && document.hidden) return;
       this.needsRender = false;
