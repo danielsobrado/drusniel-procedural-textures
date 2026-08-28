@@ -365,10 +365,13 @@ export class AppState {
   }
 
   public applyPreset(preset: MaterialPreset): void {
-    const graphCompilation = preset.graph === undefined
-      ? null
-      : compileSurfaceGraph(structuredClone(preset.graph));
-    const material = graphCompilation === null ? clonePreset(preset) : graphCompilation;
+    // For graph-based presets, pass the raw graph to normalizeProject which
+    // handles compilation once. Previously the graph was compiled here AND
+    // again inside normalizeProject, doubling synchronous CPU work.
+    const hasGraph = preset.graph !== undefined;
+    const material = hasGraph
+      ? { groups: [] as MaterialGroup[], layers: preset.layers.map((l) => ({ ...l })) }
+      : clonePreset(preset);
     const groups = material.groups.slice(0, MAX_GROUPS);
     const layers = material.layers.slice(0, MAX_LAYERS);
     const next = normalizeProject({
@@ -378,7 +381,7 @@ export class AppState {
       selectedLayerId: layers.at(-1)?.id ?? null,
       physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
       synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) },
-      surfaceGraph: graphCompilation?.graph ?? null
+      surfaceGraph: hasGraph ? structuredClone(preset.graph!) : null
     });
     this.commit();
     this.project = next;

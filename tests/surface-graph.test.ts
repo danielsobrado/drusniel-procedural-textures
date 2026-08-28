@@ -75,7 +75,9 @@ describe('surface designer graphs', () => {
   it('rejects malformed runtime values instead of coercing them', () => {
     const graph = designerGraph() as unknown as Record<string, unknown>;
     const nodes = graph.nodes as Array<Record<string, unknown>>;
-    const runtime = nodes[0]?.runtime as Record<string, unknown>;
+    const runtimeNode = nodes.find((n) => n.runtime !== undefined);
+    if (runtimeNode === undefined) throw new Error('Designer graph has no runtime node.');
+    const runtime = runtimeNode.runtime as Record<string, unknown>;
     runtime.maskInvert = 'false';
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/mask invert.*boolean/iu);
 
@@ -94,7 +96,9 @@ describe('surface designer graphs', () => {
 
     graph.edges = [];
     const nodes = graph.nodes as Array<Record<string, unknown>>;
-    const runtime = nodes[0]?.runtime as Record<string, unknown>;
+    const runtimeNode = nodes.find((n) => n.runtime !== undefined);
+    if (runtimeNode === undefined) throw new Error('Designer graph has no runtime node.');
+    const runtime = runtimeNode.runtime as Record<string, unknown>;
     runtime.structureFrom = 'missing-node';
     expect(() => normalizeSurfaceGraph(graph)).toThrow(/missing runtime structure source/iu);
   });

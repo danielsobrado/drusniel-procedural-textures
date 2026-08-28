@@ -149,21 +149,23 @@ function finite(value: number, label: string, min: number, max: number): number 
 /**
  * setTimeout(0) is clamped to 4ms once nesting passes five levels, which serialised
  * badly across thousands of yields. A message-channel task has no such clamp.
+ *
+ * Each call creates its own channel so that rapid concurrent yields don't race
+ * on a shared port (the old singleton design could stall if messages arrived
+ * before or after listeners were attached).
  */
-const yieldChannel = typeof MessageChannel === 'function' ? new MessageChannel() : null;
-
 function waitForTask(): Promise<void> {
-  if (yieldChannel === null) {
+  if (typeof MessageChannel !== 'function') {
     return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
   }
   return new Promise((resolve) => {
-    const done = (): void => {
-      yieldChannel.port1.removeEventListener('message', done);
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
       resolve();
     };
-    yieldChannel.port1.addEventListener('message', done);
-    yieldChannel.port1.start();
-    yieldChannel.port2.postMessage(null);
+    channel.port2.postMessage(null);
   });
 }
 

@@ -128,9 +128,12 @@ export class LabRenderer {
   private compiledMaterialVersion = -1;
   private compiledSceneRevision = -1;
   private sceneRevision = 0;
+  private materialCompileAttempts = 0;
   private animationFrame = 0;
   private needsRender = true;
   private disposed = false;
+
+  private static readonly MAX_COMPILE_RETRIES = 3;
 
   public constructor(container: HTMLElement, compiler: MaterialCompiler) {
     this.container = container;
@@ -728,20 +731,26 @@ export class LabRenderer {
       this.currentMaterialCompileFailure() !== null
     ) return;
 
-    const materialVersion = this.compiler.renderMaterial.version;
     const sceneRevision = this.sceneRevision;
     this.profiler.reset();
     let compilation: Promise<void>;
     compilation = this.renderer.compileAsync(this.scene, this.camera)
       .then(() => {
-        this.compiledMaterialVersion = materialVersion;
+        // Record the material version at resolution time rather than at call time.
+        // The compiled pipeline is valid for the current node graph; recording the
+        // live version prevents a stale-version loop when simulation atlas callbacks
+        // or other async paths bump material.version during compilation.
+        this.compiledMaterialVersion = this.compiler.renderMaterial.version;
         this.compiledSceneRevision = sceneRevision;
         this.materialCompileFailure = null;
+        this.materialCompileAttempts = 0;
       })
       .catch((error: unknown) => {
         const compileError = normalizeError(error, 'Asynchronous material compilation failed.');
+        const materialVersion = this.compiler.renderMaterial.version;
         this.materialCompileFailure = { materialVersion, sceneRevision, error: compileError };
         console.error('Asynchronous material compilation failed.', compileError);
+        this.materialCompileAttempts = 0;
       })
       .finally(() => {
         if (this.materialCompilePromise === compilation) this.materialCompilePromise = null;
@@ -751,7 +760,17 @@ export class LabRenderer {
           !this.disposed &&
           this.materialNeedsCompilation() &&
           this.currentMaterialCompileFailure() === null
-        ) this.startMaterialCompilation();
+        ) {
+          if (this.materialCompileAttempts >= LabRenderer.MAX_COMPILE_RETRIES) {
+            console.warn('Material compilation retry limit reached; rendering with current state.');
+            this.compiledMaterialVersion = this.compiler.renderMaterial.version;
+            this.compiledSceneRevision = this.sceneRevision;
+            this.materialCompileAttempts = 0;
+          } else {
+            this.materialCompileAttempts += 1;
+            this.startMaterialCompilation();
+          }
+        }
         this.updateBusyIndicator();
       });
     this.materialCompilePromise = compilation;
