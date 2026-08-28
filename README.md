@@ -8,7 +8,7 @@ A real-time Three.js material playground for building layered procedural surface
 
 **Runtime library:** See the [PTL Runtime documentation](docs/runtime-package-README.md) for installation, Three.js integration, renderer backends, texture fields, and `.ptl.json` recipes.
 
-## V0.3 — Surface Designer
+## V0.3 : Surface Designer
 
 V0.3 completes the move from a layered material playground to a visual surface-authoring tool. Authored graphs stay editable from preview through baking, GLB export, project save/load, and portable runtime use instead of being flattened into a preset-only representation.
 
@@ -30,7 +30,7 @@ V0.3 completes the move from a layered material playground to a visual surface-a
 
 V0.3 preserves existing runtime-bound subgraph references in shipped and imported graphs. Arbitrary unbound nested subgraphs are intentionally outside this release because the runtime material model does not yet expose a generic nested-graph execution interface.
 
-## V0.2 — Structure, Simulation & Evolution
+## V0.2 : Structure, Simulation & Evolution
 
 V0.2 builds coherent materials from shared structural fields instead of treating every PBR channel as an unrelated noise stack. It adds reaction-diffusion and erosion simulations, SDF structures, an advanced dependency graph, environmental ageing, multi-scale synthesis, continuous anti-repetition, a lockable six-variant material genome, and a procedural terrain workspace in Tile Lab.
 
@@ -38,7 +38,7 @@ The interactive material preview is WebGPU-first. Texture baking and GLB export 
 
 ![Procedural Texture Lab V0.2 showcase](docs/images/v0-2-showcase.png)
 
-## V0.1 showcase
+## V0.1 Initial
 
 ![Procedural Texture Lab V0.1 showcase](docs/images/v0-1-showcase.png)
 
