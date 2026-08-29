@@ -62,7 +62,7 @@ async function renderPng(page, id) {
 
 async function compareCachedPixels(page, id) {
   return page.evaluate(async (presetId) => {
-    const expectedDataUrl = window.__PTL_THUMBNAIL_GENERATOR__.renderTerrain(presetId);
+    const expectedDataUrl = await window.__PTL_THUMBNAIL_GENERATOR__.renderTerrain(presetId);
     const cacheBust = `${Date.now()}-${Math.random()}`;
     const actualUrl = `/terrain-presets/${encodeURIComponent(presetId)}.png?ptl-check=${cacheBust}`;
     const [expectedResponse, actualResponse] = await Promise.all([
