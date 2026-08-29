@@ -56,9 +56,13 @@ vec3 labLinearToSrgb(vec3 color) {
 
 const TANGENT_NORMAL_GLSL = /* glsl */ `
 vec3 labBakeTangentNormal(vec3 baseNormal, float height) {
+  vec3 sampleDx = dFdx(vBakePosition) * 2.0;
+  vec3 sampleDy = dFdy(vBakePosition) * 2.0;
+  float heightDx = labEvaluateDisplacement(vBakePosition + sampleDx);
+  float heightDy = labEvaluateDisplacement(vBakePosition + sampleDy);
   vec3 displacedPosition = vBakeWorldPosition + baseNormal * height;
-  vec3 displacedDx = dFdx(displacedPosition);
-  vec3 displacedDy = dFdy(displacedPosition);
+  vec3 displacedDx = vBakeWorldPosition + dFdx(vBakeWorldPosition) * 2.0 + baseNormal * heightDx - displacedPosition;
+  vec3 displacedDy = vBakeWorldPosition + dFdy(vBakeWorldPosition) * 2.0 + baseNormal * heightDy - displacedPosition;
   vec3 displacedNormal = normalize(cross(displacedDx, displacedDy));
   if (dot(displacedNormal, baseNormal) < 0.0) displacedNormal = -displacedNormal;
 

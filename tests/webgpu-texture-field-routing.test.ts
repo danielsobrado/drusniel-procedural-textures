@@ -8,24 +8,24 @@ const source = readFileSync(
 
 describe('WebGPU designer channel routing', () => {
   it('routes designer SSS layers instead of dropping them from the WebGPU material', () => {
-    expect(source).toContain('let sssColor = base.sssColor.mul(base.sss);');
+    expect(source).toContain("let sssColor: Node<'vec3'> = vec3(0);");
     expect(source).toContain("if (layer.channel === 'sss')");
     expect(source).toContain('sssColor = sssColor.add(layerColor.mul(scatter));');
     expect(source).toContain('sss = sss.add(scatter);');
     expect(source).toContain('sssColor: sssColor.div(max(sss, 0.0001))');
   });
 
-  it('routes procedural layers through texture-field mask and structure dependencies', () => {
+  it('evaluates the complete hybrid surface once with texture-field dependencies', () => {
     expect(source).toContain('function designerLayerIndices(');
     expect(source).toContain('const dependencies = [layer.maskSourceLayerId, layer.structureSourceLayerId];');
-    expect(source).toContain('withoutDesignerLayers(activeLayers, designerIndices)');
-    expect(source).toContain('if (!designerIndices.has(index)) return;');
-    expect(source).toContain('const coverage = designerCoverage(layer, shaped, textureField);');
-    expect(source).toContain('designerDisplacementSignal(layer, shaped, textureField)');
+    expect(source).not.toContain('withoutDesignerLayers(');
+    expect(source).toContain('activeLayers.forEach((layer, index) => {');
+    expect(source).toContain('const coverage = designerCoverage(layer, shaped);');
+    expect(source).toContain('designerDisplacementSignal(layer, shaped)');
   });
 
   it('keeps designer roughness and clearcoat weighting aligned with the portable path', () => {
-    expect(source).toContain("layer.kind === 'base' && !textureField");
+    expect(source).toContain("layer.kind === 'base'");
     expect(source).toContain('mix(0.4, 1, shaped)');
     expect(source).toContain('opacity.mul(shaped).mul(max(uniforms.strength[index]!, 0))');
   });
@@ -56,6 +56,6 @@ describe('WebGPU designer channel routing', () => {
     expect(source).toContain("textureSettings.mode === 'warp'");
     expect(source).toContain("textureSettings.mode === 'modulate'");
     expect(source).toContain("textureSettings.mode === 'detail'");
-    expect(source).toContain("const textureField = layer.texture?.mode === 'replace';");
+    expect(source).toContain('buildWebGpuPatternField(domain, settings, params, seed, triplanarNormal)');
   });
 });

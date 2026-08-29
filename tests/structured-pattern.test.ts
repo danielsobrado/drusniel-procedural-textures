@@ -19,8 +19,13 @@ const STRUCTURED_IDS = [
   'designer-cobblestone'
 ] as const;
 
-const webGpuStructuredSource = readFileSync(
-  new URL('../src/materials/WebGpuStructuredPatternNodes.ts', import.meta.url),
+const webGpuPatternSource = readFileSync(
+  new URL('../src/materials/WebGpuPatternNodes.ts', import.meta.url),
+  'utf8'
+);
+
+const webGpuDesignerSource = readFileSync(
+  new URL('../src/materials/WebGpuSurfaceDesignerNodes.ts', import.meta.url),
   'utf8'
 );
 
@@ -95,10 +100,16 @@ describe('structured surface patterns', () => {
   });
 
   it('keeps numeric structured controls uniform-driven in WebGPU', () => {
-    expect(webGpuStructuredSource).not.toContain('settings.jitter');
-    expect(webGpuStructuredSource).not.toContain('settings.edgeWear');
-    expect(webGpuStructuredSource).toContain('params.cellJitterOffset');
-    expect(webGpuStructuredSource).toContain('params.grassEdgeWear');
+    const evaluator = webGpuPatternSource.slice(webGpuPatternSource.indexOf('function roundedCell'));
+    expect(evaluator).not.toContain('settings.jitter');
+    expect(evaluator).not.toContain('settings.edgeWear');
+    expect(evaluator).toContain('params.cellJitterOffset');
+    expect(evaluator).toContain('params.grassEdgeWear');
+  });
+
+  it('routes every TSL pattern through the shared portable evaluator', () => {
+    expect(webGpuDesignerSource).toContain('buildWebGpuPatternField(');
+    expect(webGpuDesignerSource).not.toContain('WebGpuStructuredPatternNodes');
   });
 
   it('keeps every structured preset safe to read while building the library', () => {

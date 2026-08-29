@@ -1,6 +1,9 @@
 import type { Node } from 'three/webgpu';
-import { abs, clamp, float, floor, fract, max, mix, pow, smoothstep, step, vec2 } from 'three/tsl';
-import { RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig } from '../core/material/generated/runtimeConfig';
+import { abs, clamp, float, floor, fract, max, min, mix, pow, smoothstep, step, vec2, vec3 } from 'three/tsl';
+import {
+  RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig,
+  RUNTIME_STRUCTURED_PATTERN_CONFIG as structuredPatternConfig
+} from '../core/material/generated/runtimeConfig';
 import {
   DEFAULT_PATTERN_SETTINGS,
   type PatternSettings
@@ -99,9 +102,34 @@ export function derivePatternParams(settings: Readonly<PatternSettings>): Patter
 }
 
 function hash21(position: Node<'vec2'>, seed: Node<'float'>): Node<'float'> {
-  return fract(
-    position.dot(vec2(127.1, 311.7)).add(seed.mul(74.7)).sin().mul(43758.5453123)
-  );
+  const p = fract(vec3(position, seed.mul(0.173)).mul(0.1031));
+  const mixed = p.add(p.dot(vec3(p.y, p.z, p.x).add(33.33)));
+  return fract(mixed.x.add(mixed.y).mul(mixed.z));
+}
+
+function hash31(position: Node<'vec3'>): Node<'float'> {
+  const p = fract(position.mul(0.1031));
+  const mixed = p.add(p.dot(vec3(p.y, p.z, p.x).add(33.33)));
+  return fract(mixed.x.add(mixed.y).mul(mixed.z));
+}
+
+function noise3(position: Node<'vec3'>): Node<'float'> {
+  const cell = floor(position);
+  const local = fract(position);
+  const shaped = local.mul(local).mul(vec3(3).sub(local.mul(2)));
+  const n000 = hash31(cell);
+  const n100 = hash31(cell.add(vec3(1, 0, 0)));
+  const n010 = hash31(cell.add(vec3(0, 1, 0)));
+  const n110 = hash31(cell.add(vec3(1, 1, 0)));
+  const n001 = hash31(cell.add(vec3(0, 0, 1)));
+  const n101 = hash31(cell.add(vec3(1, 0, 1)));
+  const n011 = hash31(cell.add(vec3(0, 1, 1)));
+  const n111 = hash31(cell.add(vec3(1, 1, 1)));
+  const nx00 = mix(n000, n100, shaped.x);
+  const nx10 = mix(n010, n110, shaped.x);
+  const nx01 = mix(n001, n101, shaped.x);
+  const nx11 = mix(n011, n111, shaped.x);
+  return mix(mix(nx00, nx10, shaped.y), mix(nx01, nx11, shaped.y), shaped.z);
 }
 
 function valueNoise2(position: Node<'vec2'>, seed: Node<'float'>): Node<'float'> {
@@ -119,8 +147,8 @@ function rotate(position: Node<'vec2'>, angle: Node<'float'>): Node<'vec2'> {
   const cosine = angle.cos();
   const sine = angle.sin();
   return vec2(
-    position.x.mul(cosine).sub(position.y.mul(sine)),
-    position.x.mul(sine).add(position.y.mul(cosine))
+    position.x.mul(cosine).add(position.y.mul(sine)),
+    position.y.mul(cosine).sub(position.x.mul(sine))
   );
 }
 
@@ -129,9 +157,15 @@ function roundedCell(
   params: PatternParamNodes,
   randomValue: Node<'float'>
 ): Node<'float'> {
-  const q = max(abs(local).sub(params.cellInnerHalf), vec2(0));
-  const wear = randomValue.sub(0.5).mul(params.cellWear);
-  return float(1).sub(smoothstep(-0.012, 0.035, q.length().sub(params.cellRadius).add(wear)));
+  const signed = abs(local).sub(max(params.cellInnerHalf, 0.001));
+  const distance = max(signed, vec2(0)).length()
+    .add(min(max(signed.x, signed.y), 0))
+    .sub(params.cellRadius);
+  const wear = noise3(vec3(local.mul(4.7), randomValue.mul(13)))
+    .sub(0.5)
+    .mul(params.grassEdgeWear)
+    .mul(0.16);
+  return float(1).sub(smoothstep(-0.018, 0.028, distance.add(wear)));
 }
 
 function grassBlade2d(
@@ -177,7 +211,11 @@ function grassBlade2d(
   );
   const taper = max(pow(max(float(1).sub(t), 0), params.grassBladeTaper), 0.035);
   const widthAtHeight = params.grassBladeWidth.mul(widthScale).mul(taper);
-  const edgeNoise = randomD.sub(0.5).mul(params.grassEdgeWear).mul(params.grassBladeWidth).mul(0.55);
+  const edgeNoise = noise3(vec3(local.mul(8), seed.add(randomD.mul(11))))
+    .sub(0.5)
+    .mul(params.grassEdgeWear)
+    .mul(params.grassBladeWidth)
+    .mul(0.55);
   const bladeEdge = abs(local.x.sub(centerline)).add(edgeNoise);
   const feather = max(0.004, params.grassBladeWidth.mul(0.22));
   const blade = float(1).sub(smoothstep(widthAtHeight, widthAtHeight.add(feather), bladeEdge));
@@ -317,16 +355,21 @@ export function buildWebGpuPatternField(
   position: Node<'vec3'>,
   settings: Readonly<PatternSettings>,
   params: PatternParamNodes,
-  seed: Node<'float'>
+  seed: Node<'float'>,
+  triplanarNormal: Node<'vec3'>
 ): Node<'float'> {
   const xy = pattern2d(position.xy, settings, params, seed);
   const xz = pattern2d(position.xz, settings, params, seed.add(11));
   const yz = pattern2d(position.yz, settings, params, seed.add(23));
-  const peak = max(xy, max(xz, yz));
-  if (settings.kind !== 'grass' && settings.kind !== 'turf') return peak;
-  const average = xy.add(xz).add(yz).div(3);
-  const averageMix = settings.kind === 'grass'
-    ? grassPatternConfig.rendering.triplanarAverageMix
-    : grassPatternConfig.rendering.turfTriplanarAverageMix;
-  return clamp(mix(peak, average, averageMix), 0, 1);
+  if (settings.kind === 'grass' || settings.kind === 'turf') {
+    const peak = max(xy, max(xz, yz));
+    const average = xy.add(xz).add(yz).div(3);
+    const averageMix = settings.kind === 'grass'
+      ? grassPatternConfig.rendering.triplanarAverageMix
+      : grassPatternConfig.rendering.turfTriplanarAverageMix;
+    return clamp(mix(peak, average, averageMix), 0, 1);
+  }
+  const weights = pow(abs(triplanarNormal.normalize()), structuredPatternConfig.projection.sharpness);
+  const total = max(weights.x.add(weights.y).add(weights.z), 0.0001);
+  return clamp(yz.mul(weights.x).add(xz.mul(weights.y)).add(xy.mul(weights.z)).div(total), 0, 1);
 }

@@ -6,6 +6,14 @@ const harnessSource = readFileSync(
   new URL('../scripts/webgpu-bake-parity.mjs', import.meta.url),
   'utf8'
 );
+const webGpuBakerSource = readFileSync(
+  new URL('../src/export/WebGpuTextureBaker.ts', import.meta.url),
+  'utf8'
+);
+const glslBakeSource = readFileSync(
+  new URL('../src/export/TextureBakeShader.ts', import.meta.url),
+  'utf8'
+);
 const packageDocument = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 ) as { scripts?: Record<string, string> };
@@ -34,6 +42,24 @@ describe('WebGPU bake parity harness', () => {
     expect(harnessSource).toContain("'--use-angle=gl'");
     expect(paritySource).toContain('SerializedReferenceBundle');
     expect(paritySource).toContain('window.ptlBakeReferences');
+  });
+
+  it('uses an exact asymmetric control to catch readback orientation regressions', () => {
+    expect(paritySource).toContain('(control) asymmetric vertical gradient');
+    expect(webGpuBakerSource).not.toContain('flipRowsInPlace');
+    expect(webGpuBakerSource).toContain('new Uint8ClampedArray(read.buffer');
+  });
+
+  it('samples height explicitly in both normal-map pipelines', () => {
+    expect(glslBakeSource).toContain('labEvaluateDisplacement(vBakePosition + sampleDx)');
+    expect(glslBakeSource).toContain('labEvaluateDisplacement(vBakePosition + sampleDy)');
+    expect(webGpuBakerSource).toContain('samplePosition.add(samplePosition.dFdx().mul(2))');
+    expect(webGpuBakerSource).toContain('samplePosition.add(samplePosition.dFdy().mul(2))');
+  });
+
+  it('permits only isolated one-byte filtered-sample outliers outside the strict peak limit', () => {
+    expect(paritySource).toContain('channel.maxDelta === maximumAllowedDelta + 1');
+    expect(paritySource).toContain('channel.meanDelta <= maximumAllowedDelta / 10');
   });
 
   it('rejects invalid CLI values instead of silently weakening the gate', () => {

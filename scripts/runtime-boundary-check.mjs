@@ -20,7 +20,6 @@ const allowedFiles = new Set([
   'materials/WebGpuMaterialUniforms.ts',
   'materials/WebGpuPatternNodes.ts',
   'materials/WebGpuProceduralNodes.ts',
-  'materials/WebGpuStructuredPatternNodes.ts',
   'materials/WebGpuSurfaceDesignerNodes.ts'
 ].map((path) => resolve(sourceRoot, path)));
 const allowedPackages = new Set(['three', 'three/tsl', 'three/webgpu']);

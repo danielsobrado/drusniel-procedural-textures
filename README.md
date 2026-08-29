@@ -4,7 +4,7 @@ A real-time Three.js material playground for building layered procedural surface
 
 **Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/procedural-texture-lab/)
 
-**Current release:** V0.3.0 — Surface Designer
+**Current release:** V0.3.1 — Portable GLSL/WebGPU parity
 
 **Runtime library:** See the [PTL Runtime documentation](docs/runtime-package-README.md) for installation, Three.js integration, renderer backends, texture fields, and `.ptl.json` recipes.
 

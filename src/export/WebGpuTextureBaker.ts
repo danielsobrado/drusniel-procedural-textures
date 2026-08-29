@@ -26,7 +26,6 @@ import type { PhysicalSettings } from '../materials/types';
 import type { WebGpuSurfaceNodes } from '../materials/WebGpuSurfaceDesignerNodes';
 import {
   disposeBakeSnapshot,
-  flipRowsInPlace,
   snapshotBakeMesh,
   type BakeMeshSnapshot
 } from './BakeGeometry';
@@ -102,10 +101,18 @@ function linearToSrgb(color: Node<'vec3'>): Node<'vec3'> {
 function bakeTangentNormal(
   worldPosition: Node<'vec3'>,
   baseNormal: Node<'vec3'>,
-  height: Node<'float'>
+  height: Node<'float'>,
+  heightDx: Node<'float'>,
+  heightDy: Node<'float'>
 ): Node<'vec3'> {
   const displaced = worldPosition.add(baseNormal.mul(height));
-  const rawNormal = normalize(cross(displaced.dFdx(), displaced.dFdy()));
+  const displacedDx = worldPosition.add(worldPosition.dFdx().mul(2))
+    .add(baseNormal.mul(heightDx))
+    .sub(displaced);
+  const displacedDy = worldPosition.add(worldPosition.dFdy().mul(2))
+    .add(baseNormal.mul(heightDy))
+    .sub(displaced);
+  const rawNormal = normalize(cross(displacedDx, displacedDy));
   const displacedNormal = select(
     dot(rawNormal, baseNormal).lessThan(float(0)),
     rawNormal.negate(),
@@ -198,6 +205,7 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 
 interface BakeSurfaceGraph {
   surface: WebGpuSurfaceNodes;
+  samplePosition: Node<'vec3'>;
   worldPosition: Node<'vec3'>;
   baseNormal: Node<'vec3'>;
 }
@@ -266,12 +274,7 @@ export class WebGpuTextureBaker {
       resolution,
       isHeight ? 0 : source!.attachment
     );
-    const pixels = new Uint8Array(read.buffer, read.byteOffset, read.byteLength);
-    const flipped = flipRowsInPlace(
-      pixels as Uint8Array<ArrayBuffer>,
-      resolution,
-      resolution
-    );
+    const pixels = new Uint8ClampedArray(read.buffer, read.byteOffset, read.byteLength);
     const canvas = document.createElement('canvas');
     canvas.width = resolution;
     canvas.height = resolution;
@@ -281,7 +284,11 @@ export class WebGpuTextureBaker {
     if (context === null) {
       throw new Error('Browser does not provide a 2D canvas required for texture baking.');
     }
-    context.putImageData(new ImageData(flipped, resolution, resolution), 0, 0);
+    context.putImageData(
+      new ImageData(pixels as Uint8ClampedArray<ArrayBuffer>, resolution, resolution),
+      0,
+      0
+    );
     return { canvas };
   }
 
@@ -355,6 +362,7 @@ export class WebGpuTextureBaker {
 
     return {
       surface: this.compiler.buildSurfaceNodes(samplePosition, triplanarNormal),
+      samplePosition,
       worldPosition,
       baseNormal
     };
@@ -366,7 +374,7 @@ export class WebGpuTextureBaker {
   }
 
   private createSurfaceMaterial(group: readonly PbrChannelName[]): THREE.NodeMaterial {
-    const { surface, worldPosition, baseNormal } = this.buildGraph();
+    const { surface, samplePosition, worldPosition, baseNormal } = this.buildGraph();
     const physical = this.compiler.physicalUniforms;
 
     const albedo = linearToSrgb(clamp(
@@ -395,7 +403,15 @@ export class WebGpuTextureBaker {
     const tangentNormal = bakeTangentNormal(
       worldPosition,
       normalize(baseNormal),
-      surface.displacement
+      surface.displacement,
+      this.compiler.buildSurfaceNodes(
+        samplePosition.add(samplePosition.dFdx().mul(2)),
+        baseNormal
+      ).displacement,
+      this.compiler.buildSurfaceNodes(
+        samplePosition.add(samplePosition.dFdy().mul(2)),
+        baseNormal
+      ).displacement
     ).mul(0.5).add(0.5);
 
     const material = new THREE.NodeMaterial();
