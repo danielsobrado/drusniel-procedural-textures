@@ -16,6 +16,10 @@ function title(value: string): string {
 function familyGraph(family: string, textureIds: readonly string[]): SurfaceGraphDefinition {
   const defaultTextureId = textureIds[0];
   if (defaultTextureId === undefined) throw new Error(`Texture family ${family} is empty.`);
+  // A sibling variant decorrelates the roughness breakup from the field driving colour and
+  // height. Single-variant families fall back to the same asset; the layers still diverge
+  // because they carry different seeds, scales and rotations.
+  const roughnessTextureId = textureIds[1] ?? defaultTextureId;
 
   return {
     version: 1,
@@ -49,6 +53,31 @@ function familyGraph(family: string, textureIds: readonly string[]): SurfaceGrap
         }
       },
       {
+        id: 'surface',
+        // An fbm carrying the same family field in `detail` mode. The field stays the visible
+        // subject of the preset on colour and height; here it only breaks up roughness, which is
+        // what stops the family reading as a flat painted decal under a moving light.
+        kind: 'noise',
+        label: `${title(family)} roughness breakup`,
+        position: { x: 80, y: 300 },
+        params: {
+          textureId: roughnessTextureId,
+          mode: 'detail',
+          modeAmount: 0.45,
+          scale: 9,
+          strength: 1,
+          seed: 41,
+          opacity: 0.55,
+          roughness: 0.16,
+          scaleX: 1.27,
+          scaleY: 0.83,
+          rotation: -0.41,
+          contrast: 1.08,
+          bias: 0,
+          sampleChannel: 'r'
+        }
+      },
+      {
         id: 'output',
         kind: 'output',
         label: 'Material Output',
@@ -64,11 +93,16 @@ function familyGraph(family: string, textureIds: readonly string[]): SurfaceGrap
       {
         from: { nodeId: 'field', port: 'height' },
         to: { nodeId: 'output', port: 'height' }
+      },
+      {
+        from: { nodeId: 'surface', port: 'height' },
+        to: { nodeId: 'output', port: 'roughness' }
       }
     ],
     outputs: [
       { channel: 'baseColor', source: { nodeId: 'field', port: 'color' } },
-      { channel: 'height', source: { nodeId: 'field', port: 'height' } }
+      { channel: 'height', source: { nodeId: 'field', port: 'height' } },
+      { channel: 'roughness', source: { nodeId: 'surface', port: 'height' } }
     ],
     exposed: [
       {
@@ -209,6 +243,48 @@ function familyGraph(family: string, textureIds: readonly string[]): SurfaceGrap
         parameter: 'colorB',
         type: 'color',
         defaultValue: FAMILY_COLOR_HIGH
+      },
+      {
+        id: 'roughness-texture',
+        label: 'Roughness field',
+        nodeId: 'surface',
+        parameter: 'textureId',
+        type: 'enum',
+        defaultValue: roughnessTextureId,
+        options: [...textureIds]
+      },
+      {
+        id: 'roughness-scale',
+        label: 'Roughness scale',
+        nodeId: 'surface',
+        parameter: 'scale',
+        type: 'float',
+        defaultValue: 9,
+        min: 0.5,
+        max: 20,
+        step: 0.1
+      },
+      {
+        id: 'roughness-detail',
+        label: 'Roughness detail',
+        nodeId: 'surface',
+        parameter: 'modeAmount',
+        type: 'float',
+        defaultValue: 0.45,
+        min: 0,
+        max: 2,
+        step: 0.01
+      },
+      {
+        id: 'roughness-strength',
+        label: 'Roughness variation',
+        nodeId: 'surface',
+        parameter: 'roughness',
+        type: 'float',
+        defaultValue: 0.16,
+        min: -0.5,
+        max: 0.5,
+        step: 0.01
       }
     ],
     groups: [],

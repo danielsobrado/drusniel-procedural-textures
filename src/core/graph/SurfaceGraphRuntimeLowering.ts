@@ -1,5 +1,13 @@
 import { normalizeTextureFieldSettings } from '../texture/TextureFieldSettings';
-import { surfaceGraphRuntimeInputRoutes } from './SurfaceGraphRuntimeRouting';
+import {
+  surfaceGraphNamedInputSources,
+  surfaceGraphRuntimeInputRoutes
+} from './SurfaceGraphRuntimeRouting';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD
+} from '../material/runtimeDefaults';
 import type {
   SurfaceGraphDefinition,
   SurfaceGraphNode,
@@ -24,7 +32,7 @@ const DEFAULT_PATTERN: SurfaceRuntimePattern = {
 
 const HEIGHT_KINDS = new Set<SurfaceGraphNodeKind>([
   'bevel', 'slope-blur', 'blur', 'non-uniform-blur', 'distance', 'edge-detect', 'curvature',
-  'emboss', 'sharpen', 'height-blend', 'height-select', 'warp', 'directional-warp', 'vector-warp',
+  'emboss', 'sharpen', 'height-select', 'warp', 'directional-warp', 'vector-warp',
   'multi-direction-warp', 'swirl', 'slope-warp', 'levels', 'histogram-scan', 'histogram-range',
   'clamp', 'contrast', 'posterize', 'quantize', 'invert', 'transform-2d', 'mirror', 'symmetry',
   'tile', 'polar-transform', 'height-to-normal', 'height-to-curvature', 'height-to-slope',
@@ -105,6 +113,16 @@ function textureForNode(node: Readonly<SurfaceGraphNode>) {
   });
 }
 
+/**
+ * Generator nodes may carry a texture field so an authored graph can express the hybrid the
+ * runtime supports -- an fbm detailed or warped by a KTX2 field -- rather than only the
+ * field-instead-of-generator shape a `texture-field` node lowers to. The field is opt-in: a node
+ * without a `textureId` parameter lowers exactly as it did before, with no texture attached.
+ */
+function optionalTextureForNode(node: Readonly<SurfaceGraphNode>) {
+  return node.params.textureId === undefined ? null : textureForNode(node);
+}
+
 function outputChannel(graph: Readonly<SurfaceGraphDefinition>, nodeId: string): SurfaceRuntimeChannel | undefined {
   const channels = graph.outputs.filter((item) => item.source.nodeId === nodeId).map((item) => item.channel);
   if (channels.includes('baseColor') && channels.includes('height')) return 'surface';
@@ -141,7 +159,15 @@ function runtimeForNode(
   if (node.kind === 'shape') {
     return { ...common, kind: 'sdf', displacement: channel === 'height' || channel === 'surface' ? 0.025 : 0 };
   }
-  if (node.kind === 'noise') return { ...common, kind: 'fbm', displacement: channel === 'height' ? 0.02 : 0 };
+  if (node.kind === 'noise') {
+    return {
+      ...common,
+      kind: 'fbm',
+      displacement: channel === 'height' ? 0.02 : 0,
+      roughness: channel === 'roughness' ? clamp(numberParam(node, 'roughness', 0.12), -0.5, 0.5) : 0,
+      texture: optionalTextureForNode(node)
+    };
+  }
   if (node.kind === 'texture-field') {
     return {
       ...common,
@@ -171,19 +197,32 @@ function runtimeForNode(
   if (node.kind === 'height-to-ao') return { ...common, kind: 'ridges', channel: channel ?? 'ao' };
   if (node.kind === 'sdf') return { ...common, kind: 'sdf', displacement: channel === 'height' || channel === 'surface' ? 0.03 : 0 };
 
+  if (node.kind === 'height-blend') {
+    return {
+      ...common,
+      kind: 'fbm',
+      maskMode: 'height',
+      maskThreshold: clamp(numberParam(node, 'threshold', PTL_DEFAULT_MASK_THRESHOLD), 0, 1),
+      maskSoftness: clamp(numberParam(node, 'softness', PTL_DEFAULT_MASK_SOFTNESS), 0, 1),
+      maskBreakup: clamp(numberParam(node, 'breakup', PTL_DEFAULT_MASK_BREAKUP), 0, 1),
+      maskInvert: booleanParam(node, 'invert', false),
+      maskStrength: clamp(numberParam(node, 'maskStrength', 1), 0, 1),
+      displacement: channel === 'height' || channel === 'surface' ? 0.018 : 0
+    };
+  }
+
   const blendMode = BLEND_KIND_TO_MODE[node.kind];
   if (blendMode !== undefined) return { ...common, kind: 'fbm', blendMode };
   if (HEIGHT_KINDS.has(node.kind)) {
-    const kind = node.kind === 'edge-detect' || node.kind === 'curvature' || node.kind.startsWith('height-to-')
-      ? 'ridges'
-      : node.kind.includes('warp') || node.kind === 'swirl'
-        ? 'veins'
-        : 'fbm';
+    // Planned operators stay as zero-opacity routing layers. Removing them breaks imported graphs
+    // when a downstream node references their id; keeping them inert preserves the route without
+    // pretending the unavailable operation changed the material.
     return {
       ...common,
-      kind,
-      displacement: channel === 'height' || channel === 'surface' ? 0.018 : 0,
-      roughness: channel === 'roughness' ? 0.12 : 0
+      kind: 'fbm',
+      opacity: 0,
+      displacement: 0,
+      roughness: 0
     };
   }
   return { ...common, kind: 'fbm' };
@@ -205,6 +244,31 @@ function reachableNodeIds(graph: Readonly<SurfaceGraphDefinition>): Set<string> 
   for (const output of graph.outputs) visit(output.source.nodeId);
   for (const node of graph.nodes) if (node.runtime !== undefined) visit(node.id);
   return reachable;
+}
+
+/**
+ * Binds a height blend's inputs by port name. The generic two-slot router would order these
+ * by catalog input index and read `base` as the structure and `top` as the mask, which is the
+ * reverse of what the node means.
+ */
+function bindHeightBlendRoutes(
+  graph: Readonly<SurfaceGraphDefinition>,
+  node: Readonly<SurfaceGraphNode>,
+  runtime: SurfaceGraphRuntimeLayer,
+  runtimeIds: ReadonlySet<string>
+): void {
+  const sources = surfaceGraphNamedInputSources(graph, node.id, runtimeIds);
+  if (sources.has('opacity')) {
+    throw new Error(
+      `Surface graph node ${node.label} drives the height blend opacity port from another node. ` +
+      'The runtime layer carries a single mask slot, already bound to the base input; ' +
+      'set the mask strength parameter instead of connecting opacity.'
+    );
+  }
+  const top = sources.get('top');
+  const base = sources.get('base');
+  if (top !== undefined) runtime.structureFrom = top;
+  if (base !== undefined) runtime.maskFrom = base;
 }
 
 export function lowerSurfaceGraphRuntimeNodes(
@@ -232,6 +296,11 @@ export function lowerSurfaceGraphRuntimeNodes(
           }
     };
     if (node.runtime === undefined) return node;
+
+    if (source.kind === 'height-blend') {
+      bindHeightBlendRoutes(graph, source, node.runtime, runtimeIds);
+      return node;
+    }
 
     const incoming = surfaceGraphRuntimeInputRoutes(graph, node.id, runtimeIds);
     if (incoming.structureFrom !== undefined) node.runtime.structureFrom = incoming.structureFrom;

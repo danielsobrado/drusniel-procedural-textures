@@ -4,6 +4,7 @@ import type {
   SurfaceGraphParameterValue,
   SurfaceGraphValueType
 } from '../../core/graph/SurfaceGraph';
+import type { SurfaceGraphNodeStatus } from '../../core/graph/SurfaceGraphCatalog';
 import { TEXTURE_FIELD_MODES } from '../../core/texture/TextureFieldSettings';
 import { escapeHtml } from '../../utils/html';
 import {
@@ -235,6 +236,16 @@ function inspectorMarkup(graph: Readonly<SurfaceGraphDefinition>, selectedNodeId
   `;
 }
 
+function nodeStatusLabel(status: SurfaceGraphNodeStatus): string {
+  return status === 'preview' ? 'approximate' : 'not implemented';
+}
+
+function nodeStatusHint(status: SurfaceGraphNodeStatus): string {
+  return status === 'preview'
+    ? 'Approximated by a related procedural layer. The result is usable but is not the exact operation.'
+    : 'Declared but not implemented yet. This node contributes nothing to the material.';
+}
+
 function browserMarkup(graph: Readonly<SurfaceGraphDefinition>, open: boolean, query: string): string {
   const specs = graphNodeBrowserSpecs(graph);
   return `
@@ -250,9 +261,9 @@ function browserMarkup(graph: Readonly<SurfaceGraphDefinition>, open: boolean, q
         </label>
         <div class="sg-browser-list" data-role="graph-browser-list">
           ${specs.map((spec) => `
-            <button class="sg-browser-item" data-node-kind="${spec.kind}" data-search="${escapeHtml(`${spec.label} ${spec.kind} ${spec.category}`.toLowerCase())}">
+            <button class="sg-browser-item" data-node-kind="${spec.kind}" data-node-status="${spec.status}" data-search="${escapeHtml(`${spec.label} ${spec.kind} ${spec.category}`.toLowerCase())}"${spec.status === 'stable' ? '' : ` title="${escapeHtml(nodeStatusHint(spec.status))}"`}>
               <span class="sg-browser-icon" data-category="${spec.category}">${escapeHtml(spec.label.slice(0, 2).toUpperCase())}</span>
-              <span><strong>${escapeHtml(spec.label)}</strong><small>${escapeHtml(spec.category)} · ${spec.outputs.length} output${spec.outputs.length === 1 ? '' : 's'}</small></span>
+              <span><strong>${escapeHtml(spec.label)}${spec.status === 'stable' ? '' : ` <em class="sg-browser-badge">${escapeHtml(nodeStatusLabel(spec.status))}</em>`}</strong><small>${escapeHtml(spec.category)} · ${spec.outputs.length} output${spec.outputs.length === 1 ? '' : 's'}</small></span>
               <i aria-hidden="true">＋</i>
             </button>
           `).join('')}

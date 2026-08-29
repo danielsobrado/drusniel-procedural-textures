@@ -6,7 +6,6 @@ export type StructuredPatternKind = 'brick' | 'tile' | 'plank' | 'pebble' | 'roo
 export interface StructuredPatternConfig {
   projection: {
     sharpness: number;
-    portableAverageMix: number;
   };
   displacementGain: Record<StructuredPatternKind, number>;
 }
@@ -46,13 +45,7 @@ function parseConfig(value: unknown): StructuredPatternConfig {
 
   return {
     projection: {
-      sharpness: number(projection.sharpness, 'Structured pattern projection sharpness', 1, 16),
-      portableAverageMix: number(
-        projection.portableAverageMix,
-        'Structured pattern portable average mix',
-        0,
-        1
-      )
+      sharpness: number(projection.sharpness, 'Structured pattern projection sharpness', 1, 16)
     },
     displacementGain
   };

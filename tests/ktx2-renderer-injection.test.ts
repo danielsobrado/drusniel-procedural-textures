@@ -127,13 +127,10 @@ describe('KTX2 renderer injection', () => {
     );
   });
 
-  it('gives the terrain preset baker a support renderer before its first sync', () => {
-    expect(terrainPresetSource).toContain(
-      'compiler.setTextureSupportRendererProvider(async () => baker.acquireRenderer());'
-    );
-    expect(terrainPresetSource.indexOf('setTextureSupportRendererProvider')).toBeLessThan(
-      terrainPresetSource.indexOf('compiler.sync(')
-    );
+  it('keeps cached terrain preset previews out of the KTX2 renderer path', () => {
+    expect(terrainPresetSource).toContain('loadPresetTerrainTexture(preset.id, resolution)');
+    expect(terrainPresetSource).not.toContain('setTextureSupportRendererProvider');
+    expect(terrainPresetSource).not.toContain('TileMaterialBaker');
   });
 
   it('parks a failed texture-field preparation under a fingerprint no layer set can produce', () => {

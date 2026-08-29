@@ -66,8 +66,20 @@ export function surfaceGraphNodeSpec(kind: SurfaceGraphNodeKind): SurfaceGraphNo
   return spec;
 }
 
-export function graphNodeBrowserSpecs(_graph: Readonly<SurfaceGraphDefinition>): readonly SurfaceGraphNodeSpec[] {
-  return SURFACE_GRAPH_NODE_SPECS.filter((spec) => spec.kind !== 'output' && spec.kind !== 'subgraph');
+/**
+ * A `planned` kind contributes nothing to the material, so offering it hands the author a node
+ * that silently does not work. Those are withheld unless explicitly asked for. `preview` kinds
+ * approximate their operation with a related layer, which is useful, so they are offered and
+ * badged instead of hidden.
+ */
+export function graphNodeBrowserSpecs(
+  _graph: Readonly<SurfaceGraphDefinition>,
+  includeUnimplemented = false
+): readonly SurfaceGraphNodeSpec[] {
+  return SURFACE_GRAPH_NODE_SPECS.filter((spec) => {
+    if (spec.kind === 'output' || spec.kind === 'subgraph') return false;
+    return spec.status === 'planned' ? includeUnimplemented : true;
+  });
 }
 
 export function createSurfaceGraphNode(

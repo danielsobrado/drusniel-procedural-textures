@@ -4,7 +4,8 @@ import {
   isStructuredPatternKind,
   structuredPatternConfig
 } from '../src/config/structuredPatternConfig';
-import { SHARED_GLSL } from '../src/materials/PortableProceduralShader';
+import { SHARED_GLSL as BASE_SHARED_GLSL } from '../src/materials/ProceduralShader';
+import { FRAGMENT_GLSL, SHARED_GLSL } from '../src/materials/PortableProceduralShader';
 import { SURFACE_DESIGNER_CATALOG } from '../src/materials/surfaceDesignerCatalog';
 
 const STRUCTURED_IDS = [
@@ -23,6 +24,11 @@ const webGpuStructuredSource = readFileSync(
   'utf8'
 );
 
+const materialCompilerSource = readFileSync(
+  new URL('../src/materials/MaterialCompiler.ts', import.meta.url),
+  'utf8'
+);
+
 describe('structured surface patterns', () => {
   it('uses sharp normal-weighted projection and bounded displacement gains', () => {
     expect(structuredPatternConfig.projection.sharpness).toBeGreaterThanOrEqual(4);
@@ -38,8 +44,54 @@ describe('structured surface patterns', () => {
       expect(SHARED_GLSL).toContain(`return ${gain.toFixed(6)}`);
     }
     expect(SHARED_GLSL).toContain(
-      `mix(peak, average, ${structuredPatternConfig.projection.portableAverageMix.toFixed(6)})`
+      `pow(abs(labTriplanarNormal), vec3(${structuredPatternConfig.projection.sharpness.toFixed(6)}))`
     );
+  });
+
+  it('weights structured projections by the surface normal instead of taking a hard maximum', () => {
+    const field = SHARED_GLSL.slice(SHARED_GLSL.indexOf('float labPatternField'));
+    const body = field.slice(0, field.indexOf('\n}'));
+
+    expect(body).toContain('(yz * weights.x + xz * weights.y + xy * weights.z) / totalWeight');
+    // Grass and turf keep their own peak/average vegetation blend; nothing else may fall back
+    // to an unweighted maximum, which is what produced a hard projection seam.
+    expect(body).not.toContain('return max(xy, max(xz, yz));');
+  });
+
+  it('applies the pattern displacement gain in both the geometry and the shading pass', () => {
+    const gainTerm = '(kind == 13 ? labPatternDisplacementGain(i) : 1.0)';
+
+    const geometry = SHARED_GLSL.slice(SHARED_GLSL.indexOf('float labEvaluateDisplacement'));
+    expect(geometry).toContain(gainTerm);
+
+    const shading = FRAGMENT_GLSL.slice(FRAGMENT_GLSL.indexOf('surface.displacement +='));
+    expect(shading).toContain(gainTerm);
+  });
+
+  it('keeps the gain off non-pattern layers, whose uLabPatternKind slot defaults to brick', () => {
+    const gain = SHARED_GLSL.slice(SHARED_GLSL.indexOf('float labPatternDisplacementGain'));
+    // The default fill is the brick code, so an ungated call would scale every non-pattern
+    // layer by the brick gain instead of leaving it at 1.0.
+    expect(gain).toContain(`if (kind == 0) return ${structuredPatternConfig.displacementGain.brick.toFixed(6)}`);
+    for (const source of [SHARED_GLSL, FRAGMENT_GLSL]) {
+      const calls = source.match(/labPatternDisplacementGain\(i\)/g) ?? [];
+      const guarded = source.match(/kind == 13 \? labPatternDisplacementGain\(i\)/g) ?? [];
+      expect(calls.length).toBeGreaterThan(0);
+      expect(guarded.length).toBe(calls.length);
+    }
+  });
+
+  it('never routes a pattern layer through the compact bake profile', () => {
+    // The compact profile bakes the unpatched base GLSL, which has no pattern support at all
+    // — no labPatternField, no labPatternDisplacementGain — so the missing gain there is
+    // unreachable only for as long as a pattern layer forces the portable profile.
+    expect(BASE_SHARED_GLSL).not.toContain('labPatternField');
+    expect(BASE_SHARED_GLSL).not.toContain('labPatternDisplacementGain');
+
+    const kinds = /const COMPACT_BAKE_KINDS = new Set<MaterialLayer\['kind'\]>\(\[([^\]]*)\]/u
+      .exec(materialCompilerSource)?.[1];
+    expect(kinds).toBeDefined();
+    expect(kinds).not.toContain("'pattern'");
   });
 
   it('keeps numeric structured controls uniform-driven in WebGPU', () => {

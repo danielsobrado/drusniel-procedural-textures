@@ -175,6 +175,10 @@ export interface SurfaceGraphRuntimeLayer {
   structureFrom?: string | null;
   maskInvert?: boolean;
   maskStrength?: number;
+  maskMode?: 'coverage' | 'height';
+  maskThreshold?: number;
+  maskSoftness?: number;
+  maskBreakup?: number;
   pattern?: SurfaceRuntimePattern | null;
   texture?: TextureFieldSettings | null;
 }

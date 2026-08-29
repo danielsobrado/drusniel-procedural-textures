@@ -11,7 +11,6 @@ const NON_EXECUTABLE = new Set<SurfaceGraphNodeKind>(['output']);
 
 const OUTPUT_SPEC = SURFACE_GRAPH_NODE_SPECS.find((spec) => spec.kind === 'output')!;
 
-// Mirrors compatibleTypes() in SurfaceGraphValidation: exact match, or scalar-to-scalar.
 const SCALAR_TYPES = new Set<SurfaceGraphValueType>(['float', 'mask', 'height']);
 function compatible(source: SurfaceGraphValueType, target: SurfaceGraphValueType): boolean {
   return source === target || (SCALAR_TYPES.has(source) && SCALAR_TYPES.has(target));
@@ -20,16 +19,9 @@ function compatible(source: SurfaceGraphValueType, target: SurfaceGraphValueType
 interface Route {
   sourcePort: string;
   channel: string;
-  /** Set when the node cannot drive a material channel without an adapter in between. */
   via?: { kind: SurfaceGraphNodeKind; inPort: string; outPort: string };
 }
 
-/**
- * Picks a type-correct path from a node to the material output. Wiring every node's
- * first output into `output.height` (as this test used to) is a type error for the
- * colour, normal and id-producing nodes, so it exercised the validator instead of the
- * lowering it is meant to cover.
- */
 function routeFor(kind: SurfaceGraphNodeKind): Route {
   const spec = SURFACE_GRAPH_NODE_SPECS.find((entry) => entry.kind === kind);
   if (spec === undefined) throw new Error(`No catalog spec for ${kind}.`);
@@ -39,7 +31,6 @@ function routeFor(kind: SurfaceGraphNodeKind): Route {
     if (channel !== undefined) return { sourcePort: out.name, channel: channel.name };
   }
 
-  // Intermediate-only nodes (a flood-fill id, a flood position) need one adapter hop.
   for (const out of spec.outputs) {
     for (const candidate of SURFACE_GRAPH_NODE_SPECS) {
       if (candidate.kind === kind || candidate.kind === 'output') continue;
@@ -122,8 +113,6 @@ describe('surface graph generic runtime lowering', () => {
   )('lowers %s into an executable PTL material layer', (kind) => {
     const graph = graphFor(kind);
     if (kind === 'subgraph') {
-      // Lowering requires a subgraph node to carry an explicit runtime binding (see
-      // runtimeForNode); authored presets supply one the same way.
       graph.nodes[0]!.subgraphId = 'nested';
       graph.nodes[0]!.runtime = { kind: 'fbm', channel: 'roughness', opacity: 0.24, scale: 8.5, seed: 72 };
     }
@@ -139,6 +128,30 @@ describe('surface graph generic runtime lowering', () => {
       name: 'Test routing',
       nodes: [
         { id: 'noise', kind: 'noise', label: 'Noise', position: { x: 0, y: 0 }, params: {} },
+        { id: 'shaped', kind: 'sdf', label: 'SDF', position: { x: 160, y: 0 }, params: {} },
+        { id: 'output', kind: 'output', label: 'Output', position: { x: 320, y: 0 }, params: {} }
+      ],
+      edges: [
+        { from: { nodeId: 'noise', port: 'height' }, to: { nodeId: 'shaped', port: 'a' } },
+        { from: { nodeId: 'shaped', port: 'height' }, to: { nodeId: 'output', port: 'height' } }
+      ],
+      outputs: [{ channel: 'height', source: { nodeId: 'shaped', port: 'height' } }],
+      exposed: [],
+      groups: [],
+      subgraphs: []
+    };
+    const compiled = compileSurfaceGraph(graph);
+    expect(compiled.layers).toHaveLength(2);
+    expect(compiled.layers[1]?.structureSourceLayerId).toBe(compiled.layers[0]?.id);
+  });
+
+  it('keeps an unimplemented operator inert while preserving its upstream route', () => {
+    const graph: SurfaceGraphDefinition = {
+      version: 1,
+      id: 'test-unimplemented',
+      name: 'Test unimplemented',
+      nodes: [
+        { id: 'noise', kind: 'noise', label: 'Noise', position: { x: 0, y: 0 }, params: {} },
         { id: 'levels', kind: 'levels', label: 'Levels', position: { x: 160, y: 0 }, params: {} },
         { id: 'output', kind: 'output', label: 'Output', position: { x: 320, y: 0 }, params: {} }
       ],
@@ -151,8 +164,47 @@ describe('surface graph generic runtime lowering', () => {
       groups: [],
       subgraphs: []
     };
+
     const compiled = compileSurfaceGraph(graph);
     expect(compiled.layers).toHaveLength(2);
+    expect(compiled.layers[1]?.name).toBe('Levels');
+    expect(compiled.layers[1]?.opacity).toBe(0);
+    expect(compiled.layers[1]?.displacement).toBe(0);
     expect(compiled.layers[1]?.structureSourceLayerId).toBe(compiled.layers[0]?.id);
+  });
+
+  it('keeps downstream routing valid across an unimplemented operator', () => {
+    const graph: SurfaceGraphDefinition = {
+      version: 1,
+      id: 'test-unimplemented-chain',
+      name: 'Test unimplemented chain',
+      nodes: [
+        { id: 'noise', kind: 'noise', label: 'Noise', position: { x: 0, y: 0 }, params: {} },
+        { id: 'levels', kind: 'levels', label: 'Levels', position: { x: 120, y: 0 }, params: {} },
+        { id: 'sdf', kind: 'sdf', label: 'SDF', position: { x: 240, y: 0 }, params: {} },
+        { id: 'output', kind: 'output', label: 'Output', position: { x: 360, y: 0 }, params: {} }
+      ],
+      edges: [
+        { from: { nodeId: 'noise', port: 'height' }, to: { nodeId: 'levels', port: 'height' } },
+        { from: { nodeId: 'levels', port: 'height' }, to: { nodeId: 'sdf', port: 'a' } },
+        { from: { nodeId: 'sdf', port: 'height' }, to: { nodeId: 'output', port: 'height' } }
+      ],
+      outputs: [{ channel: 'height', source: { nodeId: 'sdf', port: 'height' } }],
+      exposed: [],
+      groups: [],
+      subgraphs: []
+    };
+
+    const compiled = compileSurfaceGraph(graph);
+    expect(compiled.layers).toHaveLength(3);
+    expect(compiled.layers[1]?.opacity).toBe(0);
+    expect(compiled.layers[1]?.structureSourceLayerId).toBe(compiled.layers[0]?.id);
+    expect(compiled.layers[2]?.structureSourceLayerId).toBe(compiled.layers[1]?.id);
+  });
+
+  it('keeps a standalone unimplemented operator valid but inert', () => {
+    const compiled = compileSurfaceGraph(graphFor('levels'));
+    expect(compiled.layers.length).toBeGreaterThan(0);
+    expect(compiled.layers[0]?.opacity).toBe(0);
   });
 });

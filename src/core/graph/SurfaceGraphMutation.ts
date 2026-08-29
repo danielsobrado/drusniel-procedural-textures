@@ -132,6 +132,9 @@ function updateRuntime(
     else if (parameter === 'strength') next.strength = value;
     else if (parameter === 'seed') next.seed = value;
     else if (parameter === 'maskStrength') next.maskStrength = value;
+    else if (parameter === 'threshold' || parameter === 'maskThreshold') next.maskThreshold = value;
+    else if (parameter === 'softness' || parameter === 'maskSoftness') next.maskSoftness = value;
+    else if (parameter === 'breakup' || parameter === 'maskBreakup') next.maskBreakup = value;
     else if (parameter === 'amount' || parameter === 'damage') {
       next.opacity = Math.max(0, Math.min(1, 0.05 + value * 0.55));
     }

@@ -26,6 +26,25 @@ function orderedIncomingEdges(
       (inputOrder.get(right.to.port) ?? Number.MAX_SAFE_INTEGER));
 }
 
+/**
+ * Incoming edges keyed by the input port they land on, for nodes whose lowering binds inputs
+ * by name rather than by the two-slot structure/mask heuristic. Later edges win, which is
+ * unreachable in a validated graph — `validateUnambiguousGraph` rejects a doubly driven input.
+ */
+export function surfaceGraphNamedInputSources(
+  graph: Readonly<SurfaceGraphDefinition>,
+  nodeId: string,
+  eligibleSourceIds?: ReadonlySet<string>
+): Map<string, string> {
+  const sources = new Map<string, string>();
+  for (const edge of graph.edges) {
+    if (edge.to.nodeId !== nodeId) continue;
+    if (eligibleSourceIds !== undefined && !eligibleSourceIds.has(edge.from.nodeId)) continue;
+    sources.set(edge.to.port, edge.from.nodeId);
+  }
+  return sources;
+}
+
 export function surfaceGraphRuntimeInputRoutes(
   graph: Readonly<SurfaceGraphDefinition>,
   nodeId: string,

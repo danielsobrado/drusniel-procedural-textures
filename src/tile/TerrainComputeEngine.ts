@@ -1,4 +1,4 @@
-import { TERRAIN_CONFIG } from '../config/terrainConfig';
+import { createFrameBudget } from '../utils/scheduling';
 import type { TerrainComputeBackend, TerrainSettings } from './TerrainTypes';
 
 const TAU = Math.PI * 2;
@@ -315,10 +315,6 @@ function validateTerrainSettings(settings: Readonly<TerrainSettings>): void {
   validateScalar(settings.detail, 'Terrain detail', 0, 1);
 }
 
-function waitForTask(): Promise<void> {
-  return new Promise((resolve) => globalThis.setTimeout(resolve, 0));
-}
-
 export class TerrainComputeEngine {
   private device: GpuDeviceLike | null = null;
   private pipeline: GpuPipelineLike | null = null;
@@ -450,17 +446,15 @@ export class TerrainComputeEngine {
     signal?: AbortSignal
   ): Promise<Float32Array> {
     const height = new Float32Array(resolution * resolution);
-    const yieldRows = TERRAIN_CONFIG.compute.cpuYieldRows;
+    const budget = createFrameBudget();
     for (let y = 0; y < resolution; y += 1) {
       signal?.throwIfAborted();
       for (let x = 0; x < resolution; x += 1) {
         height[y * resolution + x] = periodicHeight(x / resolution, y / resolution, settings);
       }
-      if ((y + 1) % yieldRows === 0 && y + 1 < resolution) {
-        await waitForTask();
-        signal?.throwIfAborted();
-      }
+      if (budget.isDue()) await budget.yieldIfDue();
     }
+    signal?.throwIfAborted();
     return height;
   }
 

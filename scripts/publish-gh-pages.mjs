@@ -10,18 +10,21 @@ function git(root, command) {
   return execSync(command, { cwd: root, encoding: 'utf8' }).trim();
 }
 
+function requireCleanWorktree(root, phase) {
+  if (git(root, 'git status --porcelain').length > 0) {
+    throw new Error(`Publish requires a clean working tree ${phase}. Commit or stash generated changes first.`);
+  }
+}
+
 async function main() {
   const root = resolve(import.meta.dirname, '..');
   const distDir = join(root, 'dist');
   const branch = git(root, 'git rev-parse --abbrev-ref HEAD');
-  const worktree = git(root, 'git status --porcelain');
 
   if (branch !== DEPLOY_BRANCH) {
     throw new Error(`Publish must run from ${DEPLOY_BRANCH}; current branch is ${branch}.`);
   }
-  if (worktree.length > 0) {
-    throw new Error('Publish requires a clean working tree. Commit or stash local changes first.');
-  }
+  requireCleanWorktree(root, 'before release checks');
 
   git(root, `git fetch --quiet origin ${DEPLOY_BRANCH}`);
   const localCommit = git(root, 'git rev-parse HEAD');
@@ -32,8 +35,9 @@ async function main() {
 
   const commit = git(root, 'git rev-parse --short HEAD');
   const remoteUrl = git(root, 'git config --get remote.origin.url');
-  console.log(`\nValidating and building Procedural Texture Lab from ${branch} (${commit})...\n`);
-  execSync('npm run ci', { cwd: root, stdio: 'inherit' });
+  console.log(`\nRunning release checks for Procedural Texture Lab from ${branch} (${commit})...\n`);
+  execSync('npm run release:check', { cwd: root, stdio: 'inherit' });
+  requireCleanWorktree(root, 'after release checks');
   await writeFile(join(distDir, '.nojekyll'), '', 'utf8');
 
   const commitMessage = `Deploy ${commit} [${new Date().toISOString()}]`;

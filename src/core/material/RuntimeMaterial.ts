@@ -20,6 +20,13 @@ export type LayerKind =
 
 export type BlendMode = 'normal' | 'multiply' | 'add' | 'screen' | 'overlay';
 
+/**
+ * How a layer's mask source is shaped. `coverage` consumes the source generator's field
+ * linearly. `height` thresholds the source's relief, so the masked layer settles into the
+ * source's crevices — moss in mortar, dirt in seams, snow on ledges.
+ */
+export type MaskMode = 'coverage' | 'height';
+
 export type LayerChannel =
   | 'surface'
   | 'color'
@@ -51,6 +58,10 @@ export interface MaterialLayer {
   structureSourceLayerId: string | null;
   maskInvert: boolean;
   maskStrength: number;
+  maskMode: MaskMode;
+  maskThreshold: number;
+  maskSoftness: number;
+  maskBreakup: number;
   pattern?: PatternSettings | null;
   texture?: TextureFieldSettings | null;
 }

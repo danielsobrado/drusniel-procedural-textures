@@ -20,12 +20,52 @@ export interface SurfaceGraphPortSpec {
   optional?: boolean;
 }
 
+/**
+ * How faithfully a kind's lowering reproduces the operation its label promises.
+ *
+ * `stable`  - lowers to the operation it names.
+ * `preview` - lowers to a related procedural layer that approximates it.
+ * `planned` - has no lowering of its own yet and contributes nothing.
+ *
+ * This governs catalog visibility only. Every kind stays valid in the schema, because recipes
+ * already in the wild reference them and narrowing the schema would break import.
+ */
+export type SurfaceGraphNodeStatus = 'stable' | 'preview' | 'planned';
+
 export interface SurfaceGraphNodeSpec {
   kind: SurfaceGraphNodeKind;
   label: string;
   category: SurfaceGraphNodeCategory;
   inputs: readonly SurfaceGraphPortSpec[];
   outputs: readonly SurfaceGraphPortSpec[];
+  status: SurfaceGraphNodeStatus;
+}
+
+type SurfaceGraphNodeSpecSource = Omit<SurfaceGraphNodeSpec, 'status'>;
+
+/** Lowers to a related layer that reads as the operation without performing it. */
+const PREVIEW_KINDS = new Set<SurfaceGraphNodeKind>([
+  'flood-fill', 'flood-random', 'flood-index', 'flood-gradient', 'flood-position',
+  'gradient-map', 'rgb-to-hsl', 'hsl-adjust', 'color-variation', 'height-to-ao'
+]);
+
+/**
+ * Declared but not implemented. Mirrors HEIGHT_KINDS in SurfaceGraphRuntimeLowering; the two are
+ * held in step by tests/surface-graph-node-status.test.ts.
+ */
+const PLANNED_KINDS = new Set<SurfaceGraphNodeKind>([
+  'bevel', 'slope-blur', 'blur', 'non-uniform-blur', 'distance', 'edge-detect', 'curvature',
+  'emboss', 'sharpen', 'height-select', 'warp', 'directional-warp', 'vector-warp',
+  'multi-direction-warp', 'swirl', 'slope-warp', 'levels', 'histogram-scan', 'histogram-range',
+  'clamp', 'contrast', 'posterize', 'quantize', 'invert', 'transform-2d', 'mirror', 'symmetry',
+  'tile', 'polar-transform', 'height-to-normal', 'height-to-curvature', 'height-to-slope',
+  'height-to-edge', 'height-to-cavity', 'normal-combine', 'normal-blend', 'normal-rotate'
+]);
+
+function statusFor(kind: SurfaceGraphNodeKind): SurfaceGraphNodeStatus {
+  if (PLANNED_KINDS.has(kind)) return 'planned';
+  if (PREVIEW_KINDS.has(kind)) return 'preview';
+  return 'stable';
 }
 
 const scalar = (name: string, optional = false): SurfaceGraphPortSpec => ({ name, type: 'float', optional });
@@ -35,7 +75,7 @@ const color = (name = 'color', optional = false): SurfaceGraphPortSpec => ({ nam
 const normal = (name = 'normal', optional = false): SurfaceGraphPortSpec => ({ name, type: 'normal', optional });
 const id = (name = 'id', optional = false): SurfaceGraphPortSpec => ({ name, type: 'id', optional });
 
-export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] = [
+const NODE_SPEC_SOURCES: readonly SurfaceGraphNodeSpecSource[] = [
   { kind: 'shape', label: 'Shape', category: 'generator', inputs: [], outputs: [height()] },
   { kind: 'noise', label: 'Noise', category: 'generator', inputs: [], outputs: [height()] },
   { kind: 'texture-field', label: 'Texture Field', category: 'generator', inputs: [], outputs: [height(), mask(), scalar('value'), color()] },
@@ -101,6 +141,9 @@ export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] = [
   { kind: 'subgraph', label: 'Subgraph', category: 'graph', inputs: [height('input', true)], outputs: [height('output')] },
   { kind: 'output', label: 'Material Output', category: 'output', inputs: [color('baseColor', true), scalar('roughness', true), scalar('metallic', true), normal('normal', true), height('height', true), scalar('ao', true), color('emissive', true), scalar('opacity', true), scalar('clearcoat', true), scalar('sss', true)], outputs: [{ name: 'material', type: 'material' }] }
 ] as const;
+
+export const SURFACE_GRAPH_NODE_SPECS: readonly SurfaceGraphNodeSpec[] =
+  NODE_SPEC_SOURCES.map((spec) => ({ ...spec, status: statusFor(spec.kind) }));
 
 export const SURFACE_GRAPH_NODE_SPEC_BY_KIND = new Map(
   SURFACE_GRAPH_NODE_SPECS.map((spec) => [spec.kind, spec] as const)

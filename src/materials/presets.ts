@@ -30,8 +30,8 @@ function hybridize(presets: readonly MaterialPreset[]): MaterialPreset[] {
 export const MATERIAL_PRESETS: readonly MaterialPreset[] = [
   ...SURFACE_DESIGNER_CATALOG,
   ...TEXTURE_FIELD_PRESETS,
-  ...SYNTHESIS_PRESETS,
-  ...CORE_MATERIAL_PRESETS,
+  ...hybridize(SYNTHESIS_PRESETS),
+  ...hybridize(CORE_MATERIAL_PRESETS),
   ...hybridize(BIOLOGICAL_PRESETS),
   ...hybridize(ICE_PRESETS),
   ...STONE_PRESETS,

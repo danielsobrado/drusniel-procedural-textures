@@ -1,4 +1,9 @@
 import type { LayerKind, MaterialLayer } from './types';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD
+} from '../core/material/runtimeDefaults';
 
 function defaultChannel(kind: LayerKind): MaterialLayer['channel'] {
   if (kind === 'wet-film') return 'clearcoat';
@@ -33,6 +38,10 @@ export function createPresetLayer(
     structureSourceLayerId: null,
     maskInvert: false,
     maskStrength: 1,
+    maskMode: 'coverage',
+    maskThreshold: PTL_DEFAULT_MASK_THRESHOLD,
+    maskSoftness: PTL_DEFAULT_MASK_SOFTNESS,
+    maskBreakup: PTL_DEFAULT_MASK_BREAKUP,
     ...overrides
   };
 }

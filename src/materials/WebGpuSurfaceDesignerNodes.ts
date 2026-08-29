@@ -31,6 +31,7 @@ import { buildWebGpuPatternField } from './WebGpuPatternNodes';
 import { buildWebGpuStructuredPatternField } from './WebGpuStructuredPatternNodes';
 import {
   buildWebGpuFieldWithSynthesis,
+  buildWebGpuHeightMask,
   buildWebGpuProceduralLayerMesoField,
   buildWebGpuStochasticDomain,
   buildWebGpuSurfaceNodes as buildLegacySurfaceNodes,
@@ -324,11 +325,15 @@ function designerMaskForLayer(
     simulation,
     textures
   );
-  const source = clamp(
+  const sourceShaped = clamp(
     float(0.5).add(sourceField.sub(0.5).mul(max(uniforms.strength[sourceIndex]!, 0))),
     0,
     1
   );
+  const sourceLayer = layers[sourceIndex];
+  const source = layer.maskMode === 'height' && sourceLayer !== undefined
+    ? buildWebGpuHeightMask(layerIndex, sourceIndex, sourceLayer.kind, sourceShaped, position, uniforms)
+    : sourceShaped;
   const inverted = mix(source, source.oneMinus(), clamp(uniforms.maskInvert[layerIndex]!, 0, 1));
   return mix(1, inverted, clamp(uniforms.maskStrength[layerIndex]!, 0, 1));
 }

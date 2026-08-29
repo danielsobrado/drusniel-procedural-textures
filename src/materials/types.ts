@@ -10,6 +10,7 @@ export type {
   BlendMode,
   LayerChannel,
   LayerKind,
+  MaskMode,
   MaterialGroup,
   MaterialLayer,
   PhysicalSettings,

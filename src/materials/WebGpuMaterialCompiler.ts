@@ -34,7 +34,8 @@ import { applyPhysicalSettings } from './PhysicalMaterial';
 import {
   buildWebGpuSurfaceNodes,
   webGpuTopologyFingerprint,
-  type WebGpuSimulationState
+  type WebGpuSimulationState,
+  type WebGpuSurfaceNodes
 } from './WebGpuSurfaceDesignerNodes';
 import { WebGpuMaterialUniforms } from './WebGpuMaterialUniforms';
 import type {
@@ -121,6 +122,35 @@ export class WebGpuMaterialCompiler {
 
   public get displacementExtent(): number {
     return this.displacementExtentValue;
+  }
+
+  /**
+   * Builds the surface node graph against an arbitrary sample position, so a texture bake can
+   * evaluate the very same layer stack the viewport shows from a UV-space pass. Rebuilding the
+   * stack from the compiler's own state is what keeps the baked result and the preview in
+   * agreement; a second, bake-only construction of these nodes would be free to drift.
+   */
+  public buildSurfaceNodes(
+    position: Node<'vec3'>,
+    triplanarNormal: Node<'vec3'>
+  ): WebGpuSurfaceNodes {
+    return buildWebGpuSurfaceNodes(
+      position,
+      this.layers,
+      this.uniforms,
+      this.simulation,
+      this.textureFields,
+      triplanarNormal
+    );
+  }
+
+  /** The base physical uniforms a bake blends its channels against. */
+  public get physicalUniforms(): WebGpuMaterialUniforms {
+    return this.uniforms;
+  }
+
+  public get sampleCoordinateSpace(): MaterialCoordinateSpace {
+    return this.coordinateSpace;
   }
 
   public setPhysical(settings: Readonly<PhysicalSettings>): void {

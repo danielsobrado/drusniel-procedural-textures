@@ -344,6 +344,32 @@
 
 .sg-browser-item[hidden] { display: none; }
 
+/* An approximated node is still worth offering, but the author has to be able to see that it
+   is not the exact operation before they build on top of it. */
+.sg-browser-badge {
+  margin-left: 2px;
+  padding: 1px 5px;
+  border: 1px solid rgba(226, 178, 118, 0.34);
+  border-radius: 5px;
+  background: rgba(226, 178, 118, 0.11);
+  color: rgb(226, 190, 142);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.sg-browser-item[data-node-status="planned"] .sg-browser-badge {
+  border-color: rgba(232, 138, 148, 0.34);
+  background: rgba(232, 138, 148, 0.11);
+  color: rgb(236, 158, 166);
+}
+
+.sg-browser-item[data-node-status="planned"] .sg-browser-icon { opacity: 0.55; }
+
 .sg-browser-icon {
   --sg-accent: 139, 155, 216;
   width: 32px;

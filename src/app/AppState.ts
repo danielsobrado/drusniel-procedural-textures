@@ -5,6 +5,11 @@ import {
   type SurfaceGraphExposedValue
 } from '../core/graph/SurfaceGraphParameters';
 import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD
+} from '../core/material/runtimeDefaults';
 import { mutateGenome } from '../materials/MaterialGenome';
 import { compileSurfaceGraph } from '../materials/SurfaceGraphCompiler';
 import type {
@@ -63,7 +68,8 @@ export type StateListener = (state: Readonly<ProjectState>, reason: StateChangeR
 
 const CONTINUOUS_LAYER_FIELDS = new Set<keyof MaterialLayer>([
   'name', 'opacity', 'scale', 'strength', 'seed', 'colorA', 'colorB',
-  'roughness', 'displacement', 'maskStrength', 'pattern'
+  'roughness', 'displacement', 'maskStrength', 'maskThreshold', 'maskSoftness',
+  'maskBreakup', 'pattern'
 ]);
 const CONTINUOUS_GROUP_FIELDS = new Set<keyof MaterialGroup>(['name', 'opacity']);
 const COPY_SUFFIX = ' copy';
@@ -163,6 +169,10 @@ export function createDefaultLayer(kind: MaterialLayer['kind']): MaterialLayer {
     structureSourceLayerId: null,
     maskInvert: false,
     maskStrength: 1,
+    maskMode: 'coverage',
+    maskThreshold: PTL_DEFAULT_MASK_THRESHOLD,
+    maskSoftness: PTL_DEFAULT_MASK_SOFTNESS,
+    maskBreakup: PTL_DEFAULT_MASK_BREAKUP,
     pattern: kind === 'pattern' ? { ...DEFAULT_PATTERN_SETTINGS } : null,
     // normalizeMaterialLayer canonicalizes an absent texture to null, so a freshly created
     // layer has to carry the same key or it will not compare equal to the same layer loaded

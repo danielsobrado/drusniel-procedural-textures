@@ -1,6 +1,10 @@
-import { RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig } from '../core/material/generated/runtimeConfig';
+import {
+  RUNTIME_GRASS_PATTERN_CONFIG as grassPatternConfig,
+  RUNTIME_STRUCTURED_PATTERN_CONFIG as structuredPatternConfig
+} from '../core/material/generated/runtimeConfig';
 import type { PatternKind } from '../core/material/PatternSettings';
 
+const STRUCTURED_TRIPLANAR_SHARPNESS = structuredPatternConfig.projection.sharpness.toFixed(6);
 const GRASS_DISPLACEMENT_GAIN = grassPatternConfig.rendering.geometryDisplacementGain.toFixed(6);
 const GRASS_TRIPLANAR_AVERAGE_MIX = grassPatternConfig.rendering.triplanarAverageMix.toFixed(6);
 const TURF_DISPLACEMENT_GAIN = grassPatternConfig.rendering.turfGeometryDisplacementGain.toFixed(6);
@@ -298,6 +302,12 @@ float labPatternField(int layerIndex, vec3 p, float seed) {
     float averageMix = kind == 3 ? ${GRASS_TRIPLANAR_AVERAGE_MIX} : ${TURF_TRIPLANAR_AVERAGE_MIX};
     return clamp(mix(peak, average, averageMix), 0.0, 1.0);
   }
-  return max(xy, max(xz, yz));
+  // Structured patterns are weighted by the surface normal, so a face pointing down an axis
+  // reads its own projection. A plain max of the three would show whichever projection happens
+  // to be brightest regardless of orientation, and the locus where two of them cross reads as
+  // a hard seam — a ring around a sphere. This matches buildWebGpuStructuredPatternField.
+  vec3 weights = pow(abs(labTriplanarNormal), vec3(${STRUCTURED_TRIPLANAR_SHARPNESS}));
+  float totalWeight = max(weights.x + weights.y + weights.z, 0.0001);
+  return clamp((yz * weights.x + xz * weights.y + xy * weights.z) / totalWeight, 0.0, 1.0);
 }
 `;

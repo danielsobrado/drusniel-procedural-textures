@@ -1,9 +1,5 @@
-import { DEFAULT_PHYSICAL, DEFAULT_SYNTHESIS } from '../app/constants';
+import { presetTerrainTextureUrl } from '../assets/PresetAssets';
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
-import { TILE_CONFIG } from '../config/tileConfig';
-import { makeTextureSeamless } from '../export/SeamlessTexture';
-import { TileMaterialBaker } from '../export/TileMaterialBaker';
-import { MaterialCompiler } from '../materials/MaterialCompiler';
 import { MATERIAL_PRESETS } from '../materials/presets';
 import type { MaterialPreset } from '../materials/types';
 import type { TerrainTextureSource } from './TerrainTypes';
@@ -13,26 +9,21 @@ export type TerrainPresetBakeProgress = (phase: string, fraction: number) => voi
 
 export interface TerrainPresetLoadOptions {
   onProgress?: TerrainPresetBakeProgress;
-  /**
-   * Consulted just before the queued bake starts. A slot that has moved on to another preset
-   * reports false, and the bake is dropped instead of occupying the GPU ahead of the one the
-   * user is actually waiting for.
-   */
+  /** Consulted before and after the asset load so obsolete UI requests can be discarded. */
   isCurrent?: () => boolean;
 }
 
-/** Thrown when every requester lost interest before the queued bake reached the front. */
+/** Thrown when every requester lost interest before a preset texture can be published. */
 export class TerrainPresetBakeCancelled extends Error {
   public constructor(presetId: string) {
-    super(`Terrain preset bake cancelled: ${presetId}.`);
+    super(`Terrain preset load cancelled: ${presetId}.`);
     this.name = 'TerrainPresetBakeCancelled';
   }
 }
 
 /**
- * Baked previews are plain pixel buffers keyed by an immutable preset id, so they stay valid
- * for the life of the page and are shared across panel instances: closing the Tile Lab and
- * reopening it no longer re-bakes. 256² RGBA is 256 KB an entry, so the cache is bounded.
+ * Preset previews are immutable pixel buffers keyed by preset id. They are shared across panel
+ * instances and retained in a bounded LRU cache for the life of the page.
  */
 const PRESET_CACHE_LIMIT = 24;
 const presetCache = new Map<string, TerrainTextureSource>();
@@ -54,16 +45,13 @@ function cacheWrite(presetId: string, texture: TerrainTextureSource): void {
   }
 }
 
-interface BakeResources {
-  compiler: MaterialCompiler;
-  baker: TileMaterialBaker;
-}
-
-interface PendingBake {
-  request: Promise<TerrainTextureSource>;
-  /** One entry per in-flight caller; the bake runs while any of them is still current. */
+interface PendingLoadState {
   waiters: (() => boolean)[];
   reporters: TerrainPresetBakeProgress[];
+}
+
+interface PendingLoad extends PendingLoadState {
+  request: Promise<TerrainTextureSource>;
 }
 
 function findPreset(id: string): MaterialPreset {
@@ -74,7 +62,7 @@ function findPreset(id: string): MaterialPreset {
 
 function textureFromCanvas(canvas: HTMLCanvasElement): TerrainTextureSource {
   const context = canvas.getContext('2d', { willReadFrequently: true });
-  if (context === null) throw new Error('Could not read the baked terrain preset texture.');
+  if (context === null) throw new Error('Could not read the cached terrain preset texture.');
   return {
     width: canvas.width,
     height: canvas.height,
@@ -82,16 +70,34 @@ function textureFromCanvas(canvas: HTMLCanvasElement): TerrainTextureSource {
   };
 }
 
+async function loadPresetTerrainTexture(presetId: string, resolution: number): Promise<HTMLCanvasElement> {
+  const response = await fetch(presetTerrainTextureUrl(presetId));
+  if (!response.ok) {
+    throw new Error(`Could not load the cached terrain texture for ${presetId} (${response.status}).`);
+  }
+
+  const bitmap = await createImageBitmap(await response.blob());
+  try {
+    if (bitmap.width !== resolution || bitmap.height !== resolution) {
+      throw new Error(
+        `Cached terrain texture ${presetId} must be ${resolution}×${resolution}; ` +
+        `received ${bitmap.width}×${bitmap.height}.`
+      );
+    }
+    const canvas = document.createElement('canvas');
+    canvas.width = resolution;
+    canvas.height = resolution;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (context === null) throw new Error('Could not prepare the cached terrain texture.');
+    context.drawImage(bitmap, 0, 0);
+    return canvas;
+  } finally {
+    bitmap.close();
+  }
+}
+
 export class TerrainPresetTextureLibrary {
-  private readonly pending = new Map<string, PendingBake>();
-  private compiler: MaterialCompiler | null = null;
-  private baker: TileMaterialBaker | null = null;
-  private bakeQueue: Promise<void> = Promise.resolve();
-  private queueDepth = 0;
-  /**
-   * Bumped by clear(). A bake that was already in flight across a clear() must not publish
-   * its result, or it would overwrite the newer request that replaced it.
-   */
+  private readonly pending = new Map<string, PendingLoad>();
   private generation = 0;
 
   public async load(
@@ -111,13 +117,16 @@ export class TerrainPresetTextureLibrary {
       return pending.request;
     }
 
+    const preset = findPreset(presetId);
     const generation = this.generation;
-    const entry: PendingBake = {
-      request: Promise.resolve() as unknown as Promise<TerrainTextureSource>,
+    const state: PendingLoadState = {
       waiters: [options.isCurrent ?? (() => true)],
       reporters: options.onProgress === undefined ? [] : [options.onProgress]
     };
-    entry.request = this.enqueueBake(findPreset(presetId), entry);
+    const entry: PendingLoad = {
+      ...state,
+      request: Promise.resolve().then(() => this.loadPreset(preset, state))
+    };
     this.pending.set(presetId, entry);
     try {
       const texture = await entry.request;
@@ -130,103 +139,29 @@ export class TerrainPresetTextureLibrary {
     }
   }
 
-  /** Creates the bake context ahead of the first user interaction. Safe to call repeatedly. */
-  public warm(): void {
-    try {
-      this.resources();
-    } catch {
-      // A machine without WebGL2 surfaces the failure on the first real bake instead.
-    }
-  }
-
-  /** Releases the GPU context. The pixel cache is deliberately kept; see presetCache. */
+  /** Cancels publication by active panel instances while retaining the immutable pixel cache. */
   public clear(): void {
     this.generation += 1;
     this.pending.clear();
-    const queue = this.bakeQueue;
-    void queue.then(() => this.releaseResources());
   }
 
-  private enqueueBake(
+  private async loadPreset(
     preset: Readonly<MaterialPreset>,
-    entry: PendingBake
+    state: PendingLoadState
   ): Promise<TerrainTextureSource> {
-    // Bakes are serialized because they share one WebGL context. Anything still waiting when
-    // its slot has moved on is dropped here, so a burst of preset changes costs one bake
-    // rather than one per click.
-    this.queueDepth += 1;
-    const ahead = this.queueDepth - 1;
-    if (ahead > 0) {
-      report(entry, `Queued behind ${ahead} bake${ahead === 1 ? '' : 's'}`, 0);
-    }
+    const isWanted = (): boolean => state.waiters.some((isCurrent) => isCurrent());
+    if (!isWanted()) throw new TerrainPresetBakeCancelled(preset.id);
 
-    const request = this.bakeQueue.then(async () => {
-      if (!entry.waiters.some((isCurrent) => isCurrent())) {
-        throw new TerrainPresetBakeCancelled(preset.id);
-      }
-      return await this.bake(preset, entry);
-    });
-
-    this.bakeQueue = request.then(
-      () => { this.queueDepth = Math.max(0, this.queueDepth - 1); },
-      () => { this.queueDepth = Math.max(0, this.queueDepth - 1); }
-    );
-    return request;
-  }
-
-  private resources(): BakeResources {
-    if (this.compiler !== null && this.baker !== null) {
-      return { compiler: this.compiler, baker: this.baker };
-    }
-
-    const compiler = new MaterialCompiler();
-    const baker = new TileMaterialBaker(compiler);
-    // Presets whose layers reference KTX2 texture fields cannot compile until the resolver has
-    // a renderer to detect transcoder support against. The provider has to be installed before
-    // the first sync() kicks off texture-field preparation.
-    compiler.setTextureSupportRendererProvider(async () => baker.acquireRenderer());
-    this.compiler = compiler;
-    this.baker = baker;
-    return { compiler, baker };
-  }
-
-  private releaseResources(): void {
-    const compiler = this.compiler;
-    const baker = this.baker;
-    this.compiler = null;
-    this.baker = null;
-    baker?.dispose();
-    compiler?.dispose();
-  }
-
-  private async bake(
-    preset: Readonly<MaterialPreset>,
-    entry: PendingBake
-  ): Promise<TerrainTextureSource> {
     const resolution = TERRAIN_CONFIG.materials.presetBakeResolution;
-    report(entry, 'Compiling material', 0.05);
-    const { compiler, baker } = this.resources();
-    const physical = { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) };
-    const synthesis = { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) };
-    compiler.sync(preset.layers, preset.groups ?? [], false, synthesis);
-    compiler.applyPhysical(physical);
+    report(state, 'Loading cached preview', 0.15);
+    const canvas = await loadPresetTerrainTexture(preset.id, resolution);
 
-    // The first bake of a session pays for the KTX2 transcoder and the shader compile in here,
-    // which is why this phase can dominate before the cache warms up.
-    report(entry, 'Preparing texture fields', 0.15);
-    await compiler.ensureSimulationReady();
-
-    report(entry, `Rendering ${resolution}²`, 0.45);
-    const albedo = await baker.bakeAlbedo(physical, resolution, TILE_CONFIG.worldSize);
-
-    report(entry, 'Blending seams', 0.85);
-    await makeTextureSeamless(albedo, TILE_CONFIG.blendFraction);
-
-    report(entry, 'Ready', 1);
-    return textureFromCanvas(albedo.canvas);
+    if (!isWanted()) throw new TerrainPresetBakeCancelled(preset.id);
+    report(state, 'Ready', 1);
+    return textureFromCanvas(canvas);
   }
 }
 
-function report(entry: PendingBake, phase: string, fraction: number): void {
-  for (const reporter of entry.reporters) reporter(phase, fraction);
+function report(state: PendingLoadState, phase: string, fraction: number): void {
+  for (const reporter of state.reporters) reporter(phase, fraction);
 }

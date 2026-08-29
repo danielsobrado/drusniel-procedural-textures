@@ -10,6 +10,7 @@ import type {
   ImportedMeshTarget,
   LayerChannel,
   LayerKind,
+  MaskMode,
   MaterialGroup,
   MaterialLayer,
   ObjectPreset,
@@ -33,9 +34,15 @@ import {
   MAX_IMPORTED_MESHES,
   MAX_LAYER_NAME_LENGTH,
   MAX_LAYERS,
+  MASK_MODES,
   MAX_MESH_LABEL_LENGTH,
   OBJECT_PRESETS
 } from './constants';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD
+} from '../core/material/runtimeDefaults';
 
 export { MAX_GROUP_NAME_LENGTH, MAX_IMPORTED_MESHES, MAX_LAYER_NAME_LENGTH } from './constants';
 
@@ -44,6 +51,7 @@ const SAFE_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/i;
 const OBJECT_IDS = new Set<ObjectPreset>(OBJECT_PRESETS.map((item) => item.id));
 const LAYER_KIND_IDS = new Set<LayerKind>(LAYER_KINDS.map((item) => item.id));
 const BLEND_MODE_IDS = new Set<BlendMode>(BLEND_MODES.map((item) => item.id));
+const MASK_MODE_IDS = new Set<MaskMode>(MASK_MODES.map((item) => item.id));
 const CHANNEL_IDS = new Set<LayerChannel>(LAYER_CHANNELS.map((item) => item.id));
 const ENVIRONMENT_IDS = new Set<EnvironmentPreset>(ENVIRONMENTS.map((item) => item.id));
 
@@ -115,6 +123,11 @@ function asBlendMode(value: unknown, index: number): BlendMode {
   return value as BlendMode;
 }
 
+function asMaskMode(value: unknown, index: number): MaskMode {
+  if (typeof value !== 'string' || !MASK_MODE_IDS.has(value as MaskMode)) throw new Error(`Layer ${index + 1} contains an unsupported mask mode.`);
+  return value as MaskMode;
+}
+
 function asLayerChannel(value: unknown, index: number): LayerChannel {
   if (typeof value !== 'string' || !CHANNEL_IDS.has(value as LayerChannel)) throw new Error(`Layer ${index + 1} contains an unsupported output channel.`);
   return value as LayerChannel;
@@ -161,6 +174,16 @@ export function normalizeMaterialLayer(value: unknown, index: number): MaterialL
     maskStrength: input.maskStrength === undefined
       ? 1
       : asControlNumber(input.maskStrength, `Layer ${index + 1} mask strength`, CONTROL_RANGES.layer.maskStrength),
+    maskMode: input.maskMode === undefined ? 'coverage' : asMaskMode(input.maskMode, index),
+    maskThreshold: input.maskThreshold === undefined
+      ? PTL_DEFAULT_MASK_THRESHOLD
+      : asControlNumber(input.maskThreshold, `Layer ${index + 1} mask threshold`, CONTROL_RANGES.layer.maskThreshold),
+    maskSoftness: input.maskSoftness === undefined
+      ? PTL_DEFAULT_MASK_SOFTNESS
+      : asControlNumber(input.maskSoftness, `Layer ${index + 1} mask softness`, CONTROL_RANGES.layer.maskSoftness),
+    maskBreakup: input.maskBreakup === undefined
+      ? PTL_DEFAULT_MASK_BREAKUP
+      : asControlNumber(input.maskBreakup, `Layer ${index + 1} mask breakup`, CONTROL_RANGES.layer.maskBreakup),
     pattern: kind === 'pattern'
       ? normalizePatternSettings(input.pattern ?? DEFAULT_PATTERN_SETTINGS)
       : null,

@@ -42,6 +42,9 @@ const RUNTIME_CHANNELS = new Set<RuntimeChannel>([
 const RUNTIME_BLEND_MODES = new Set<RuntimeBlendMode>([
   'normal', 'multiply', 'add', 'screen', 'overlay'
 ]);
+const RUNTIME_MASK_MODES = new Set<NonNullable<RuntimeBinding['maskMode']>>([
+  'coverage', 'height'
+]);
 const OUTPUT_CHANNELS = new Set<SurfaceGraphOutput['channel']>([
   'baseColor', 'roughness', 'metallic', 'normal', 'height', 'ao', 'emissive', 'opacity', 'clearcoat', 'sss'
 ]);
@@ -132,6 +135,10 @@ function runtime(value: unknown, name: string): SurfaceGraphNode['runtime'] {
     structureFrom: input.structureFrom === undefined ? undefined : input.structureFrom === null ? null : id(input.structureFrom, `${name} structure source`),
     maskInvert: input.maskInvert === undefined ? undefined : boolean(input.maskInvert, `${name} mask invert`),
     maskStrength: input.maskStrength === undefined ? undefined : finite(input.maskStrength, `${name} mask strength`, 0, 1),
+    maskMode: input.maskMode === undefined ? undefined : enumId(input.maskMode, `${name} mask mode`, RUNTIME_MASK_MODES),
+    maskThreshold: input.maskThreshold === undefined ? undefined : finite(input.maskThreshold, `${name} mask threshold`, 0, 1),
+    maskSoftness: input.maskSoftness === undefined ? undefined : finite(input.maskSoftness, `${name} mask softness`, 0, 1),
+    maskBreakup: input.maskBreakup === undefined ? undefined : finite(input.maskBreakup, `${name} mask breakup`, 0, 1),
     pattern,
     texture
   };

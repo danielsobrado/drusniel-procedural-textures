@@ -4,8 +4,30 @@ import type {
   SurfaceGraphNode,
   SurfaceGraphRuntimeLayer
 } from '../core/graph/SurfaceGraph';
+import {
+  DEFAULT_TEXTURE_FIELD_SETTINGS,
+  type TextureFieldSettings
+} from '../core/texture/TextureFieldSettings';
 import { compileSurfaceGraph } from './SurfaceGraphCompiler';
 import type { MaterialPreset, PhysicalSettings, SynthesisSettings } from './types';
+
+/**
+ * Micro-roughness layers previously ran on value-noise fbm alone, which reads uniform close up.
+ * `detail` mode keeps that fbm as the structure and adds a KTX2 field on top of it, so the
+ * surface gains high-frequency character without spending a layer slot or a new output route.
+ */
+function grain(id: string, rotation: number): TextureFieldSettings {
+  return {
+    ...DEFAULT_TEXTURE_FIELD_SETTINGS,
+    id,
+    mode: 'detail',
+    modeAmount: 0.35,
+    scaleX: 1.24,
+    scaleY: 0.86,
+    rotation,
+    contrast: 1.06
+  };
+}
 
 function node(
   id: string,
@@ -92,7 +114,8 @@ const BRICK_GRAPH = graph('designer-old-brick-wall', 'Designer · Old Brick Wall
   }),
   node('face-grain', 'noise', 'Clay Face Grain', 380, 95, {
     kind: 'fbm', channel: 'roughness', blendMode: 'overlay', opacity: 0.2, scale: 18, strength: 1, seed: 63,
-    colorA: '#3f2d26', colorB: '#9b6a55', roughness: 0.12, maskFrom: 'brick-tiles', maskStrength: 0.9
+    colorA: '#3f2d26', colorB: '#9b6a55', roughness: 0.12, maskFrom: 'brick-tiles', maskStrength: 0.9,
+    texture: grain('grainy.03', 0.29)
   }),
   node('mortar-dirt', 'noise', 'Mortar Dirt', 580, 95, {
     kind: 'fbm', channel: 'color', blendMode: 'multiply', opacity: 0.2, scale: 7.2, strength: 1, seed: 75,
@@ -106,6 +129,53 @@ const BRICK_GRAPH = graph('designer-old-brick-wall', 'Designer · Old Brick Wall
   { id: 'brick-scale', label: 'Brick Scale', nodeId: 'brick-tiles', parameter: 'xAmount', type: 'float', defaultValue: 7, min: 2, max: 16, step: 1 },
   { id: 'mortar-gap', label: 'Mortar Width', nodeId: 'brick-tiles', parameter: 'gap', type: 'float', defaultValue: 0.125, min: 0.03, max: 0.24, step: 0.005 },
   { id: 'damage', label: 'Edge Wear', nodeId: 'brick-tiles', parameter: 'edgeWear', type: 'float', defaultValue: 0.34, min: 0, max: 0.8, step: 0.01 }
+]);
+
+const MOSSY_BRICK_GRAPH = graph('designer-mossy-brick-wall', 'Designer · Mossy Brick Wall', [
+  node('mortar', 'noise', 'Mortar Base', 0, 0, {
+    kind: 'base', channel: 'surface', blendMode: 'normal', colorA: '#5b5146', colorB: '#817466', roughness: 0.16
+  }),
+  node('brick-tiles', 'tile-sampler', 'Running Bond Bricks', 180, 0, {
+    kind: 'pattern', channel: 'surface', blendMode: 'normal', scale: 4.15, strength: 1.25, seed: 14,
+    colorA: '#6f2d21', colorB: '#b85a3b', roughness: 0.055, displacement: 0.026,
+    pattern: BRICK_PATTERN
+  }, { xAmount: 7, gap: 0.125, edgeWear: 0.34, bond: 'running' }),
+  node('variation', 'color-variation', 'Per-Brick Variation', 380, 0, {
+    kind: 'pattern', channel: 'color', blendMode: 'overlay', opacity: 0.26, scale: 4.15, strength: 1, seed: 37,
+    colorA: '#4a211b', colorB: '#d17a52', structureFrom: 'brick-tiles', pattern: BRICK_PATTERN
+  }),
+  // Moss settles where the brick relief is low. The height mask thresholds the brick layer's
+  // relief just above the mortar floor, inverted so the moss takes the recessed joints, with
+  // breakup so the colony edge is not a clean contour of the mortar line.
+  node('joint-moss', 'noise', 'Mortar Joint Moss', 580, 0, {
+    kind: 'fbm', channel: 'surface', blendMode: 'normal', opacity: 0.92, scale: 7.4, strength: 1.15, seed: 58,
+    colorA: '#2d3a20', colorB: '#71834a', roughness: 0.16, displacement: 0.012,
+    maskFrom: 'brick-tiles', maskMode: 'height', maskInvert: true,
+    maskThreshold: 0.42, maskSoftness: 0.14, maskBreakup: 0.38, maskStrength: 1
+  }, { threshold: 0.42, softness: 0.14, breakup: 0.38 }),
+  // A second, sparser colony sits higher up the relief so moss creeps onto worn brick edges
+  // instead of stopping dead at the joint.
+  node('creeping-moss', 'noise', 'Creeping Colonies', 580, 110, {
+    kind: 'fbm', channel: 'color', blendMode: 'multiply', opacity: 0.3, scale: 12.6, strength: 1.3, seed: 91,
+    colorA: '#3f4d2c', colorB: '#8daf4d',
+    maskFrom: 'brick-tiles', maskMode: 'height', maskInvert: true,
+    maskThreshold: 0.68, maskSoftness: 0.26, maskBreakup: 0.52, maskStrength: 0.72
+  }),
+  node('face-grain', 'noise', 'Clay Face Grain', 380, 190, {
+    kind: 'fbm', channel: 'roughness', blendMode: 'overlay', opacity: 0.2, scale: 18, strength: 1, seed: 63,
+    colorA: '#3f2d26', colorB: '#9b6a55', roughness: 0.12, maskFrom: 'brick-tiles', maskStrength: 0.9,
+    texture: grain('grainy.03', 0.29)
+  })
+], [
+  { channel: 'baseColor', source: { nodeId: 'creeping-moss', port: 'color' } },
+  { channel: 'height', source: { nodeId: 'joint-moss', port: 'height' } },
+  { channel: 'roughness', source: { nodeId: 'face-grain', port: 'height' } }
+], [
+  { id: 'brick-scale', label: 'Brick Scale', nodeId: 'brick-tiles', parameter: 'xAmount', type: 'float', defaultValue: 7, min: 2, max: 16, step: 1 },
+  { id: 'mortar-gap', label: 'Mortar Width', nodeId: 'brick-tiles', parameter: 'gap', type: 'float', defaultValue: 0.125, min: 0.03, max: 0.24, step: 0.005 },
+  { id: 'moss-line', label: 'Moss Line', nodeId: 'joint-moss', parameter: 'threshold', type: 'float', defaultValue: 0.42, min: 0, max: 1, step: 0.01 },
+  { id: 'moss-spread', label: 'Moss Spread', nodeId: 'joint-moss', parameter: 'softness', type: 'float', defaultValue: 0.14, min: 0, max: 1, step: 0.01 },
+  { id: 'moss-breakup', label: 'Moss Breakup', nodeId: 'joint-moss', parameter: 'breakup', type: 'float', defaultValue: 0.38, min: 0, max: 1, step: 0.01 }
 ]);
 
 const ROOF_PATTERN = {
@@ -134,7 +204,8 @@ const ROOF_GRAPH = graph('designer-clay-roof-tiles', 'Designer · Clay Roof Tile
   }),
   node('weather', 'noise', 'Weathering', 580, 90, {
     kind: 'fbm', channel: 'roughness', opacity: 0.22, scale: 9, seed: 72,
-    colorA: '#342d25', colorB: '#8c7c67', roughness: 0.18, maskFrom: 'tiles', maskStrength: 0.85
+    colorA: '#342d25', colorB: '#8c7c67', roughness: 0.18, maskFrom: 'tiles', maskStrength: 0.85,
+    texture: grain('grainy.02', -0.34)
   })
 ], [
   { channel: 'baseColor', source: { nodeId: 'variation', port: 'color' } },
@@ -172,7 +243,8 @@ const WOOD_GRAPH = graph('designer-weathered-planks', 'Designer · Weathered Woo
   }),
   node('cracks', 'noise', 'Dry Surface', 580, 95, {
     kind: 'ridges', channel: 'roughness', opacity: 0.18, scale: 17, strength: 1.4, seed: 65,
-    colorA: '#17110d', colorB: '#756452', roughness: 0.14, maskFrom: 'planks', maskStrength: 0.8
+    colorA: '#17110d', colorB: '#756452', roughness: 0.14, maskFrom: 'planks', maskStrength: 0.8,
+    texture: grain('streak.01', 0.12)
   })
 ], [
   { channel: 'baseColor', source: { nodeId: 'variation', port: 'color' } },
@@ -240,7 +312,8 @@ const FABRIC_GRAPH = graph('designer-woven-fabric', 'Designer · Woven Fabric', 
   }),
   node('fiber', 'noise', 'Fiber Roughness', 580, 80, {
     kind: 'fbm', channel: 'roughness', opacity: 0.24, scale: 20, seed: 59,
-    colorA: '#1c2023', colorB: '#8e969b', roughness: 0.16
+    colorA: '#1c2023', colorB: '#8e969b', roughness: 0.16,
+    texture: grain('streak.02', -0.18)
   })
 ], [
   { channel: 'baseColor', source: { nodeId: 'variation', port: 'color' } },
@@ -301,7 +374,8 @@ const ASPHALT_GRAPH = graph('designer-road-asphalt', 'Designer · Road Asphalt',
   }),
   node('fine', 'noise', 'Fine Mineral Grain', 390, 0, {
     kind: 'fbm', channel: 'roughness', opacity: 0.3, scale: 20, seed: 67,
-    colorA: '#111315', colorB: '#45484a', roughness: 0.15
+    colorA: '#111315', colorB: '#45484a', roughness: 0.15,
+    texture: grain('super-noise.01', 0.44)
   }),
   node('dust', 'noise', 'Road Dust', 580, 80, {
     kind: 'fbm', channel: 'color', blendMode: 'overlay', opacity: 0.08, scale: 5.5, seed: 91,
@@ -335,7 +409,8 @@ const COBBLE_GRAPH = graph('designer-cobblestone', 'Designer · Cobblestone', [
   }),
   node('surface', 'noise', 'Stone Surface', 390, 95, {
     kind: 'fbm', channel: 'roughness', opacity: 0.2, scale: 14, seed: 73,
-    colorA: '#2a2d2c', colorB: '#858077', roughness: 0.14, maskFrom: 'stones', maskStrength: 0.9
+    colorA: '#2a2d2c', colorB: '#858077', roughness: 0.14, maskFrom: 'stones', maskStrength: 0.9,
+    texture: grain('grainy.03', -0.27)
   }),
   node('moss', 'noise', 'Moss in Joints', 580, 95, {
     kind: 'fbm', channel: 'color', blendMode: 'overlay', opacity: 0.12, scale: 8.5, seed: 92,
@@ -349,11 +424,12 @@ const COBBLE_GRAPH = graph('designer-cobblestone', 'Designer · Cobblestone', [
 
 export const STRUCTURED_SURFACE_PRESETS: readonly MaterialPreset[] = [
   preset(BRICK_GRAPH, 'Running-bond masonry with visible recessed mortar, chipped clay edges and restrained per-brick variation.', ['brick', 'masonry', 'construction'], { roughness: 0.72, clearcoat: 0.012, clearcoatRoughness: 0.78, specularIntensity: 0.28 }, { age: 0.32, weathering: 0.34, variation: 0.34 }),
+  preset(MOSSY_BRICK_GRAPH, 'Running-bond masonry with moss settled into the recessed mortar joints and sparse colonies creeping onto worn brick edges.', ['brick', 'masonry', 'moss', 'weathered'], { roughness: 0.76, clearcoat: 0.02, clearcoatRoughness: 0.72, specularIntensity: 0.24 }, { age: 0.52, weathering: 0.58, variation: 0.38 }),
   preset(ROOF_GRAPH, 'Overlapping barrel clay tiles with readable courses, fired-clay variation and shallow weathered relief.', ['roof', 'tile', 'construction'], { roughness: 0.64, clearcoat: 0.025, clearcoatRoughness: 0.68, specularIntensity: 0.3 }, { age: 0.22, weathering: 0.3, variation: 0.3 }),
-  preset(WOOD_GRAPH, 'Staggered weathered boards with visible seams, restrained cupping, long grain and dry surface breakup.', ['wood', 'plank', 'construction'], { roughness: 0.66, sheen: 0.025, specularIntensity: 0.28 }, { age: 0.34, weathering: 0.36, variation: 0.38 }),
+  preset(WOOD_GRAPH, 'Staggered weathered boards with visible seams, restrained cupping, long grain and dry surface breakup.', ['wood', 'plank', 'construction'], { roughness: 0.66, sheen: 0.025, specularIntensity: 0.28, clearcoat: 0.03, clearcoatRoughness: 0.72 }, { age: 0.34, weathering: 0.36, variation: 0.38 }),
   preset(CERAMIC_GRAPH, 'Clean ceramic tiles with stable grout lines, shallow bevels and localized glossy glaze.', ['ceramic', 'tile', 'interior'], { roughness: 0.28, clearcoat: 0.64, clearcoatRoughness: 0.16, specularIntensity: 0.64 }, { variation: 0.08 }),
-  preset(FABRIC_GRAPH, 'Irregular woven fabric with softened warp-and-weft crossings and fine fiber roughness breakup.', ['fabric', 'woven', 'interior'], { roughness: 0.72, sheen: 0.42, sheenRoughness: 0.68, sheenColor: '#b8c0c5' }, { variation: 0.2 }),
+  preset(FABRIC_GRAPH, 'Irregular woven fabric with softened warp-and-weft crossings and fine fiber roughness breakup.', ['fabric', 'woven', 'interior'], { roughness: 0.72, sheen: 0.42, sheenRoughness: 0.68, sheenColor: '#b8c0c5', clearcoat: 0 }, { variation: 0.2 }),
   preset(GRAVEL_GRAPH, 'Irregular layered river pebbles over a fine bed with restrained relief and localized wet stone response.', ['gravel', 'stone', 'ground'], { roughness: 0.6, clearcoat: 0.1, clearcoatRoughness: 0.26, specularIntensity: 0.34 }, { variation: 0.46, stochasticTiling: 0.2 }),
-  preset(ASPHALT_GRAPH, 'Dense asphalt aggregate embedded in dark binder with fine mineral roughness and subtle road dust.', ['asphalt', 'road', 'ground'], { roughness: 0.78, specularIntensity: 0.22 }, { variation: 0.38, stochasticTiling: 0.18 }),
+  preset(ASPHALT_GRAPH, 'Dense asphalt aggregate embedded in dark binder with fine mineral roughness and subtle road dust.', ['asphalt', 'road', 'ground'], { roughness: 0.78, specularIntensity: 0.22, clearcoat: 0.03, clearcoatRoughness: 0.85 }, { variation: 0.38, stochasticTiling: 0.18 }),
   preset(COBBLE_GRAPH, 'Irregular cobblestones with visible joint bed, individual stone variation and protected-joint moss.', ['cobblestone', 'stone', 'construction'], { roughness: 0.7, clearcoat: 0.025, clearcoatRoughness: 0.65, specularIntensity: 0.28 }, { age: 0.38, weathering: 0.44, variation: 0.46 })
 ];

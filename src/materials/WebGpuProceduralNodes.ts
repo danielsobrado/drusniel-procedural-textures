@@ -17,6 +17,11 @@ import {
 } from 'three/tsl';
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
 import {
+  isZeroBaselineLayerKind,
+  PTL_MASK_BREAKUP_SCALE,
+  PTL_MASK_SOFTNESS_FLOOR
+} from '../core/material/MaterialRelief';
+import {
   SIMULATION_ATLAS_COLUMNS,
   SIMULATION_ATLAS_ROWS
 } from '../core/material/SimulationAtlasLayout';
@@ -453,6 +458,43 @@ function displacementGain(kind: LayerKind): number {
   return kind === 'cellular' ? cellularConfig.displacement.gain : 1;
 }
 
+/**
+ * TSL mirror of `labReliefForLayer`. The zero-baseline classification and the coverage fold
+ * are build-time decisions from `layer.kind`, but the displacement sign is a live uniform, so
+ * the orientation flip has to be a node-level select rather than a JS branch. `step(0, d)` is
+ * 1 for a zero or positive displacement and 0 for a negative one, matching the base shader's
+ * rule that only a negative displacement mirrors the relief.
+ */
+function reliefForLayer(
+  sourceIndex: number,
+  sourceKind: LayerKind,
+  shaped: Node<'float'>,
+  uniforms: WebGpuMaterialUniforms
+): Node<'float'> {
+  const base = isZeroBaselineLayerKind(sourceKind)
+    ? shaped.mul(coverage(sourceKind, shaped))
+    : shaped;
+  const oriented = mix(base.oneMinus(), base, step(0, uniforms.displacement[sourceIndex]!));
+  return clamp(oriented, 0, 1);
+}
+
+/** TSL mirror of `labHeightMask`. */
+export function buildWebGpuHeightMask(
+  layerIndex: number,
+  sourceIndex: number,
+  sourceKind: LayerKind,
+  shaped: Node<'float'>,
+  position: Node<'vec3'>,
+  uniforms: WebGpuMaterialUniforms
+): Node<'float'> {
+  const breakup = clamp(uniforms.maskBreakup[layerIndex]!, 0, 1);
+  const relief = reliefForLayer(sourceIndex, sourceKind, shaped, uniforms)
+    .add(noise3(position.mul(PTL_MASK_BREAKUP_SCALE)).sub(0.5).mul(breakup));
+  const softness = max(uniforms.maskSoftness[layerIndex]!, PTL_MASK_SOFTNESS_FLOOR);
+  const threshold = clamp(uniforms.maskThreshold[layerIndex]!, 0, 1);
+  return smoothstep(threshold.sub(softness), threshold.add(softness), relief);
+}
+
 function maskForLayer(
   layerIndex: number,
   position: Node<'vec3'>,
@@ -461,12 +503,18 @@ function maskForLayer(
   uniforms: WebGpuMaterialUniforms,
   resolveField: WebGpuLayerFieldResolver
 ): Node<'float'> {
-  const sourceId = layers[layerIndex]?.maskSourceLayerId;
+  const layer = layers[layerIndex];
+  const sourceId = layer?.maskSourceLayerId;
   if (sourceId === null || sourceId === undefined) return float(1);
   const sourceIndex = indexById.get(sourceId);
   if (sourceIndex === undefined) return float(1);
+  const sourceLayer = layers[sourceIndex];
+  if (sourceLayer === undefined) return float(1);
   const sourceField = resolveField(sourceIndex, position);
-  const shaped = shapedField(sourceField, uniforms.strength[sourceIndex]!);
+  const sourceShaped = shapedField(sourceField, uniforms.strength[sourceIndex]!);
+  const shaped = layer?.maskMode === 'height'
+    ? buildWebGpuHeightMask(layerIndex, sourceIndex, sourceLayer.kind, sourceShaped, position, uniforms)
+    : sourceShaped;
   const inverted = mix(shaped, shaped.oneMinus(), uniforms.maskInvert[layerIndex]!);
   return mix(1, inverted, clamp(uniforms.maskStrength[layerIndex]!, 0, 1));
 }
@@ -619,7 +667,10 @@ export function webGpuTopologyFingerprint(
       channel: layer.channel,
       blendMode: layer.blendMode,
       maskSourceLayerId: layer.maskSourceLayerId,
-      structureSourceLayerId: layer.structureSourceLayerId
+      structureSourceLayerId: layer.structureSourceLayerId,
+      // Mask mode is branched on in JS at build time, so it changes the generated node graph
+      // and has to force a rebuild rather than riding along as a uniform update.
+      maskMode: layer.maskMode
     })),
     readyLayers: readyLayers.slice(0, PTL_MAX_LAYERS)
   });

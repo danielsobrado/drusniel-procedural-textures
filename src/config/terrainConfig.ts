@@ -41,9 +41,6 @@ export interface TerrainConfig {
     fogStartMeters: number;
     fogEndMeters: number;
   };
-  compute: {
-    cpuYieldRows: number;
-  };
   imports: {
     maxFileBytes: number;
     maxDimension: number;
@@ -98,7 +95,6 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
   const painting = asRecord(config.painting, 'Terrain painting configuration');
   const materials = asRecord(config.materials, 'Terrain materials configuration');
   const player = asRecord(config.player, 'Terrain player configuration');
-  const compute = asRecord(config.compute, 'Terrain compute configuration');
   const imports = asRecord(config.imports, 'Terrain import configuration');
   const preview = asRecord(config.preview, 'Terrain preview configuration');
   const fogStartMeters = asNumber(player.fogStartMeters, 'player.fogStartMeters', 10, 4096);
@@ -173,9 +169,6 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
       tileRadius: asInteger(player.tileRadius, 'player.tileRadius', 1, 2),
       fogStartMeters,
       fogEndMeters
-    },
-    compute: {
-      cpuYieldRows: asInteger(compute.cpuYieldRows, 'compute.cpuYieldRows', 1, 128)
     },
     imports: {
       maxFileBytes: asInteger(imports.maxFileBytes, 'imports.maxFileBytes', 1024, 256 * 1024 * 1024),

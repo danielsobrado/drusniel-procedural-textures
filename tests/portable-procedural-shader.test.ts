@@ -1,8 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyPatches,
   SHARED_GLSL,
   SURFACE_VERTEX_DISPLACEMENT_GLSL
 } from '../src/materials/PortableProceduralShader';
+
+describe('portable shader patch integrity', () => {
+  it('throws naming the patch when a search string no longer matches', () => {
+    expect(() => applyPatches('float labFoo() { return 1.0; }', [
+      ['present', 'return 1.0;', 'return 2.0;'],
+      ['stale', 'return 3.0;', 'return 4.0;']
+    ])).toThrow(/Portable shader patch "stale" no longer matches/);
+  });
+
+  it('applies every patch in order', () => {
+    expect(applyPatches('a b c', [
+      ['first', 'a', 'x'],
+      ['second', 'b', 'y']
+    ])).toBe('x y c');
+  });
+
+  it('skips a patch explicitly marked optional', () => {
+    expect(applyPatches('only a', [
+      ['absent but optional', 'b', 'z', true]
+    ])).toBe('only a');
+  });
+});
 
 describe('portable procedural shader', () => {
   it('samples hydrated simulations and exposes recipe-driven SDF controls', () => {

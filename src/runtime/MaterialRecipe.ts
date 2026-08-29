@@ -18,11 +18,18 @@ import type {
 } from '../core/material/RuntimeMaterial';
 
 export const PTL_MATERIAL_FORMAT = 'ptl-material';
-export const PTL_MATERIAL_VERSION = 3;
+export const PTL_MATERIAL_VERSION = 4;
 export const PTL_MATERIAL_FILE_SUFFIX = '.ptl.json';
 
+const TEXTURE_FIELD_MATERIAL_VERSION = 3;
 const SURFACE_GRAPH_MATERIAL_VERSION = 2;
 const LEGACY_MATERIAL_VERSION = 1;
+const SUPPORTED_MATERIAL_VERSIONS: ReadonlySet<number> = new Set([
+  PTL_MATERIAL_VERSION,
+  TEXTURE_FIELD_MATERIAL_VERSION,
+  SURFACE_GRAPH_MATERIAL_VERSION,
+  LEGACY_MATERIAL_VERSION
+]);
 const MAX_RECIPE_SEED = 0xffff_ffff;
 const MAX_TEXTURE_DEPENDENCIES = 64;
 const SAFE_DEPENDENCY_ID = /^[a-z0-9][a-z0-9._:-]{0,127}$/iu;
@@ -142,11 +149,7 @@ export function parseMaterialRecipe(value: unknown): MaterialRecipe {
   const recipe = asRecord(value, 'Material recipe');
   if (recipe.format !== PTL_MATERIAL_FORMAT) throw new Error('File is not a Procedural Texture Lab material recipe.');
   const version = recipe.version;
-  if (
-    version !== PTL_MATERIAL_VERSION &&
-    version !== SURFACE_GRAPH_MATERIAL_VERSION &&
-    version !== LEGACY_MATERIAL_VERSION
-  ) {
+  if (typeof version !== 'number' || !SUPPORTED_MATERIAL_VERSIONS.has(version)) {
     throw new Error(`Unsupported material recipe version: ${String(version)}.`);
   }
 
@@ -154,11 +157,11 @@ export function parseMaterialRecipe(value: unknown): MaterialRecipe {
     ? graphDefinition(recipe.surfaceGraph)
     : null;
   if (
-    version < PTL_MATERIAL_VERSION &&
+    version < TEXTURE_FIELD_MATERIAL_VERSION &&
     surfaceGraph !== null &&
     graphContainsTextureField(surfaceGraph)
   ) {
-    throw new Error(`Texture-field material recipes require version ${PTL_MATERIAL_VERSION}.`);
+    throw new Error(`Texture-field material recipes require version ${TEXTURE_FIELD_MATERIAL_VERSION}.`);
   }
 
   const compiled = surfaceGraph === null ? null : compileSurfaceGraph(surfaceGraph);
@@ -169,12 +172,20 @@ export function parseMaterialRecipe(value: unknown): MaterialRecipe {
     layers: compiled?.layers ?? recipe.layers
   });
   if (
-    version < PTL_MATERIAL_VERSION &&
+    version < TEXTURE_FIELD_MATERIAL_VERSION &&
     normalized.layers.some((layer) => layer.texture !== null && layer.texture !== undefined)
   ) {
-    throw new Error(`Texture-field material recipes require version ${PTL_MATERIAL_VERSION}.`);
+    throw new Error(`Texture-field material recipes require version ${TEXTURE_FIELD_MATERIAL_VERSION}.`);
   }
-  const dependencies = version === PTL_MATERIAL_VERSION
+  // A pre-v4 runtime silently renders a height mask as a coverage mask, which is wrong output
+  // with no error, so a height-masked layer may not appear in an older recipe.
+  if (
+    version < PTL_MATERIAL_VERSION &&
+    normalized.layers.some((layer) => layer.maskMode === 'height')
+  ) {
+    throw new Error(`Height-masked material recipes require version ${PTL_MATERIAL_VERSION}.`);
+  }
+  const dependencies = version >= TEXTURE_FIELD_MATERIAL_VERSION
     ? normalizeDependencies(recipe.dependencies, normalized.layers)
     : undefined;
 

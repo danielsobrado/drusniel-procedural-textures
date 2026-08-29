@@ -365,8 +365,8 @@ export const SURFACE_DESIGNER_PRESETS: readonly MaterialPreset[] = [
   makePreset(WOOD_GRAPH, 'Weathered plank layout with long grain, seams and dry cracking.', ['wood', 'plank', 'construction'], { roughness: 0.62, sheen: 0.03 }, { age: 0.38, weathering: 0.4, variation: 0.4 }),
   makePreset(CERAMIC_GRAPH, 'Clean ceramic tile grid with recessed grout and a procedural glossy glaze.', ['ceramic', 'tile', 'interior'], { roughness: 0.24, clearcoat: 0.72, clearcoatRoughness: 0.14, specularIntensity: 0.72 }, { variation: 0.12 }),
   makePreset(FABRIC_GRAPH, 'Fine woven fabric with warp-and-weft relief and fiber roughness breakup.', ['fabric', 'woven', 'interior'], { roughness: 0.7, sheen: 0.48, sheenRoughness: 0.62, sheenColor: '#bfc7cc' }, { variation: 0.24 }),
-  makePreset(CONCRETE_GRAPH, 'Weathered concrete with aggregate, pores, stains and coherent height variation.', ['concrete', 'construction'], { roughness: 0.74 }, { age: 0.35, weathering: 0.42, variation: 0.45 }),
-  makePreset(PLASTER_GRAPH, 'Troweled aged plaster with pits, subtle cracks and broad surface variation.', ['plaster', 'wall', 'construction'], { roughness: 0.71 }, { age: 0.4, weathering: 0.33, variation: 0.36 }),
+  makePreset(CONCRETE_GRAPH, 'Weathered concrete with aggregate, pores, stains and coherent height variation.', ['concrete', 'construction'], { roughness: 0.74, clearcoat: 0 }, { age: 0.35, weathering: 0.42, variation: 0.45 }),
+  makePreset(PLASTER_GRAPH, 'Troweled aged plaster with pits, subtle cracks and broad surface variation.', ['plaster', 'wall', 'construction'], { roughness: 0.71, clearcoat: 0 }, { age: 0.4, weathering: 0.33, variation: 0.36 }),
   makePreset(ASPHALT_GRAPH, 'Dense road asphalt with procedural aggregate, binder and fine roughness grain.', ['asphalt', 'road', 'ground'], { roughness: 0.82 }, { variation: 0.48, stochasticTiling: 0.24 }),
   makePreset(COBBLE_GRAPH, 'Irregular cobblestones with individual stone variation, mortar and moss in protected gaps.', ['cobblestone', 'stone', 'construction'], { roughness: 0.7, clearcoat: 0.04 }, { age: 0.46, weathering: 0.52, variation: 0.58 })
 ];

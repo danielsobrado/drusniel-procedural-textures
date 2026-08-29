@@ -1,6 +1,5 @@
 projection:
   sharpness: 6.0
-  portableAverageMix: 0.62
 
 displacementGain:
   brick: 0.55

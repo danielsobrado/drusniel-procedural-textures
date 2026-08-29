@@ -10,6 +10,23 @@ import {
   serializeMaterialRecipe
 } from '../src/runtime/MaterialRecipe';
 
+/**
+ * Removes every texture field from a recipe: from the flattened layers and from the runtime
+ * bindings the surface graph carries, which `parseMaterialRecipe` inspects separately.
+ */
+function stripTextureFields<T>(recipe: T): T {
+  const clone = JSON.parse(JSON.stringify(recipe)) as {
+    layers?: { texture?: unknown }[];
+    surfaceGraph?: { nodes?: { runtime?: { texture?: unknown }; params?: Record<string, unknown> }[] } | null;
+  };
+  for (const layer of clone.layers ?? []) delete layer.texture;
+  for (const node of clone.surfaceGraph?.nodes ?? []) {
+    if (node.runtime !== undefined) delete node.runtime.texture;
+    if (node.params !== undefined) delete node.params.textureId;
+  }
+  return clone as T;
+}
+
 describe('portable material recipes', () => {
   it('round-trips only runtime material state', () => {
     const project = createDefaultProject();
@@ -61,7 +78,10 @@ describe('portable material recipes', () => {
     const state = new AppState(createDefaultProject());
     state.applyPreset(preset);
     const current = createMaterialRecipe(state.snapshot, 42);
-    const legacy = { ...current, version: 2 } as Record<string, unknown>;
+    // Texture fields arrived in version 3, so a genuine version-two recipe cannot carry one.
+    // The fixture is stripped rather than swapped for whichever preset currently ships no
+    // field, so this keeps testing graph migration as presets pick up field detail.
+    const legacy = { ...stripTextureFields(current), version: 2 } as Record<string, unknown>;
     delete legacy.dependencies;
 
     const parsed = parseMaterialRecipe(legacy);

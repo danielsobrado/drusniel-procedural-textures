@@ -4,7 +4,13 @@ import { DEFAULT_MATERIAL_ALGORITHMS } from '../core/material/MaterialAlgorithms
 import type { MaterialCoordinateSpace } from '../core/material/MaterialCoordinates';
 import { materialDisplacementExtent } from '../core/material/MaterialDisplacement';
 import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
-import { PTL_MAX_LAYERS, PTL_SHADER_DEFAULTS } from '../core/material/runtimeDefaults';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD,
+  PTL_MAX_LAYERS,
+  PTL_SHADER_DEFAULTS
+} from '../core/material/runtimeDefaults';
 import {
   DEFAULT_TEXTURE_FIELD_SETTINGS,
   type TextureFieldChannel,
@@ -162,6 +168,10 @@ export class SurfaceMaterialCompiler {
     uLabMaskIndex: { value: new Array<number>(PTL_MAX_LAYERS).fill(-1) },
     uLabMaskInvert: { value: new Array<number>(PTL_MAX_LAYERS).fill(0) },
     uLabMaskStrength: { value: new Array<number>(PTL_MAX_LAYERS).fill(1) },
+    uLabMaskMode: { value: new Array<number>(PTL_MAX_LAYERS).fill(0) },
+    uLabMaskThreshold: { value: new Array<number>(PTL_MAX_LAYERS).fill(PTL_DEFAULT_MASK_THRESHOLD) },
+    uLabMaskSoftness: { value: new Array<number>(PTL_MAX_LAYERS).fill(PTL_DEFAULT_MASK_SOFTNESS) },
+    uLabMaskBreakup: { value: new Array<number>(PTL_MAX_LAYERS).fill(PTL_DEFAULT_MASK_BREAKUP) },
     uLabStructureIndex: { value: new Array<number>(PTL_MAX_LAYERS).fill(-1) },
     uLabPatternKind: { value: new Array<number>(PTL_MAX_LAYERS).fill(PATTERN_KIND_CODE.brick) },
     uLabPatternAspect: { value: new Array<number>(PTL_MAX_LAYERS).fill(DEFAULT_PATTERN_SETTINGS.aspect) },
@@ -285,6 +295,10 @@ export class SurfaceMaterialCompiler {
       this.uniforms.uLabMaskIndex.value[index] = maskIndex;
       this.uniforms.uLabMaskInvert.value[index] = active && layer.maskInvert ? 1 : 0;
       this.uniforms.uLabMaskStrength.value[index] = active ? layer.maskStrength : 1;
+      this.uniforms.uLabMaskMode.value[index] = active && layer.maskMode === 'height' ? 1 : 0;
+      this.uniforms.uLabMaskThreshold.value[index] = active ? layer.maskThreshold : PTL_DEFAULT_MASK_THRESHOLD;
+      this.uniforms.uLabMaskSoftness.value[index] = active ? layer.maskSoftness : PTL_DEFAULT_MASK_SOFTNESS;
+      this.uniforms.uLabMaskBreakup.value[index] = active ? layer.maskBreakup : PTL_DEFAULT_MASK_BREAKUP;
       this.uniforms.uLabStructureIndex.value[index] = structureIndex;
       this.uniforms.uLabPatternKind.value[index] = PATTERN_KIND_CODE[pattern.kind];
       this.uniforms.uLabPatternAspect.value[index] = pattern.aspect;

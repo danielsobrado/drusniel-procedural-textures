@@ -98,6 +98,25 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
     return this.compute.status;
   }
 
+  /**
+   * Forwarded from the WebGPU compiler so a texture bake can evaluate the very node graph the
+   * viewport renders, against its own UV-space sample position. See WebGpuTextureBaker.
+   */
+  public buildSurfaceNodes(
+    position: Parameters<WebGpuMaterialCompiler['buildSurfaceNodes']>[0],
+    triplanarNormal: Parameters<WebGpuMaterialCompiler['buildSurfaceNodes']>[1]
+  ): ReturnType<WebGpuMaterialCompiler['buildSurfaceNodes']> {
+    return this.webGpu.buildSurfaceNodes(position, triplanarNormal);
+  }
+
+  public get physicalUniforms(): WebGpuMaterialCompiler['physicalUniforms'] {
+    return this.webGpu.physicalUniforms;
+  }
+
+  public get sampleCoordinateSpace(): MaterialCoordinateSpace {
+    return this.webGpu.sampleCoordinateSpace;
+  }
+
   public initializeCompute(): Promise<Readonly<ComputeStatus>> {
     return this.compute.initialize();
   }

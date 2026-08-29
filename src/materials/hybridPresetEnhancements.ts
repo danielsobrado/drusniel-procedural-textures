@@ -16,6 +16,7 @@ const TEXTURES = {
   craters03: 'craters.03',
   craters04: 'craters.04',
   crystal01: 'crystal.01',
+  grainy02: 'grainy.02',
   grainy03: 'grainy.03',
   grainy04: 'grainy.04',
   grainy05: 'grainy.05',
@@ -35,6 +36,7 @@ const TEXTURES = {
   rock01: 'rock.01',
   stone01: 'stone.01',
   stone04: 'stone.04',
+  streak01: 'streak.01',
   streak02: 'streak.02',
   streak03: 'streak.03',
   streak06: 'streak.06',
@@ -573,6 +575,90 @@ const ENHANCEMENTS: Readonly<Record<string, HybridPresetEnhancement>> = {
         })
       }
     }
+  },
+  'molten-rock': {
+    layers: {},
+    appendLayers: [
+      layer('preset-molten-rock-micro-roughness', 'Basalt micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.24, scale: 17.4, strength: 1.02, seed: 71,
+        roughness: 0.13,
+        texture: textureField(TEXTURES.grainy04, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
+  },
+  'storm-marble': {
+    layers: {},
+    appendLayers: [
+      layer('preset-storm-marble-micro-roughness', 'Marble micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.2, scale: 18.2, strength: 1.02, seed: 73,
+        roughness: 0.11,
+        texture: textureField(TEXTURES.grainy02, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
+  },
+  'alien-dermis': {
+    layers: {},
+    appendLayers: [
+      layer('preset-alien-dermis-micro-roughness', 'Dermal micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.26, scale: 16.8, strength: 1.02, seed: 79,
+        roughness: 0.14,
+        texture: textureField(TEXTURES.superNoise01, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
+  },
+  'weathered-geological-strata': {
+    layers: {},
+    appendLayers: [
+      layer('preset-geo-micro-roughness', 'Strata micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.27, scale: 17.1, strength: 1.02, seed: 83,
+        roughness: 0.15,
+        texture: textureField(TEXTURES.streak01, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
+  },
+  'reaction-diffusion-fungal': {
+    layers: {},
+    appendLayers: [
+      layer('preset-fungal-micro-roughness', 'Colony micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.23, scale: 16.4, strength: 1.02, seed: 89,
+        roughness: 0.12,
+        texture: textureField(TEXTURES.superNoise02, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
+  },
+  'sdf-crystal-matrix': {
+    layers: {},
+    appendLayers: [
+      layer('preset-crystal-micro-roughness', 'Facet micro roughness', 'fbm', {
+        channel: 'roughness', opacity: 0.19, scale: 18.6, strength: 1.02, seed: 97,
+        roughness: 0.1,
+        texture: textureField(TEXTURES.grainy03, {
+          mode: 'detail', modeAmount: 0.35,
+          scaleX: 1.26, scaleY: 0.88, rotation: -0.42,
+          offsetX: 0.31, offsetY: 0.24, contrast: 1.05, bias: 0
+        })
+      })
+    ]
   },
   'frosted-grass': {
     layers: {

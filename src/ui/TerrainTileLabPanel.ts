@@ -26,7 +26,6 @@ import {
 } from '../tile/TerrainTypes';
 import { downloadBlob, downloadText } from '../utils/download';
 import { escapeHtml } from '../utils/html';
-import { scheduleIdleTask } from '../utils/scheduling';
 
 interface TerrainTileLabCallbacks {
   onStatus?: (status: string) => void;
@@ -160,7 +159,6 @@ export class TerrainTileLabPanel {
   private lastStroke: { x: number; y: number } | null = null;
   private importedTextureName: string | null = null;
   private hasCurrentMaterialTexture = false;
-  private cancelPresetWarmup: (() => void) | null = null;
 
   public constructor(
     private readonly root: HTMLElement,
@@ -257,12 +255,6 @@ export class TerrainTileLabPanel {
     this.resizeObserver.observe(this.mapCanvas);
     this.selectMaterial(this.selectedMaterial);
     this.syncPlayerButton('idle');
-    // Building the bake context costs a WebGL2 context creation. Doing it while the terrain
-    // generates keeps it off the critical path of the first preset change.
-    this.cancelPresetWarmup = scheduleIdleTask(() => {
-      this.cancelPresetWarmup = null;
-      this.presetTextures.warm();
-    });
     void this.generate();
   }
 
@@ -307,8 +299,6 @@ export class TerrainTileLabPanel {
     }
     if (this.renderFrame !== 0) cancelAnimationFrame(this.renderFrame);
     if (this.surfaceFrame !== 0) cancelAnimationFrame(this.surfaceFrame);
-    this.cancelPresetWarmup?.();
-    this.cancelPresetWarmup = null;
     this.resizeObserver.disconnect();
     this.presetTextures.clear();
     this.meshPreview.dispose();

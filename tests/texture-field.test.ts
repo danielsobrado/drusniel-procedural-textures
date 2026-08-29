@@ -18,6 +18,7 @@ import {
 import { HYBRID_TARGET_PRESET_IDS } from '../src/materials/hybridPresetEnhancements';
 import { MATERIAL_PRESETS } from '../src/materials/presets';
 import { SurfaceMaterialCompiler } from '../src/materials/SurfaceMaterialCompiler';
+import { compileSurfaceGraph } from '../src/materials/SurfaceGraphCompiler';
 import { TEXTURE_FIELD_PRESETS } from '../src/materials/textureFieldPresets';
 import { createMaterialRecipe, parseMaterialRecipe } from '../src/runtime/MaterialRecipe';
 import { ProceduralMaterial } from '../src/runtime/ProceduralMaterial';
@@ -171,8 +172,11 @@ describe('texture fields', () => {
     expect(hybridFields.length).toBeGreaterThan(50);
     expect(hybridFields.every((field) => field.mode === 'modulate' || field.mode === 'detail')).toBe(true);
 
+    // Micro-roughness layers are the `detail` users. The exact count grows as families pick up
+    // field breakup, so this pins the invariant rather than the census: every detail field
+    // shares the same amount, and at least the original four are present.
     const detailFields = hybridFields.filter((field) => field.mode === 'detail');
-    expect(detailFields).toHaveLength(4);
+    expect(detailFields.length).toBeGreaterThanOrEqual(4);
     expect(detailFields.every((field) => field.modeAmount === 0.35)).toBe(true);
   });
 
@@ -280,16 +284,82 @@ describe('texture fields', () => {
     expect(graph.exposed).toContainEqual(expect.objectContaining({ id: 'mode-amount', type: 'float' }));
   });
 
+  it('lowers a generator node that carries a texture field into a hybrid layer', () => {
+    // A `texture-field` node lowers to a `base` generator, whose field is a constant, so the
+    // `modulate`/`warp`/`detail` roles only mean anything on a node that generates something.
+    // A `noise` node therefore accepts the same texture parameters and keeps its fbm generator.
+    const compiled = compileSurfaceGraph(normalizeSurfaceGraph({
+      version: 1,
+      id: 'hybrid-noise-graph',
+      name: 'Hybrid noise graph',
+      nodes: [
+        {
+          id: 'noise',
+          kind: 'noise',
+          label: 'Detailed noise',
+          position: { x: 0, y: 0 },
+          params: { textureId: 'grainy.03', mode: 'detail', modeAmount: 0.4, scale: 6 }
+        },
+        { id: 'output', kind: 'output', label: 'Out', position: { x: 300, y: 0 }, params: {} }
+      ],
+      edges: [{ from: { nodeId: 'noise', port: 'height' }, to: { nodeId: 'output', port: 'height' } }],
+      outputs: [{ channel: 'height', source: { nodeId: 'noise', port: 'height' } }],
+      exposed: [],
+      groups: [],
+      subgraphs: []
+    }));
+
+    const layer = compiled.layers[0];
+    expect(layer?.kind).toBe('fbm');
+    expect(layer?.texture?.id).toBe('grainy.03');
+    expect(layer?.texture?.mode).toBe('detail');
+    expect(layer?.texture?.modeAmount).toBeCloseTo(0.4);
+  });
+
+  it('leaves a generator node without a texture parameter untouched', () => {
+    const compiled = compileSurfaceGraph(normalizeSurfaceGraph({
+      version: 1,
+      id: 'plain-noise-graph',
+      name: 'Plain noise graph',
+      nodes: [
+        { id: 'noise', kind: 'noise', label: 'Noise', position: { x: 0, y: 0 }, params: { scale: 6 } },
+        { id: 'output', kind: 'output', label: 'Out', position: { x: 300, y: 0 }, params: {} }
+      ],
+      edges: [{ from: { nodeId: 'noise', port: 'height' }, to: { nodeId: 'output', port: 'height' } }],
+      outputs: [{ channel: 'height', source: { nodeId: 'noise', port: 'height' } }],
+      exposed: [],
+      groups: [],
+      subgraphs: []
+    }));
+
+    expect(compiled.layers[0]?.kind).toBe('fbm');
+    expect(compiled.layers[0]?.texture ?? null).toBeNull();
+  });
+
+  it('gives every family preset a field-driven roughness channel', () => {
+    for (const preset of TEXTURE_FIELD_PRESETS) {
+      const roughness = preset.layers.find((layer) => layer.channel === 'roughness');
+      expect(roughness, `${preset.id} is missing a roughness layer`).toBeDefined();
+      expect(roughness?.kind).toBe('fbm');
+      expect(roughness?.texture?.mode).toBe('detail');
+    }
+  });
+
   it('declares texture dependencies in versioned material recipes', () => {
     const state = new AppState();
     state.applyPreset(texturePreset('perlin'));
     state.setSurfaceGraphParameter('texture', 'perlin.03');
 
+    // The family preset declares two fields: `perlin.03` selected above for colour and height,
+    // and the sibling `perlin.02` the roughness breakup layer carries in `detail` mode.
+    // Dependencies are deduplicated and sorted by id.
+    const expected = [{ id: 'perlin.02', version: 1 }, { id: 'perlin.03', version: 1 }];
+
     const recipe = createMaterialRecipe(state.snapshot, 91, 'object');
-    expect(recipe.dependencies?.textures).toEqual([{ id: 'perlin.03', version: 1 }]);
+    expect(recipe.dependencies?.textures).toEqual(expected);
 
     const parsed = parseMaterialRecipe(JSON.parse(JSON.stringify(recipe)) as unknown);
-    expect(parsed.dependencies?.textures).toEqual([{ id: 'perlin.03', version: 1 }]);
+    expect(parsed.dependencies?.textures).toEqual(expected);
     expect(parsed.layers[0]?.texture?.id).toBe('perlin.03');
     expect(() => parseMaterialRecipe({ ...recipe, version: 2 })).toThrow(/texture-field.*version/iu);
   });

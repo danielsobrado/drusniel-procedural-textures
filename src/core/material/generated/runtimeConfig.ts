@@ -160,8 +160,7 @@ export const RUNTIME_RENDERER_SAFETY_CONFIG = {
 
 export const RUNTIME_STRUCTURED_PATTERN_CONFIG = {
   "projection": {
-    "sharpness": 6,
-    "portableAverageMix": 0.62
+    "sharpness": 6
   },
   "displacementGain": {
     "brick": 0.55,

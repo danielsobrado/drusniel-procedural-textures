@@ -32,8 +32,6 @@ player:
   tileRadius: 1
   fogStartMeters: 280
   fogEndMeters: 520
-compute:
-  cpuYieldRows: 8
 imports:
   maxFileBytes: 33554432
   maxDimension: 4096

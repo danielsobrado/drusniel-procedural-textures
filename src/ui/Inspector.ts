@@ -4,6 +4,7 @@ import {
   ENVIRONMENTS,
   LAYER_CHANNELS,
   LAYER_KINDS,
+  MASK_MODES,
   MAX_GROUP_DEPTH
 } from '../app/constants';
 import { MAX_GROUP_NAME_LENGTH, MAX_LAYER_NAME_LENGTH } from '../app/ProjectFile';
@@ -61,7 +62,13 @@ export interface InspectorCallbacks {
 type NumericLayerKey = keyof Pick<
   MaterialLayer,
   'opacity' | 'scale' | 'strength' | 'seed' | 'roughness' | 'displacement' | 'maskStrength'
+  | 'maskThreshold' | 'maskSoftness' | 'maskBreakup'
 >;
+
+/** Numeric layer fields that live outside the main parameter section. */
+const ROUTING_NUMERIC_KEYS: ReadonlySet<string> = new Set([
+  'maskStrength', 'maskThreshold', 'maskSoftness', 'maskBreakup'
+]);
 type PatternNumericKey = Exclude<keyof PatternSettings, 'kind'>;
 
 type NumericField = {
@@ -242,7 +249,9 @@ export class Inspector {
     this.currentState = state;
     const layer = state.layers.find((item) => item.id === state.selectedLayerId) ?? null;
     const nextStructureKey = [
-      `${layer?.id ?? ''}:${layer?.groupId ?? ''}:${layer?.kind ?? ''}:${layer?.pattern?.kind ?? ''}`,
+      // Mask mode decides which routing rows exist, so it belongs in the rebuild key rather
+      // than the value sync.
+      `${layer?.id ?? ''}:${layer?.groupId ?? ''}:${layer?.kind ?? ''}:${layer?.pattern?.kind ?? ''}:${layer?.maskMode ?? ''}`,
       state.layers.map((item) => `${item.id}:${item.structureSourceLayerId ?? ''}:${item.maskSourceLayerId ?? ''}`).join('|'),
       state.groups.map((item) => `${item.id}:${item.parentId ?? ''}`).join('|'),
       state.importedMeshes.map((item) => item.id).join('|'),
@@ -350,10 +359,30 @@ export class Inspector {
             ${maskOptions}
           </select>
         </label>
+        <label class="field-stack routing-field">
+          <span>Mask mode</span>
+          <select data-field="maskMode">
+            ${MASK_MODES.map((item) => option(item.id, item.label, item.id === layer.maskMode)).join('')}
+          </select>
+        </label>
         ${this.numericRow(
           { key: 'maskStrength', label: 'Mask strength', ...CONTROL_RANGES.layer.maskStrength },
           layer.maskStrength
         )}
+        ${layer.maskMode !== 'height' ? '' : `
+          ${this.numericRow(
+            { key: 'maskThreshold', label: 'Height threshold', ...CONTROL_RANGES.layer.maskThreshold },
+            layer.maskThreshold
+          )}
+          ${this.numericRow(
+            { key: 'maskSoftness', label: 'Height softness', ...CONTROL_RANGES.layer.maskSoftness },
+            layer.maskSoftness
+          )}
+          ${this.numericRow(
+            { key: 'maskBreakup', label: 'Edge breakup', ...CONTROL_RANGES.layer.maskBreakup },
+            layer.maskBreakup
+          )}
+        `}
         <label class="toggle-row"><span>Invert mask</span><input data-field="maskInvert" type="checkbox" ${layer.maskInvert ? 'checked' : ''}></label>
         <label class="field-stack routing-field">
           <span>Group</span>
@@ -834,11 +863,15 @@ export class Inspector {
       this.callbacks.onLayerPatch(layerId, { maskInvert: target.checked });
       return;
     }
+    if (field === 'maskMode') {
+      this.callbacks.onLayerPatch(layerId, { maskMode: target.value as MaterialLayer['maskMode'] });
+      return;
+    }
     if (field === 'groupId' || field === 'maskSourceLayerId' || field === 'structureSourceLayerId') {
       this.callbacks.onLayerPatch(layerId, { [field]: target.value === '' ? null : target.value });
       return;
     }
-    if (NUMERIC_FIELDS.some((item) => item.key === field) || field === 'maskStrength') {
+    if (NUMERIC_FIELDS.some((item) => item.key === field) || ROUTING_NUMERIC_KEYS.has(field)) {
       if (!(target instanceof HTMLInputElement)) return;
       const value = this.readBoundedNumber(target);
       if (value === null) return;

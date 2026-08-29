@@ -1,4 +1,5 @@
 import { MAX_PROJECT_FILE_BYTES, OBJECT_PRESETS } from '../app/constants';
+import { presetThumbnailUrl } from '../assets/PresetAssets';
 import {
   parseMaterialPresetFile,
   serializeMaterialPresetFile
@@ -21,10 +22,6 @@ const PRESET_FILE_SUFFIX = '.ptlpreset.json';
 const BYTES_PER_MIB = 1024 * 1024;
 const FALLBACK_SWATCH_A = '#33383f';
 const FALLBACK_SWATCH_B = '#a4adb8';
-
-export function presetThumbnailUrl(id: string): string {
-  return `${import.meta.env.BASE_URL}thumbnails/presets/${encodeURIComponent(id)}.png`;
-}
 
 function presetFileStem(name: string): string {
   const stem = name

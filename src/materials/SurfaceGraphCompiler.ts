@@ -4,7 +4,13 @@ import { validateSurfaceGraphOutputContracts } from '../core/graph/SurfaceGraphO
 import { lowerSurfaceGraphRuntimeNodes } from '../core/graph/SurfaceGraphRuntimeLowering';
 import { normalizeSurfaceGraph } from '../core/graph/SurfaceGraphValidation';
 import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from '../core/material/PatternSettings';
-import { PTL_MAX_GROUPS, PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD,
+  PTL_MAX_GROUPS,
+  PTL_MAX_LAYERS
+} from '../core/material/runtimeDefaults';
 import { compileMaterialGraph, materialGraphHasCycle } from '../core/material/MaterialGraph';
 import { normalizeTextureFieldSettings } from '../core/texture/TextureFieldSettings';
 import type { MaterialGroup, MaterialLayer } from '../core/material/RuntimeMaterial';
@@ -92,6 +98,10 @@ function runtimeLayer(
     structureSourceLayerId: resolve(runtime.structureFrom),
     maskInvert: runtime.maskInvert ?? false,
     maskStrength: runtime.maskStrength ?? 1,
+    maskMode: runtime.maskMode ?? 'coverage',
+    maskThreshold: runtime.maskThreshold ?? PTL_DEFAULT_MASK_THRESHOLD,
+    maskSoftness: runtime.maskSoftness ?? PTL_DEFAULT_MASK_SOFTNESS,
+    maskBreakup: runtime.maskBreakup ?? PTL_DEFAULT_MASK_BREAKUP,
     pattern: runtime.kind === 'pattern'
       ? normalizePatternSettings({ ...DEFAULT_PATTERN_SETTINGS, ...(runtime.pattern ?? {}) })
       : null,

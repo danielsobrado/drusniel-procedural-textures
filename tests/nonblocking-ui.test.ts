@@ -6,6 +6,11 @@ const thumbnailSource = readFileSync(
   'utf8'
 );
 const bakerSource = readFileSync(new URL('../src/export/TextureBaker.ts', import.meta.url), 'utf8');
+// The row flip and UV/atlas rules are shared with the WebGPU baker, so they live beside it.
+const bakeGeometrySource = readFileSync(
+  new URL('../src/export/BakeGeometry.ts', import.meta.url),
+  'utf8'
+);
 const seamlessSource = readFileSync(new URL('../src/export/SeamlessTexture.ts', import.meta.url), 'utf8');
 const computeSource = readFileSync(new URL('../src/engine/MaterialComputeEngine.ts', import.meta.url), 'utf8');
 const simulationAtlasSource = readFileSync(new URL('../src/engine/SimulationAtlas.ts', import.meta.url), 'utf8');
@@ -23,6 +28,14 @@ const terrainPanelSource = readFileSync(
   new URL('../src/ui/TerrainTileLabPanel.ts', import.meta.url),
   'utf8'
 );
+const terrainComputeSource = readFileSync(
+  new URL('../src/tile/TerrainComputeEngine.ts', import.meta.url),
+  'utf8'
+);
+const terrainHydrologySource = readFileSync(
+  new URL('../src/tile/TerrainHydrology.ts', import.meta.url),
+  'utf8'
+);
 
 describe('nonblocking interactive paths', () => {
   it('uses asynchronous GPU readback for thumbnails and baked maps', () => {
@@ -33,14 +46,10 @@ describe('nonblocking interactive paths', () => {
   });
 
   it('uses bounded shader preparation for texture baking', () => {
-    // Linking a many-layer portable shader is the longest step of a bake, so it must not block
-    // the main thread. compileAsync alone polls COMPLETION_STATUS_KHR with no deadline, which is
-    // its own hang; the poll is raced against a budget that falls back to a compile that returns.
     expect(bakerSource).toContain('const SHADER_COMPILE_POLL_BUDGET_MS =');
     expect(bakerSource).toContain('.compileAsync(context.scene, this.camera)');
     expect(bakerSource).toContain("=== 'timeout'");
     expect(bakerSource).toContain('this.renderer.compile(context.scene, this.camera);');
-    // The blocking compile survives only as the bounded fallback, never on the hot path.
     expect(bakerSource).not.toContain('await this.renderer.compile(context.scene, this.camera);');
   });
 
@@ -60,9 +69,9 @@ describe('nonblocking interactive paths', () => {
     expect(tileBakerSource).not.toMatch(/import\s*\{[^}]*TextureBaker[^}]*\}\s*from\s*['"]\.\/TextureBaker['"]/);
   });
 
-  it('cancels the Tile Lab GPU warmup when the panel is disposed', () => {
-    expect(terrainPanelSource).toContain('this.cancelPresetWarmup = scheduleIdleTask(');
-    expect(terrainPanelSource).toContain('this.cancelPresetWarmup?.();');
+  it('does not warm a second GPU context for terrain preset previews', () => {
+    expect(terrainPanelSource).not.toContain('scheduleIdleTask(');
+    expect(terrainPanelSource).not.toContain('presetTextures.warm()');
   });
 
   it('does not traverse selected mesh bounds every render frame', () => {
@@ -128,8 +137,10 @@ describe('nonblocking interactive paths', () => {
   });
 
   it('reuses the readback buffer and allocates padding queue storage lazily', () => {
-    expect(bakerSource).toContain('function flipRowsInPlace(');
-    expect(bakerSource).toContain('new Uint8ClampedArray(source.buffer, source.byteOffset, source.byteLength)');
+    expect(bakeGeometrySource).toContain('export function flipRowsInPlace(');
+    expect(bakeGeometrySource).toContain(
+      'new Uint8ClampedArray(source.buffer, source.byteOffset, source.byteLength)'
+    );
     expect(bakerSource).toContain('let queue: Int32Array<ArrayBuffer> | null = null;');
     expect(bakerSource).toContain('queue ??= new Int32Array(');
   });
@@ -139,6 +150,15 @@ describe('nonblocking interactive paths', () => {
       expect(source).toContain('if (budget.isDue()) await budget.yieldIfDue();');
       expect(source).not.toMatch(/^\s*await budget\.yieldIfDue\(\);/mu);
     }
+  });
+
+  it('keeps Tile Lab CPU work cooperatively scheduled without no-op async boundaries', () => {
+    expect(terrainComputeSource).toContain('if (budget.isDue()) await budget.yieldIfDue();');
+    expect(terrainComputeSource).not.toMatch(/^\s*await budget\.yieldIfDue\(\);/mu);
+    expect(terrainHydrologySource).toContain(
+      'if (shouldYield(budget, signal)) await yieldForBudget(budget, signal);'
+    );
+    expect(terrainHydrologySource).not.toContain('await yieldIfDue(budget, signal);');
   });
 
   it('keeps seamless normal reconstruction chunked', () => {

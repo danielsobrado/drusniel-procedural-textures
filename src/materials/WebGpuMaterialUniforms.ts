@@ -5,6 +5,11 @@ import {
   type MaterialAlgorithmSettings
 } from '../core/material/MaterialAlgorithms';
 import { DEFAULT_PATTERN_SETTINGS } from '../core/material/PatternSettings';
+import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD
+} from '../core/material/runtimeDefaults';
 import { PTL_MAX_LAYERS, PTL_SHADER_DEFAULTS } from '../core/material/runtimeDefaults';
 import type {
   MaterialGroup,
@@ -57,6 +62,9 @@ export class WebGpuMaterialUniforms {
   public readonly groupOpacity = uniformArray(1);
   public readonly maskInvert = uniformArray(0);
   public readonly maskStrength = uniformArray(1);
+  public readonly maskThreshold = uniformArray(PTL_DEFAULT_MASK_THRESHOLD);
+  public readonly maskSoftness = uniformArray(PTL_DEFAULT_MASK_SOFTNESS);
+  public readonly maskBreakup = uniformArray(PTL_DEFAULT_MASK_BREAKUP);
 
   public readonly pattern_rotationRadians = uniformArray(DEFAULT_PATTERN_PARAMS.rotationRadians);
   public readonly pattern_density = uniformArray(DEFAULT_PATTERN_PARAMS.density);
@@ -175,6 +183,9 @@ export class WebGpuMaterialUniforms {
       this.groupOpacity[index]!.value = active ? effectiveGroupOpacity(layer.groupId, groupById) : 1;
       this.maskInvert[index]!.value = active && layer.maskInvert ? 1 : 0;
       this.maskStrength[index]!.value = active ? layer.maskStrength : 1;
+      this.maskThreshold[index]!.value = active ? layer.maskThreshold : PTL_DEFAULT_MASK_THRESHOLD;
+      this.maskSoftness[index]!.value = active ? layer.maskSoftness : PTL_DEFAULT_MASK_SOFTNESS;
+      this.maskBreakup[index]!.value = active ? layer.maskBreakup : PTL_DEFAULT_MASK_BREAKUP;
 
       const layerPattern = active ? layer.pattern : null;
       const patternParams = layerPattern === null || layerPattern === undefined

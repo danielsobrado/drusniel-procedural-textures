@@ -3,7 +3,12 @@ import { EXPORT_CONFIG } from '../app/constants';
 import { MaterialCompiler } from '../materials/MaterialCompiler';
 import type { PhysicalSettings } from '../materials/types';
 import { createFrameBudget } from '../utils/scheduling';
-import { createTriangleAtlas, validateBakeUv } from './UvValidation';
+import {
+  disposeBakeSnapshot,
+  flipRowsInPlace,
+  snapshotBakeMesh,
+  type BakeMeshSnapshot
+} from './BakeGeometry';
 
 export type BakeChannel =
   | 'albedo'
@@ -18,6 +23,8 @@ export type BakeChannel =
 
 /** The PBR channels, in the order they are rendered. */
 export type PbrChannelName = Exclude<BakeChannel, 'height'>;
+
+export type { BakeMeshSnapshot } from './BakeGeometry';
 
 const PBR_CHANNELS: readonly PbrChannelName[] = [
   'albedo',
@@ -66,14 +73,6 @@ export interface BakedTextureSet extends BakedPbrTextureSet {
   height: BakedTexture;
 }
 
-export interface BakeMeshSnapshot {
-  readonly geometry: THREE.BufferGeometry;
-  readonly matrixWorld: THREE.Matrix4;
-  readonly name: string;
-  readonly generatedUvAtlas: boolean;
-  readonly dynamicGeometry: boolean;
-}
-
 interface BakeContext {
   scene: THREE.Scene;
   mesh: THREE.Mesh;
@@ -108,92 +107,6 @@ function applyBakePhysicalSettings(
   if (uniforms.uBakeBaseClearcoatRoughness !== undefined) {
     uniforms.uBakeBaseClearcoatRoughness.value = settings.clearcoatRoughness;
   }
-}
-
-function hasMorphTargets(mesh: THREE.Mesh): boolean {
-  return Object.values(mesh.geometry.morphAttributes).some((attributes) => attributes.length > 0);
-}
-
-function isDynamicGeometry(mesh: THREE.Mesh): boolean {
-  return mesh instanceof THREE.SkinnedMesh || hasMorphTargets(mesh);
-}
-
-function needsDeformedGeometry(mesh: THREE.Mesh): boolean {
-  return mesh instanceof THREE.SkinnedMesh ||
-    (mesh.morphTargetInfluences?.some((value) => Math.abs(value) > 1e-8) ?? false);
-}
-
-function createBakeGeometry(
-  mesh: THREE.Mesh
-): { geometry: THREE.BufferGeometry; generatedUvAtlas: boolean; dynamicGeometry: boolean } {
-  if (mesh instanceof THREE.InstancedMesh) {
-    throw new Error('Instanced meshes must be converted to regular meshes before texture baking.');
-  }
-
-  const sourcePosition = mesh.geometry.getAttribute('position');
-  if (sourcePosition === undefined || sourcePosition.count === 0) {
-    throw new Error(`Mesh "${mesh.name || 'Unnamed mesh'}" has no positions to bake.`);
-  }
-
-  const dynamicGeometry = isDynamicGeometry(mesh);
-  let geometry = mesh.geometry.clone();
-  if (needsDeformedGeometry(mesh)) {
-    const vertex = new THREE.Vector3();
-    const positions = new Float32Array(sourcePosition.count * 3);
-    for (let index = 0; index < sourcePosition.count; index += 1) {
-      mesh.getVertexPosition(index, vertex);
-      const offset = index * 3;
-      positions[offset] = vertex.x;
-      positions[offset + 1] = vertex.y;
-      positions[offset + 2] = vertex.z;
-    }
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.deleteAttribute('normal');
-  }
-  if (geometry.getAttribute('normal') === undefined) geometry.computeVertexNormals();
-
-  const meshName = mesh.name || 'Unnamed mesh';
-  try {
-    validateBakeUv(geometry, meshName);
-    return { geometry, generatedUvAtlas: false, dynamicGeometry };
-  } catch (error) {
-    const canAutoPack = mesh.userData.labProceduralPreview === true ||
-      (EXPORT_CONFIG.automaticUvPacking && !dynamicGeometry);
-    if (!canAutoPack) {
-      geometry.dispose();
-      if (dynamicGeometry && EXPORT_CONFIG.automaticUvPacking) {
-        throw new Error(
-          `Mesh "${meshName}" needs a unique 0–1 UV unwrap. Automatic packing is intentionally disabled for ` +
-          'skinned or morph-target meshes because changing their vertex topology can invalidate animation data.',
-          { cause: error }
-        );
-      }
-      throw error;
-    }
-    const atlas = createTriangleAtlas(geometry);
-    geometry.dispose();
-    validateBakeUv(atlas, meshName);
-    return { geometry: atlas, generatedUvAtlas: true, dynamicGeometry };
-  }
-}
-
-function flipRowsInPlace(
-  source: Uint8Array<ArrayBuffer>,
-  width: number,
-  height: number
-): Uint8ClampedArray<ArrayBuffer> {
-  const rowBytes = width * 4;
-  const pixels = new Uint8ClampedArray(source.buffer, source.byteOffset, source.byteLength);
-  const row = new Uint8ClampedArray(rowBytes);
-  const halfHeight = Math.floor(height / 2);
-  for (let y = 0; y < halfHeight; y += 1) {
-    const topOffset = y * rowBytes;
-    const bottomOffset = (height - y - 1) * rowBytes;
-    row.set(pixels.subarray(topOffset, topOffset + rowBytes));
-    pixels.copyWithin(topOffset, bottomOffset, bottomOffset + rowBytes);
-    pixels.set(row, bottomOffset);
-  }
-  return pixels;
 }
 
 function copyPixel(
@@ -327,19 +240,11 @@ export class TextureBaker {
   }
 
   public snapshotMesh(source: THREE.Mesh): BakeMeshSnapshot {
-    source.updateMatrixWorld(true);
-    const bake = createBakeGeometry(source);
-    return {
-      geometry: bake.geometry,
-      matrixWorld: source.matrixWorld.clone(),
-      name: source.name || 'Unnamed mesh',
-      generatedUvAtlas: bake.generatedUvAtlas,
-      dynamicGeometry: bake.dynamicGeometry
-    };
+    return snapshotBakeMesh(source);
   }
 
   public disposeSnapshot(snapshot: BakeMeshSnapshot): void {
-    snapshot.geometry.dispose();
+    disposeBakeSnapshot(snapshot);
   }
 
   public async bake(

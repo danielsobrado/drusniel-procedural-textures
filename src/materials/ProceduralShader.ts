@@ -1,4 +1,8 @@
 import { RUNTIME_CELLULAR_CONFIG } from '../core/material/generated/runtimeConfig';
+import {
+  PTL_MASK_BREAKUP_SCALE,
+  PTL_MASK_SOFTNESS_FLOOR
+} from '../core/material/MaterialRelief';
 import { PTL_MAX_LAYERS } from '../core/material/runtimeDefaults';
 
 function glslFloat(value: number): string {
@@ -6,6 +10,9 @@ function glslFloat(value: number): string {
 }
 
 const cellularConfig = RUNTIME_CELLULAR_CONFIG;
+
+const MASK_BREAKUP_SCALE = glslFloat(PTL_MASK_BREAKUP_SCALE);
+const MASK_SOFTNESS_FLOOR = glslFloat(PTL_MASK_SOFTNESS_FLOOR);
 
 const CELLULAR_JITTER = glslFloat(cellularConfig.sampling.jitter);
 const CELLULAR_WARP_SCALE = glslFloat(cellularConfig.warp.scale);
@@ -37,6 +44,10 @@ uniform float uLabGroupOpacity[LAB_MAX_LAYERS];
 uniform int uLabMaskIndex[LAB_MAX_LAYERS];
 uniform float uLabMaskInvert[LAB_MAX_LAYERS];
 uniform float uLabMaskStrength[LAB_MAX_LAYERS];
+uniform float uLabMaskMode[LAB_MAX_LAYERS];
+uniform float uLabMaskThreshold[LAB_MAX_LAYERS];
+uniform float uLabMaskSoftness[LAB_MAX_LAYERS];
+uniform float uLabMaskBreakup[LAB_MAX_LAYERS];
 uniform int uLabStructureIndex[LAB_MAX_LAYERS];
 uniform float uLabHasDisplacement;
 uniform float uLabNormalStrength;
@@ -330,11 +341,39 @@ float labDisplacementGainForKind(int kind) {
   return kind == 2 ? ${CELLULAR_DISPLACEMENT_GAIN} : 1.0;
 }
 
+bool labIsZeroBaselineKind(int kind) {
+  return kind == 4 || kind == 5 || kind == 7;
+}
+
+float labReliefForLayer(int layerIndex, vec3 position) {
+  int kind = uLabLayerKind[layerIndex];
+  float shaped = labShapeField(labFieldForLayer(layerIndex, position), uLabStrength[layerIndex]);
+  float relief = labIsZeroBaselineKind(kind) ? shaped * labLayerCoverage(kind, shaped) : shaped;
+  if (uLabDisplacement[layerIndex] < 0.0) relief = 1.0 - relief;
+  return clamp(relief, 0.0, 1.0);
+}
+
+float labHeightMask(int layerIndex, int maskIndex, vec3 position) {
+  float relief = labReliefForLayer(maskIndex, position);
+  float breakup = clamp(uLabMaskBreakup[layerIndex], 0.0, 1.0);
+  if (breakup > 0.0) {
+    relief += (labNoise3(position * ${MASK_BREAKUP_SCALE}) - 0.5) * breakup;
+  }
+  float softness = max(uLabMaskSoftness[layerIndex], ${MASK_SOFTNESS_FLOOR});
+  float threshold = clamp(uLabMaskThreshold[layerIndex], 0.0, 1.0);
+  return smoothstep(threshold - softness, threshold + softness, relief);
+}
+
 float labMaskForLayer(int layerIndex, vec3 position) {
   int maskIndex = uLabMaskIndex[layerIndex];
   if (maskIndex < 0 || maskIndex >= uLabCount) return 1.0;
-  float field = labFieldForLayer(maskIndex, position);
-  float shaped = labShapeField(field, uLabStrength[maskIndex]);
+  float shaped;
+  if (uLabMaskMode[layerIndex] > 0.5) {
+    shaped = labHeightMask(layerIndex, maskIndex, position);
+  } else {
+    float field = labFieldForLayer(maskIndex, position);
+    shaped = labShapeField(field, uLabStrength[maskIndex]);
+  }
   if (uLabMaskInvert[layerIndex] > 0.5) shaped = 1.0 - shaped;
   return mix(1.0, shaped, clamp(uLabMaskStrength[layerIndex], 0.0, 1.0));
 }

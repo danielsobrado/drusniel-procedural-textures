@@ -23,12 +23,19 @@ const NORMAL_DETERMINANT_EPSILON = rendererSafetyConfig.normal.determinantEpsilo
 const NORMAL_VECTOR_EPSILON_SQUARED = (
   rendererSafetyConfig.normal.vectorEpsilon * rendererSafetyConfig.normal.vectorEpsilon
 ).toFixed(18);
-const STRUCTURED_PORTABLE_AVERAGE_MIX = structuredPatternConfig.projection.portableAverageMix.toFixed(6);
 const TEXTURE_FIELD_TRIPLANAR_SHARPNESS = textureFieldConfig.projection.sharpness.toFixed(6);
 const TEXTURE_FIELD_TRIPLANAR_MIN_WEIGHT = textureFieldConfig.projection.minWeight.toFixed(6);
 const STRUCTURED_DISPLACEMENT_GAIN = Object.fromEntries(
   Object.entries(structuredPatternConfig.displacementGain).map(([kind, value]) => [kind, value.toFixed(6)])
 ) as Record<keyof typeof structuredPatternConfig.displacementGain, string>;
+
+/**
+ * `labPatternDisplacementGain` reads `uLabPatternKind`, which the compiler fills with the
+ * default `brick` code in every slot and only overwrites for real pattern layers. Guarding on
+ * the layer kind keeps the gain off non-pattern layers, matching `designerDisplacementGain`
+ * in the TSL path and `signalExtent` in `MaterialDisplacement`. Layer kind 13 is `pattern`.
+ */
+const PATTERN_DISPLACEMENT_GAIN_TERM = '(kind == 13 ? labPatternDisplacementGain(i) : 1.0)';
 
 const EXTRA_UNIFORMS = `uniform float uLabStochasticTiling;
 uniform int uLabCoordinateSpace;
@@ -115,11 +122,14 @@ float labTextureField(int layerIndex, vec3 p) {
   vec3 weights = pow(abs(labTriplanarNormal), vec3(${TEXTURE_FIELD_TRIPLANAR_SHARPNESS}));
   weights *= step(vec3(${TEXTURE_FIELD_TRIPLANAR_MIN_WEIGHT}), weights);
   float totalWeight = max(dot(weights, vec3(1.0)), 0.000001);
-  float value = 0.0;
-  if (weights.z > 0.0) value += labTextureFieldSample(layerIndex, p.xy) * weights.z;
-  if (weights.y > 0.0) value += labTextureFieldSample(layerIndex, p.xz) * weights.y;
-  if (weights.x > 0.0) value += labTextureFieldSample(layerIndex, p.yz) * weights.x;
-  value /= totalWeight;
+  // All three projections are sampled unconditionally. Branching on the weights would put an
+  // implicit-LOD fetch inside non-uniform control flow, where the derivatives that select the
+  // mip level are undefined; a zero weight already drops the projection from the sum.
+  float value = (
+    labTextureFieldSample(layerIndex, p.xy) * weights.z +
+    labTextureFieldSample(layerIndex, p.xz) * weights.y +
+    labTextureFieldSample(layerIndex, p.yz) * weights.x
+  ) / totalWeight;
   vec4 adjust = uLabTextureAdjust[layerIndex];
   value = 0.5 + (value - 0.5) * adjust.y + adjust.z;
   if (adjust.w > 0.5) value = 1.0 - value;
@@ -176,106 +186,183 @@ float labSoftLimitNormalDisplacement(float value) {
 }
 `;
 
+/**
+ * The portable shader is not a shader; it is a set of exact-string patches over the base
+ * GLSL. A search string that no longer matches would return the source unchanged, silently
+ * diverging the portable path from the base path rather than failing. Every patch therefore
+ * asserts it applied.
+ */
+type ShaderPatch = readonly [
+  label: string,
+  search: string,
+  replacement: string,
+  optional?: boolean
+];
+
+/**
+ * `optional` marks a patch that legitimately does not apply to every shader it is run over.
+ * `addCoordinatePolicy` patches both the surface and shadow vertex shaders, and only the
+ * surface one carries the `vLabPosition` varying. Everything else must apply.
+ */
+export function applyPatches(source: string, patches: readonly ShaderPatch[]): string {
+  return patches.reduce((current, [label, search, replacement, optional]) => {
+    if (!current.includes(search)) {
+      if (optional === true) return current;
+      throw new Error(
+        `Portable shader patch "${label}" no longer matches the base shader. ` +
+        'The base GLSL changed shape; update the patch to match it.'
+      );
+    }
+    return current.replace(search, replacement);
+  }, source);
+}
+
 function extendPatternShader(source: string): string {
-  return source
-    .replace(
+  return applyPatches(source, [
+    [
+      'structured pattern displacement gain',
       `  if (kind == 3) return`,
       `  if (kind == 0) return ${STRUCTURED_DISPLACEMENT_GAIN.brick};\n  if (kind == 1) return ${STRUCTURED_DISPLACEMENT_GAIN.tile};\n  if (kind == 2) return ${STRUCTURED_DISPLACEMENT_GAIN.plank};\n  if (kind == 4) return ${STRUCTURED_DISPLACEMENT_GAIN.pebble};\n  if (kind == 5) return ${STRUCTURED_DISPLACEMENT_GAIN['roof-tile']};\n  if (kind == 6) return ${STRUCTURED_DISPLACEMENT_GAIN.fabric};\n  if (kind == 3) return`
-    )
-    .replace(
-      `  return max(xy, max(xz, yz));\n}`,
-      `  float peak = max(xy, max(xz, yz));\n  float average = (xy + xz + yz) / 3.0;\n  return clamp(mix(peak, average, ${STRUCTURED_PORTABLE_AVERAGE_MIX}), 0.0, 1.0);\n}`
-    );
+    ],
+    // A patch softening the structured triplanar seam used to sit here, mixing the hard
+    // `max(xy, max(xz, yz))` towards a flat three-projection average. `labPatternField` now
+    // weights the projections by the surface normal, the same way the TSL path does, so there
+    // is no seam left to soften and no `max` left to match.
+  ]);
 }
 
 const PORTABLE_PATTERN_GLSL_HELPERS = extendPatternShader(PATTERN_GLSL_HELPERS);
 
 function extendSharedShader(source: string): string {
-  return source
-    .replace('uniform float uLabStochasticTiling;', EXTRA_UNIFORMS)
-    .replace('float labHash31(vec3 p) {', `${DISPLACEMENT_HELPERS}\nfloat labHash31(vec3 p) {`)
-    .replace(
+  return applyPatches(source, [
+    ['portable uniforms', 'uniform float uLabStochasticTiling;', EXTRA_UNIFORMS],
+    [
+      'displacement soft limits',
+      'float labHash31(vec3 p) {',
+      `${DISPLACEMENT_HELPERS}\nfloat labHash31(vec3 p) {`
+    ],
+    [
+      'stochastic tiling domain warp',
       `  vec3 tile = floor(position * 0.5);\n  vec3 tileWarp = (labHash33(tile + seedOffset) - 0.5) * uLabStochasticTiling;\n  vec3 domain = position + tileWarp;`,
       `  vec3 warpDomain = position * 0.5 + seedOffset * 0.031;\n  vec3 tileWarp = vec3(\n    labNoise3(warpDomain + vec3(11.0, 3.0, 7.0)),\n    labNoise3(warpDomain + vec3(23.0, 17.0, 5.0)),\n    labNoise3(warpDomain + vec3(2.0, 29.0, 19.0))\n  ) - 0.5;\n  vec3 domain = position + tileWarp * uLabStochasticTiling;`
-    )
-    .replace(
+    ],
+    [
+      'generator field signature',
       'float labLayerField(int kind, vec3 position, float scale, float seed) {',
       `${SIMULATION_HELPERS}\n${TEXTURE_FIELD_HELPERS}\n${PORTABLE_PATTERN_GLSL_HELPERS}\nfloat labGeneratorField(int layerIndex, int kind, vec3 position, float scale, float seed) {`
-    )
-    .replace(
+    ],
+    [
+      'reaction diffusion simulation atlas',
       `  if (kind == 10) {\n    vec3 q = p + (labFbm3(p * 0.21) - 0.5) * 2.1;\n    float activator = sin(q.x * 1.7 + sin(q.y * 1.3)) * cos(q.z * 1.1 - q.y * 0.7);\n    float inhibitor = labFbm3(q * 0.38 + 19.0);\n    return smoothstep(-0.28, 0.38, activator * 0.62 + inhibitor - 0.5);\n  }`,
       `  if (kind == 10) {\n    if (uLabSimulationReady[layerIndex] > 0.5) return labSimulationField(layerIndex, p * 0.08);\n    vec3 q = p + (labFbm3(p * 0.21) - 0.5) * 2.1;\n    float activator = sin(q.x * 1.7 + sin(q.y * 1.3)) * cos(q.z * 1.1 - q.y * 0.7);\n    float inhibitor = labFbm3(q * 0.38 + 19.0);\n    return smoothstep(-0.28, 0.38, activator * 0.62 + inhibitor - 0.5);\n  }`
-    )
-    .replace(
+    ],
+    [
+      'erosion simulation atlas',
       `  if (kind == 11) {\n    float terrain = labFbm3(p * 0.31);\n    float talus = 1.0 - abs(labFbm3(p * 0.82 + 7.0) * 2.0 - 1.0);\n    float sediment = smoothstep(0.18, 0.72, terrain - talus * 0.31 + domain.y * uLabGravity * 0.08);\n    return mix(terrain, sediment, 0.72);\n  }`,
       `  if (kind == 11) {\n    if (uLabSimulationReady[layerIndex] > 0.5) return labSimulationField(layerIndex, p * 0.08);\n    vec3 q = p;\n    float terrain = labFbm3(q * 0.31);\n    float talus = 1.0 - abs(labFbm3(q * 0.82 + 7.0) * 2.0 - 1.0);\n    float sediment = smoothstep(0.18, 0.72, terrain - talus * 0.31 + domain.y * uLabGravity * 0.08);\n    return mix(terrain, sediment, 0.72);\n  }`
-    )
-    .replace(
+    ],
+    [
+      'pattern field and configurable sdf',
       `  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - 0.31;\n  float box = length(max(abs(cell) - vec3(0.25), 0.0)) - 0.055;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-0.06, 0.18, sdf);`,
       `  if (kind == 13) return labPatternField(layerIndex, p, seed);\n  vec3 cell = fract(p) - 0.5;\n  float sphere = length(cell) - uLabSdfRadius;\n  float box = length(max(abs(cell) - vec3(uLabSdfBoxSize), 0.0)) - uLabSdfEdgeSoftness;\n  float sdf = mix(sphere, box, labHash31(floor(p)));\n  return 1.0 - smoothstep(-uLabSdfEdgeSoftness, uLabSdfEdgeSoftness * 3.0, sdf);`
-    )
-    .replace('float labFieldForLayer(int layerIndex, vec3 position) {', `${TEXTURE_MODE_HELPERS}\nfloat labFieldForLayer(int layerIndex, vec3 position) {`)
-    .replace(
+    ],
+    [
+      'texture mode helpers',
+      'float labFieldForLayer(int layerIndex, vec3 position) {',
+      `${TEXTURE_MODE_HELPERS}\nfloat labFieldForLayer(int layerIndex, vec3 position) {`
+    ],
+    [
+      'layer-indexed meso field',
       `  float mesoField = labLayerField(\n    uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`,
       `  float mesoField = labLayerField(\n    fieldIndex, uLabLayerKind[fieldIndex], position, uLabScale[fieldIndex] * max(uLabMeso, 0.1), uLabSeed[fieldIndex] + 17.0\n  );`
-    )
-    .replace(
+    ],
+    [
+      'pattern layer coverage',
       `  if (kind == 4 || kind == 5 || kind == 7) {\n    return smoothstep(0.03, 0.92, shaped);\n  }`,
       `  if (kind == 4 || kind == 5 || kind == 7) {\n    return smoothstep(0.03, 0.92, shaped);\n  }\n  if (kind == 13) return smoothstep(0.04, 0.92, shaped);`
-    )
-    .replace(
+    ],
+    [
+      'pattern displacement signal',
       '  if (kind == 4 || kind == 5 || kind == 7) return shaped;',
       '  if (kind == 4 || kind == 5 || kind == 7 || kind == 13) return shaped;'
-    )
-    .replace(
-      `        labDisplacementGainForKind(kind) *\n        opacityBase *`,
-      `        labDisplacementGainForKind(kind) *\n        labPatternDisplacementGain(i) *\n        opacityBase *`
-    )
-    .replace('  return displacement;\n}', '  return labSoftLimitGeometryDisplacement(displacement);\n}');
+    ],
+    [
+      'pattern zero-baseline relief',
+      '  return kind == 4 || kind == 5 || kind == 7;',
+      '  return kind == 4 || kind == 5 || kind == 7 || kind == 13;'
+    ],
+    [
+      'pattern displacement gain in displacement pass',
+      `      labDisplacementGainForKind(kind) *\n      opacityBase *`,
+      `      labDisplacementGainForKind(kind) *\n      ${PATTERN_DISPLACEMENT_GAIN_TERM} *\n      opacityBase *`
+    ],
+    [
+      'geometry displacement soft limit',
+      '  return displacement;\n}',
+      '  return labSoftLimitGeometryDisplacement(displacement);\n}'
+    ]
+  ]);
 }
 
 function extendFragmentShader(source: string): string {
-  return source
-    .replace(
+  return applyPatches(source, [
+    [
+      'pattern displacement gain in surface pass',
       `        labDisplacementGainForKind(kind) *\n        opacityBase *`,
-      `        labDisplacementGainForKind(kind) *\n        labPatternDisplacementGain(i) *\n        opacityBase *`
-    )
-    .replace(
+      `        labDisplacementGainForKind(kind) *\n        ${PATTERN_DISPLACEMENT_GAIN_TERM} *\n        opacityBase *`
+    ],
+    [
+      'normal displacement soft limit',
       '  if (surface.sss > 0.0001) surface.sssColor /= surface.sss;',
       '  surface.displacement = labSoftLimitNormalDisplacement(surface.displacement);\n  if (surface.sss > 0.0001) surface.sssColor /= surface.sss;'
-    );
+    ]
+  ]);
 }
 
 function extendDisplacedNormalShader(source: string): string {
-  return source
-    .replace(
+  return applyPatches(source, [
+    [
+      'normal determinant epsilon',
       'if (abs(labDeterminant) > 0.00000001) {',
       `if (abs(labDeterminant) > ${NORMAL_DETERMINANT_EPSILON}) {`
-    )
-    .replace(
+    ],
+    [
+      'degenerate normal fallback',
       `    vec3 labWorldNormal = normalize(\n      abs(labDeterminant) * labBaseWorldNormal - labSurfaceGradient * uLabNormalStrength\n    );`,
       `    vec3 labNormalCandidate =\n      abs(labDeterminant) * labBaseWorldNormal - labSurfaceGradient * uLabNormalStrength;\n    float labNormalCandidateLengthSq = dot(labNormalCandidate, labNormalCandidate);\n    vec3 labWorldNormal = labNormalCandidateLengthSq > ${NORMAL_VECTOR_EPSILON_SQUARED}\n      ? labNormalCandidate * inversesqrt(labNormalCandidateLengthSq)\n      : labBaseWorldNormal;`
-    );
+    ]
+  ]);
 }
 
 function addCoordinatePolicy(source: string): string {
-  return source
-    .replace(
+  return applyPatches(source, [
+    [
+      'coordinate space sample position',
       'float labDisplacement = labEvaluateDisplacement(labPosition);',
       'vec3 labSamplePosition = uLabCoordinateSpace == 0 ? transformed : labPosition;'
-    )
-    .replace(
+    ],
+    [
+      'triplanar sampling normal',
       'float labWorldDeterminant = dot(labWorldA, labCofactorX);',
       `float labWorldDeterminant = dot(labWorldA, labCofactorX);\nlabTriplanarNormal = normalize(objectNormal);\nif (uLabCoordinateSpace != 0 && abs(labWorldDeterminant) > 0.00000001) {\n  vec3 labWorldSamplingNormal = mat3(labCofactorX, labCofactorY, labCofactorZ) * objectNormal;\n  if (labWorldDeterminant < 0.0) labWorldSamplingNormal = -labWorldSamplingNormal;\n  labTriplanarNormal = normalize(labWorldSamplingNormal);\n}\nfloat labDisplacement = labEvaluateDisplacement(labSamplePosition);`
-    )
-    .replace('vLabPosition = labPosition;', 'vLabPosition = labSamplePosition;');
+    ],
+    [
+      'varying sample position',
+      'vLabPosition = labPosition;',
+      'vLabPosition = labSamplePosition;',
+      true
+    ]
+  ]);
 }
 
 function exposeSurfaceTriplanarNormal(source: string): string {
-  return source.replace(
-    'vLabPosition = labSamplePosition;',
-    'vLabPosition = labSamplePosition;\nvLabTriplanarNormal = labTriplanarNormal;'
-  );
+  return applyPatches(source, [
+    [
+      'varying triplanar normal',
+      'vLabPosition = labSamplePosition;',
+      'vLabPosition = labSamplePosition;\nvLabTriplanarNormal = labTriplanarNormal;'
+    ]
+  ]);
 }
 
 export const SHARED_GLSL = extendSharedShader(BASE_SHARED_GLSL);

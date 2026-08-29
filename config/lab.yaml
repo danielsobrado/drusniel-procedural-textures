@@ -1,5 +1,5 @@
 app:
-  name: Drusniel Procedural Texture Lab
+  name: Procedural Texture Lab
   storageKey: procedural-texture-lab.project.v2
   legacyStorageKeys:
     - procedural-texture-lab.project.v1
@@ -37,6 +37,9 @@ controls:
     roughness: { min: -0.5, max: 0.5, step: 0.01 }
     displacement: { min: -0.18, max: 0.18, step: 0.001 }
     maskStrength: { min: 0.0, max: 1.0, step: 0.01 }
+    maskThreshold: { min: 0.0, max: 1.0, step: 0.01 }
+    maskSoftness: { min: 0.0, max: 1.0, step: 0.01 }
+    maskBreakup: { min: 0.0, max: 1.0, step: 0.01 }
   synthesis:
     age: { min: 0.0, max: 1.0, step: 0.01 }
     weathering: { min: 0.0, max: 1.0, step: 0.01 }
@@ -68,7 +71,7 @@ defaults:
   physical:
     roughness: 0.34
     metalness: 0.0
-    clearcoat: 0.34
+    clearcoat: 0.0
     clearcoatRoughness: 0.18
     specularIntensity: 0.62
     ior: 1.42

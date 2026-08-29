@@ -14,8 +14,15 @@ export const PTL_LAYER_LIMITS = {
   seed: { min: 0, max: 100 },
   roughness: { min: -0.5, max: 0.5 },
   displacement: { min: -0.18, max: 0.18 },
-  maskStrength: { min: 0, max: 1 }
+  maskStrength: { min: 0, max: 1 },
+  maskThreshold: { min: 0, max: 1 },
+  maskSoftness: { min: 0, max: 1 },
+  maskBreakup: { min: 0, max: 1 }
 } as const;
+
+export const PTL_DEFAULT_MASK_THRESHOLD = 0.5;
+export const PTL_DEFAULT_MASK_SOFTNESS = 0.15;
+export const PTL_DEFAULT_MASK_BREAKUP = 0;
 
 export const PTL_GROUP_LIMITS = {
   opacity: { min: 0, max: 1 }
@@ -49,7 +56,7 @@ export const PTL_SYNTHESIS_LIMITS = {
 export const PTL_DEFAULT_PHYSICAL: Readonly<PhysicalSettings> = {
   roughness: 0.34,
   metalness: 0,
-  clearcoat: 0.34,
+  clearcoat: 0,
   clearcoatRoughness: 0.18,
   specularIntensity: 0.62,
   ior: 1.42,

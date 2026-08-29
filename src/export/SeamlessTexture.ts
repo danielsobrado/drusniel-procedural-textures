@@ -228,7 +228,11 @@ function normalizeNormalPixel(pixels: Uint8ClampedArray, offset: number): void {
   let x = pixels[offset]! / 127.5 - 1;
   let y = pixels[offset + 1]! / 127.5 - 1;
   let z = pixels[offset + 2]! / 127.5 - 1;
-  const length = Math.hypot(x, y, z);
+  // Math.hypot guards against intermediate overflow, which costs several times a plain square
+  // root. This input is byte-derived, so the domain is the finite set of 256^3 triples and
+  // cannot overflow; every one was checked to round to the same three bytes either way.
+  // rebuildNormalRow keeps Math.hypot - its slopes are unbounded and the two do differ there.
+  const length = Math.sqrt(x * x + y * y + z * z);
   if (length <= 1e-8) {
     x = 0;
     y = 0;
@@ -265,20 +269,6 @@ function periodicCoordinate(value: number, size: number): number {
   return wrapped < 0 ? wrapped + period : wrapped;
 }
 
-function heightAt(
-  pixels: Uint8ClampedArray,
-  width: number,
-  height: number,
-  x: number,
-  y: number,
-  displacementExtent: number
-): number {
-  const wrappedX = periodicCoordinate(x, width);
-  const wrappedY = periodicCoordinate(y, height);
-  const value = pixels[(wrappedY * width + wrappedX) * CHANNEL_COUNT]! / 255;
-  return (value - 0.5) * displacementExtent * 2;
-}
-
 function validateNormalRebuildInput(
   heightPixels: Uint8ClampedArray,
   width: number,
@@ -300,25 +290,47 @@ function validateNormalRebuildInput(
   }
 }
 
+/**
+ * Maps an offset coordinate in [-1, size] to its periodic index. `periodicCoordinate` wraps
+ * modulo size - 1, not size, because a seamless tile repeats its outer edge; this table keeps
+ * that convention while replacing the two modulo operations each of the four neighbour reads
+ * performed - eight integer divisions per pixel.
+ */
+function periodicIndexTable(size: number): Int32Array {
+  const table = new Int32Array(size + 2);
+  for (let offset = 0; offset < table.length; offset += 1) {
+    table[offset] = periodicCoordinate(offset - 1, size);
+  }
+  return table;
+}
+
 function rebuildNormalRow(
   heightPixels: Uint8ClampedArray,
   output: Uint8ClampedArray,
   width: number,
-  height: number,
   y: number,
   pixelWorldX: number,
   pixelWorldY: number,
-  displacementExtent: number
+  displacementExtent: number,
+  wrapX: Int32Array,
+  wrapY: Int32Array
 ): void {
+  const centerRow = (wrapY[y + 1] ?? 0) * width;
+  const upperRow = (wrapY[y] ?? 0) * width;
+  const lowerRow = (wrapY[y + 2] ?? 0) * width;
+  const spanX = 2 * pixelWorldX;
+  const spanY = 2 * pixelWorldY;
+  // Kept in the same arithmetic order as the heightAt calls this replaces, so the
+  // floating-point results - and therefore every rounded byte - are unchanged.
+  const sample = (index: number): number =>
+    ((heightPixels[index * CHANNEL_COUNT]! / 255) - 0.5) * displacementExtent * 2;
+
   for (let x = 0; x < width; x += 1) {
+    const column = wrapX[x + 1] ?? 0;
     const slopeX = (
-      heightAt(heightPixels, width, height, x + 1, y, displacementExtent) -
-      heightAt(heightPixels, width, height, x - 1, y, displacementExtent)
-    ) / (2 * pixelWorldX);
-    const slopeCanvasY = (
-      heightAt(heightPixels, width, height, x, y + 1, displacementExtent) -
-      heightAt(heightPixels, width, height, x, y - 1, displacementExtent)
-    ) / (2 * pixelWorldY);
+      sample(centerRow + (wrapX[x + 2] ?? 0)) - sample(centerRow + (wrapX[x] ?? 0))
+    ) / spanX;
+    const slopeCanvasY = (sample(lowerRow + column) - sample(upperRow + column)) / spanY;
 
     let normalX = -slopeX;
     let normalY = slopeCanvasY;
@@ -347,17 +359,12 @@ export function rebuildNormalPixelsFromHeight(
   const output = new Uint8ClampedArray(new ArrayBuffer(heightPixels.length));
   const pixelWorldX = worldSize / Math.max(width - 1, 1);
   const pixelWorldY = worldSize / Math.max(height - 1, 1);
+  const wrapX = periodicIndexTable(width);
+  const wrapY = periodicIndexTable(height);
 
   for (let y = 0; y < height; y += 1) {
     rebuildNormalRow(
-      heightPixels,
-      output,
-      width,
-      height,
-      y,
-      pixelWorldX,
-      pixelWorldY,
-      displacementExtent
+      heightPixels, output, width, y, pixelWorldX, pixelWorldY, displacementExtent, wrapX, wrapY
     );
   }
 
@@ -378,17 +385,12 @@ async function rebuildNormalPixelsFromHeightAsync(
   const pixelWorldX = worldSize / Math.max(width - 1, 1);
   const pixelWorldY = worldSize / Math.max(height - 1, 1);
   const budget = createFrameBudget();
+  const wrapX = periodicIndexTable(width);
+  const wrapY = periodicIndexTable(height);
 
   for (let y = 0; y < height; y += 1) {
     rebuildNormalRow(
-      heightPixels,
-      output,
-      width,
-      height,
-      y,
-      pixelWorldX,
-      pixelWorldY,
-      displacementExtent
+      heightPixels, output, width, y, pixelWorldX, pixelWorldY, displacementExtent, wrapX, wrapY
     );
     if (budget.isDue()) await budget.yieldIfDue();
   }

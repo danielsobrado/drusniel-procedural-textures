@@ -100,7 +100,6 @@ function validateStructuredPattern(configValue) {
   const config = record(configValue, 'Structured pattern runtime configuration');
   const projection = record(config.projection, 'Structured pattern projection');
   number(projection.sharpness, 'Structured pattern projection sharpness', 1, 16);
-  number(projection.portableAverageMix, 'Structured pattern portable average mix', 0, 1);
   const gains = record(config.displacementGain, 'Structured pattern displacement gains');
   for (const kind of ['brick', 'tile', 'plank', 'pebble', 'roof-tile', 'fabric']) {
     number(gains[kind], `Structured pattern ${kind} displacement gain`, 0, 1);

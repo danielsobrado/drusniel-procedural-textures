@@ -11,6 +11,7 @@ import type {
   EnvironmentPreset,
   LayerChannel,
   LayerKind,
+  MaskMode,
   ObjectPreset,
   PhysicalSettings,
   SynthesisSettings
@@ -49,6 +50,10 @@ export const ENVIRONMENTS: ReadonlyArray<{ id: EnvironmentPreset; label: string 
   labConfig.environments;
 export const BLEND_MODES: ReadonlyArray<{ id: BlendMode; label: string }> =
   labConfig.blendModes;
+export const MASK_MODES: ReadonlyArray<{ id: MaskMode; label: string }> = [
+  { id: 'coverage', label: 'Coverage' },
+  { id: 'height', label: 'Height' }
+];
 
 export const DEFAULT_PHYSICAL: Readonly<PhysicalSettings> = labConfig.defaults.physical;
 export const DEFAULT_SYNTHESIS: Readonly<SynthesisSettings> = labConfig.defaults.synthesis;

@@ -33,7 +33,10 @@ export type LayerControlKey =
   | 'seed'
   | 'roughness'
   | 'displacement'
-  | 'maskStrength';
+  | 'maskStrength'
+  | 'maskThreshold'
+  | 'maskSoftness'
+  | 'maskBreakup';
 
 export type PhysicalControlKey = Exclude<keyof PhysicalSettings, 'sheenColor' | 'attenuationColor'>;
 export type SynthesisControlKey = keyof SynthesisSettings;
@@ -156,7 +159,8 @@ const ENVIRONMENT_IDS: readonly EnvironmentPreset[] = ['studio', 'warm', 'cool',
 const BLEND_MODE_IDS: readonly BlendMode[] = ['normal', 'multiply', 'add', 'screen', 'overlay'];
 const FIXED_QUALITY_TIER_IDS: readonly FixedQualityTier[] = ['mobile', 'balanced', 'high', 'ultra'];
 const LAYER_CONTROL_KEYS: readonly LayerControlKey[] = [
-  'opacity', 'scale', 'strength', 'seed', 'roughness', 'displacement', 'maskStrength'
+  'opacity', 'scale', 'strength', 'seed', 'roughness', 'displacement', 'maskStrength',
+  'maskThreshold', 'maskSoftness', 'maskBreakup'
 ];
 const PHYSICAL_CONTROL_KEYS: readonly PhysicalControlKey[] = [
   'roughness', 'metalness', 'clearcoat', 'clearcoatRoughness', 'specularIntensity',

@@ -3,6 +3,7 @@ import type {
   BlendMode,
   LayerChannel,
   LayerKind,
+  MaskMode,
   MaterialGroup,
   MaterialLayer,
   PhysicalSettings,
@@ -11,6 +12,9 @@ import type {
 import { DEFAULT_PATTERN_SETTINGS, normalizePatternSettings } from './PatternSettings';
 import { normalizeTextureFieldSettings } from '../texture/TextureFieldSettings';
 import {
+  PTL_DEFAULT_MASK_BREAKUP,
+  PTL_DEFAULT_MASK_SOFTNESS,
+  PTL_DEFAULT_MASK_THRESHOLD,
   PTL_DEFAULT_PHYSICAL,
   PTL_DEFAULT_SYNTHESIS,
   PTL_GROUP_LIMITS,
@@ -31,6 +35,7 @@ const LAYER_KINDS = new Set<LayerKind>([
   'reaction-diffusion', 'erosion', 'sdf', 'pattern'
 ]);
 const BLEND_MODES = new Set<BlendMode>(['normal', 'multiply', 'add', 'screen', 'overlay']);
+const MASK_MODES = new Set<MaskMode>(['coverage', 'height']);
 const CHANNELS = new Set<LayerChannel>([
   'surface', 'color', 'roughness', 'height', 'clearcoat', 'sss', 'metallic', 'ao', 'emissive'
 ]);
@@ -118,6 +123,16 @@ function normalizeLayer(value: unknown, index: number): MaterialLayer {
     maskStrength: input.maskStrength === undefined
       ? 1
       : finite(input.maskStrength, `Layer ${index + 1} mask strength`, PTL_LAYER_LIMITS.maskStrength.min, PTL_LAYER_LIMITS.maskStrength.max),
+    maskMode: enumValue(input.maskMode ?? 'coverage', MASK_MODES, `Layer ${index + 1} mask mode`),
+    maskThreshold: input.maskThreshold === undefined
+      ? PTL_DEFAULT_MASK_THRESHOLD
+      : finite(input.maskThreshold, `Layer ${index + 1} mask threshold`, PTL_LAYER_LIMITS.maskThreshold.min, PTL_LAYER_LIMITS.maskThreshold.max),
+    maskSoftness: input.maskSoftness === undefined
+      ? PTL_DEFAULT_MASK_SOFTNESS
+      : finite(input.maskSoftness, `Layer ${index + 1} mask softness`, PTL_LAYER_LIMITS.maskSoftness.min, PTL_LAYER_LIMITS.maskSoftness.max),
+    maskBreakup: input.maskBreakup === undefined
+      ? PTL_DEFAULT_MASK_BREAKUP
+      : finite(input.maskBreakup, `Layer ${index + 1} mask breakup`, PTL_LAYER_LIMITS.maskBreakup.min, PTL_LAYER_LIMITS.maskBreakup.max),
     pattern: kind === 'pattern'
       ? normalizePatternSettings(input.pattern ?? DEFAULT_PATTERN_SETTINGS)
       : null,
