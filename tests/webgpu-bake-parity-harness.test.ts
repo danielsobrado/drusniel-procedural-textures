@@ -28,6 +28,14 @@ describe('WebGPU bake parity harness', () => {
     expect(harnessSource).not.toContain("spawn('npx'");
   });
 
+  it('isolates the software WebGL reference from the real WebGPU candidate', () => {
+    expect(harnessSource).toContain("runPhase('reference', WEBGL_BROWSER_ARGS, true)");
+    expect(harnessSource).toContain("runPhase('candidate', WEBGPU_BROWSER_ARGS, false");
+    expect(harnessSource).toContain("'--use-angle=gl'");
+    expect(paritySource).toContain('SerializedReferenceBundle');
+    expect(paritySource).toContain('window.ptlBakeReferences');
+  });
+
   it('rejects invalid CLI values instead of silently weakening the gate', () => {
     expect(harnessSource).toContain('!Number.isInteger(value)');
     expect(harnessSource).toContain("parseArg('threshold', 2, 0, 255)");

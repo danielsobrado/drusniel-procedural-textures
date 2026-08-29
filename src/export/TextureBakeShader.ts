@@ -151,6 +151,7 @@ void main() {
   labTriplanarNormal = normalize(vBakeTriplanarNormal);
   float height = labEvaluateDisplacement(vBakePosition);
 
+
   vec3 outputColor;
   if (uBakeMode == 2) {
     vec3 tangentNormal = labBakeTangentNormal(normalize(vBakeWorldNormal), height);
@@ -159,7 +160,6 @@ void main() {
     float extent = max(uBakeHeightExtent, 0.000001);
     outputColor = vec3(clamp(0.5 + height / (extent * 2.0), 0.0, 1.0));
   }
-
   gl_FragColor = vec4(outputColor, 1.0);
 }
 `;
@@ -170,7 +170,11 @@ function specializeLayerLimit(source: string, layerCount: number): string {
   if (!LAYER_LIMIT_DIRECTIVE.test(source)) {
     throw new Error('Bake shader is missing its layer limit directive.');
   }
-  return source.replace(LAYER_LIMIT_DIRECTIVE, `#define LAB_MAX_LAYERS ${count}`);
+  const specialized = source.replace(LAYER_LIMIT_DIRECTIVE, `#define LAB_MAX_LAYERS ${count}`);
+  return specialized
+    .replace(/if \(i >= uLabCount\) break;/gu, 'if (i >= LAB_MAX_LAYERS) break;')
+    .replace(/sourceIndex >= uLabCount/gu, 'sourceIndex >= LAB_MAX_LAYERS')
+    .replace(/maskIndex >= uLabCount/gu, 'maskIndex >= LAB_MAX_LAYERS');
 }
 
 export function createBakeFragmentGlsl(

@@ -360,6 +360,9 @@ export class TextureBaker {
     const displacementMaterial = hasDisplacementPass
       ? this.compiler.createBakeMaterial(settings, 'displacement')
       : null;
+    if (displacementMaterial !== null) {
+      this.compiler.applyBakeTextureFields(displacementMaterial);
+    }
     const context = this.createContext(snapshot, material, resolution);
     applyBakePhysicalSettings(material, settings);
 

@@ -165,9 +165,17 @@ export interface WebGpuBakeChannels {
  */
 function maxAttachmentsFor(renderer: THREE.WebGPURenderer): number {
   const backend = (renderer as unknown as {
-    backend?: { isWebGPUBackend?: boolean; gl?: WebGL2RenderingContext };
+    backend?: {
+      isWebGPUBackend?: boolean;
+      gl?: WebGL2RenderingContext;
+      device?: { limits?: { maxColorAttachmentBytesPerSample?: number } };
+    };
   }).backend;
-  if (backend?.isWebGPUBackend === true) return SURFACE_ATTACHMENTS.length;
+  if (backend?.isWebGPUBackend === true) {
+    const maxBytes = backend.device?.limits?.maxColorAttachmentBytesPerSample ?? 32;
+    const allowed = Math.floor(maxBytes / 8);
+    return Math.max(1, Math.min(SURFACE_ATTACHMENTS.length, allowed));
+  }
 
   const gl = backend?.gl;
   if (gl !== undefined && typeof gl.getParameter === 'function') {

@@ -145,7 +145,7 @@ export class SurfaceMaterialCompiler {
 
   private displacementExtentValue = 0;
   private simulationAtlas: THREE.Texture | null = null;
-  private readonly textureFallback = createTextureFieldFallback();
+  protected readonly textureFallback = createTextureFieldFallback();
   private readonly textureIds = new Array<string | null>(PTL_MAX_LAYERS).fill(null);
   private readonly textureRecipeChannels = new Array<number>(PTL_MAX_LAYERS).fill(0);
   private textureFields: ReadonlyMap<string, ResolvedTextureField> = new Map();

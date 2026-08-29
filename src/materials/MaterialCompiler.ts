@@ -223,6 +223,12 @@ export class MaterialCompiler extends SurfaceMaterialCompiler {
       );
     }
     const bakeSimulationAtlas = bakeUniforms.uLabSimulationAtlas?.value;
+    if (
+      bakeUniforms.uLabSimulationAtlas !== undefined &&
+      (bakeUniforms.uLabSimulationAtlas.value === null || bakeUniforms.uLabSimulationAtlas.value === undefined)
+    ) {
+      bakeUniforms.uLabSimulationAtlas.value = this.textureFallback;
+    }
     const material = new THREE.ShaderMaterial({
       uniforms: {
         ...bakeUniforms,

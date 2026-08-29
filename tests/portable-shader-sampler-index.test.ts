@@ -42,6 +42,14 @@ describe('portable shader sampler indexing', () => {
     }
   });
 
+  it('specializes loop and relationship guards to the compiled bake layer count', () => {
+    const source = createBakeFragmentGlsl('portable', 3, 'surface');
+    expect(source).toContain('if (i >= LAB_MAX_LAYERS) break;');
+    expect(source).toContain('sourceIndex >= LAB_MAX_LAYERS');
+    expect(source).toContain('maskIndex >= LAB_MAX_LAYERS');
+    expect(source).not.toContain('if (i >= uLabCount) break;');
+  });
+
   it('covers the presets that actually depend on texture fields', () => {
     // Regression guard: the broken shader silently dropped texture fields from most bakes.
     const dependent = MATERIAL_PRESETS.filter((preset) => requiredTextureFieldIds(preset.layers).length > 0);

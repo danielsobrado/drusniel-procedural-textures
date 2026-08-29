@@ -22,6 +22,10 @@ const bakerSource = readFileSync(
   new URL('../src/export/TextureBaker.ts', import.meta.url),
   'utf8'
 );
+const webGpuBakerSource = readFileSync(
+  new URL('../src/export/WebGpuTextureBaker.ts', import.meta.url),
+  'utf8'
+);
 const glbExporterSource = readFileSync(
   new URL('../src/export/GlbExporter.ts', import.meta.url),
   'utf8'
@@ -103,6 +107,7 @@ describe('KTX2 renderer injection', () => {
     expect(compilerSource).toContain('await this.bakeTextureFields.prepare(renderer);');
     expect(bakerSource).toContain('await this.compiler.ensureBakeReady(this.renderer);');
     expect(bakerSource).toContain('this.compiler.applyBakeTextureFields(material);');
+    expect(bakerSource).toContain('this.compiler.applyBakeTextureFields(displacementMaterial);');
     expect(bakeTextureFieldsSource).toContain('private resolver = this.createResolver();');
     expect(bakeTextureFieldsSource).toContain('if (this.renderer !== renderer) this.setRenderer(renderer);');
     expect(compilerSource).toContain('this.textureResolver.releaseTranscoderWhenIdle();');
@@ -131,6 +136,15 @@ describe('KTX2 renderer injection', () => {
     expect(terrainPresetSource).toContain('loadPresetTerrainTexture(preset.id, resolution)');
     expect(terrainPresetSource).not.toContain('setTextureSupportRendererProvider');
     expect(terrainPresetSource).not.toContain('TileMaterialBaker');
+  });
+
+  it('binds a valid fallback for the simulation sampler in portable bake materials', () => {
+    expect(compilerSource).toContain('bakeUniforms.uLabSimulationAtlas.value = this.textureFallback;');
+  });
+
+  it('caps WebGPU attachment batches against the device byte limit', () => {
+    expect(webGpuBakerSource).toContain('maxColorAttachmentBytesPerSample');
+    expect(webGpuBakerSource).toContain('Math.floor(maxBytes / 8)');
   });
 
   it('parks a failed texture-field preparation under a fingerprint no layer set can produce', () => {

@@ -1,0 +1,20 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:,">
+    <title>PTL WebGPU Bake Parity</title>
+  </head>
+  <body>
+    <canvas id="webgpu-canvas" width="256" height="256"></canvas>
+    <canvas id="webgl-canvas" width="256" height="256"></canvas>
+    <script>
+      function pumpRaf() {
+        requestAnimationFrame(pumpRaf);
+      }
+      requestAnimationFrame(pumpRaf);
+    </script>
+    <script type="module" src="/src/bake-parity.ts"></script>
+  </body>
+</html>
