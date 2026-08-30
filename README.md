@@ -1,36 +1,32 @@
 # Procedural Texture Lab
 
-A real-time Three.js material playground for building layered procedural surfaces, previewing them on 3D meshes, and exporting practical PBR assets.
+A realtime Three.js material playground for building layered procedural surfaces, previewing them on 3D meshes, and exporting practical PBR assets.
 
-**Live demo:** [danielsobrado.github.io/procedural-texture-lab](https://danielsobrado.github.io/procedural-texture-lab/)
+**Live demo:** [danielsobrado.github.io/drusniel-procedural-textures](https://danielsobrado.github.io/drusniel-procedural-textures/)
 
-**Current release:** V0.3.1 — Portable GLSL/WebGPU parity
+**npm runtime library:** [PTL Runtime documentation](docs/runtime-package-README.md) : installation, Three.js integration, WebGPU/WebGL backends, recipes, self-contained or externally resolved texture fields, resolver ownership, versioning, testing, and manual npm publishing.
 
-**Runtime library:** See the [PTL Runtime documentation](docs/runtime-package-README.md) for installation, Three.js integration, renderer backends, texture fields, and `.ptl.json` recipes.
+## V0.3.2 showcase
 
-## V0.3 : Surface Designer
+![Procedural Texture Lab V0.3.2 showcase](docs/images/v0-3-2-showcase.png)
 
-V0.3 completes the move from a layered material playground to a visual surface-authoring tool. Authored graphs stay editable from preview through baking, GLB export, project save/load, and portable runtime use instead of being flattened into a preset-only representation.
+## V0.3.0 
 
-<!-- Add the V0.3 showcase image here when ready:
-![Procedural Texture Lab V0.3 showcase](docs/images/v0-3-showcase.png)
--->
+V0.3 turns the authored surface graph into a visual material-authoring workspace on top of the portable PTL runtime. Graph-backed materials keep their node structure, routing, exposed controls, and existing runtime-bound subgraph references while compiling through the same WebGPU-first preview, portable bake/export, and `.ptl.json` runtime representation.
 
-### Highlights
+The native TypeScript graph workspace uses HTML nodes and an SVG routing layer rather than introducing React or a second frontend architecture. It provides draggable nodes, pan/zoom and fit, a searchable node browser, typed sockets, live graph compilation, node parameters, exposed controls, duplication/deletion, undo/redo integration, PBR output routing, and a dedicated node inspector. Formal typed routes are solid and type-colored; legacy runtime `structureFrom` and `maskFrom` field relationships remain visible as lower-contrast dashed links until a formal route overrides the same runtime dependency slot.
 
-- A native TypeScript graph workspace with draggable nodes, pan and zoom, fit-to-view, a searchable node browser, typed sockets, live compilation, node inspection, duplication, deletion, and project-wide undo/redo
-- A shared catalog of 64 typed nodes covering generators, scatter and flood-fill workflows, height processing, warps, transforms, blends, histogram and color operations, normal/PBR conversion, SDFs, texture fields, and material outputs
-- Validation before execution for missing or incompatible ports, cycles, ambiguous inputs, unsupported runtime routing, conflicting output routes, and multiple material outputs
-- Solid, type-colored graph routes alongside dashed legacy `structureFrom` and `maskFrom` dependencies; a formal route takes ownership when it replaces the same runtime dependency
-- Native brick, tile, plank, grass-blade, pebble, roof-tile, and woven-fabric patterns with controls for layout, gaps, roundness, jitter, rotation, density, and wear
-- 11 graph-backed flagship materials: Old Brick Wall, Dense Grass, River Gravel, Clay Roof Tiles, Weathered Wood Planks, Ceramic Tiles, Woven Fabric, Weathered Concrete, Aged Plaster, Road Asphalt, and Cobblestone
-- Version-3 `.ptl.json` recipes with in-memory migration for version-1 and version-2 materials, plus a staged `@drusniel/ptl-runtime` package for Three.js applications
-- A versioned texture-field library with 117 stable fields packed into 41 mipmapped KTX2 files, with deterministic generated fallbacks for self-contained runtime recipes
-- Optional bounded micro-geometry for static GLB displacement, controlled by edge-length, iteration, and vertex-budget limits in `config/surface-designer.yaml`
+The Surface Designer node catalog covers shape/scatter/flood-fill workflows, height filters, warps, transforms, blends, histogram and color utilities, normal/PBR conversion, SDFs, and PBR outputs. Existing runtime-bound subgraph nodes in shipped or imported graphs remain supported, but V0.3 does not create arbitrary unbound nested subgraphs because the runtime layer model cannot execute a generic nested graph interface yet. Graph validation rejects missing ports, incompatible connections, cycles, ambiguous driven inputs, invalid PBR output types, conflicting output routes, unsupported runtime input counts, and multiple material-output nodes before execution.
 
-V0.3 preserves existing runtime-bound subgraph references in shipped and imported graphs. Arbitrary unbound nested subgraphs are intentionally outside this release because the runtime material model does not yet expose a generic nested-graph execution interface.
+Native pattern layers support brick, tile, plank, grass blades, pebble scatter, roof tiles, and woven fabric with direct controls for aspect, gap, roundness, jitter, rotation, row offset, density, and edge wear. Graph-backed presets expose high-level parameters directly in the Inspector and recompile without flattening the authored graph.
 
-## V0.2 : Structure, Simulation & Evolution
+Flagship V0.3 materials include old brick wall, dense grass, river gravel, clay roof tiles, weathered wood planks, ceramic tiles, woven fabric, weathered concrete, aged plaster, road asphalt, and cobblestone.
+
+Static GLB displacement can optionally use bounded pre-displacement tessellation for finer geometric relief. It is disabled by default and configured in `config/surface-designer.yaml` with edge-length, iteration, and vertex-budget limits.
+
+![Procedural Texture Lab V0.3.0 showcase](docs/images/v0-3-0-showcase.png)
+
+## V0.2 
 
 V0.2 builds coherent materials from shared structural fields instead of treating every PBR channel as an unrelated noise stack. It adds reaction-diffusion and erosion simulations, SDF structures, an advanced dependency graph, environmental ageing, multi-scale synthesis, continuous anti-repetition, a lockable six-variant material genome, and a procedural terrain workspace in Tile Lab.
 
@@ -38,7 +34,7 @@ The interactive material preview is WebGPU-first. Texture baking and GLB export 
 
 ![Procedural Texture Lab V0.2 showcase](docs/images/v0-2-showcase.png)
 
-## V0.1 Initial
+## V0.1 
 
 ![Procedural Texture Lab V0.1 showcase](docs/images/v0-1-showcase.png)
 
@@ -82,40 +78,36 @@ Pass `-- --force` to rebuild the complete thumbnail cache.
 
 ## Controls
 
-| Action | Control |
-| --- | --- |
-| Orbit | Left drag |
-| Pan | Right drag |
-| Zoom | Wheel or pinch |
-| Frame selection | `F` |
-| Wireframe | `W` |
-| Radial menu | Right click, `Space`, or touch and hold |
-| Undo | `Ctrl/Cmd + Z` |
-| Redo | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
+| Action          | Control                                      |
+| --------------- | -------------------------------------------- |
+| Orbit           | Left drag                                    |
+| Pan             | Right drag                                   |
+| Zoom            | Wheel or pinch                               |
+| Frame selection | `F`                                        |
+| Wireframe       | `W`                                        |
+| Radial menu     | Right click,`Space`, or touch and hold     |
+| Undo            | `Ctrl/Cmd + Z`                             |
+| Redo            | `Ctrl/Cmd + Shift + Z` or `Ctrl/Cmd + Y` |
 
 ### Surface graph controls
 
-| Action | Control |
-| --- | --- |
-| Pan graph | Drag empty canvas |
-| Zoom graph | Wheel |
-| Fit graph | `F` or **Fit** |
-| Add node | **+ Node** or right click empty canvas |
-| Connect nodes | Drag an output socket to a compatible input socket |
-| Disconnect input | Right click the input socket |
-| Inspect node | Click node |
-| Duplicate node | `Ctrl/Cmd + D` or inspector action |
-| Delete node | `Delete` / `Backspace` or inspector action |
-| Cancel connection / close node browser | `Esc` |
-| Return to material preview | **3D Preview** |
+| Action                                 | Control                                            |
+| -------------------------------------- | -------------------------------------------------- |
+| Pan graph                              | Drag empty canvas                                  |
+| Zoom graph                             | Wheel                                              |
+| Fit graph                              | `F` or **Fit**                             |
+| Add node                               | **+ Node** or right click empty canvas       |
+| Connect nodes                          | Drag an output socket to a compatible input socket |
+| Disconnect input                       | Right click the input socket                       |
+| Inspect node                           | Click node                                         |
+| Duplicate node                         | `Ctrl/Cmd + D` or inspector action               |
+| Delete node                            | `Delete` / `Backspace` or inspector action     |
+| Cancel connection / close node browser | `Esc`                                            |
+| Return to material preview             | **3D Preview**                               |
 
 ## Surface Designer
 
 Choose a Surface Designer preset to load an authored graph. High-level graph parameters appear in the Inspector and remain connected to their graph nodes. Enable **Advanced graph** to open the full graph-authoring workspace in the viewport. The material continues to compile through the existing PTL runtime while editing; choose **3D Preview** to return to the rendered material without flattening the graph.
-
-<!-- Add a Surface Designer workspace image here when ready:
-![Surface Designer graph workspace](docs/images/v0-3-surface-designer.png)
--->
 
 The graph workspace reads node and port definitions from the shared typed catalog. It does not maintain a second graph model. Connections are validated against the domain graph before state is committed, and graph edits participate in the normal project undo/redo history. Formal graph routes into runtime-bound nodes override the corresponding legacy runtime field dependency. The V0.3 runtime material model has two dependency slots per compiled node (`structure` and `mask`), so a graph edit that would require a third runtime dependency is rejected instead of being accepted as a no-op.
 
@@ -195,9 +187,7 @@ npm run publish:runtime
 
 Runtime publication is enabled in `config/runtime-package.yaml` under Apache-2.0. Publishing still happens only when `npm run publish:runtime` is invoked manually. Texture-bearing recipes work with no asset installation through deterministic generated fields included as runtime code. For exact Lab fidelity, the Apache-2.0 KTX2 catalog can be hosted separately and returned through `TextureResolver.resolve()`; the runtime selects a supplied resolver automatically.
 
-### Texture-field library
-
-The texture catalog is version 2: 117 stable field IDs are stored in 41 RGBA-packed, mipmapped UASTC/Zstd KTX2 files. Referenced packs are 1024², long-tail packs are 512², and the complete encoded library is capped at 48 MiB. Generation, packing, licensing, and provenance metadata live in `config/texture-library.yaml`.
+The texture catalog is version 2: 117 stable field IDs are stored in 41 RGBA-packed, mipmapped UASTC/Zstd KTX2 files. Referenced packs are 1024², long-tail packs are 512², and the complete encoded library is capped at 48 MiB. See [Texture library](docs/texture-library.md) for generation and provenance.
 
 ## Development and release validation
 
