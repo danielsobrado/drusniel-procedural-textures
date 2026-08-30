@@ -1,0 +1,222 @@
+.material-radial-host {
+  position: fixed;
+  inset: 0;
+  /* Above .radial-host (100) and above the tile workspace, which is an in-grid element. */
+  z-index: 130;
+  display: none;
+}
+
+.material-radial-host.is-open { display: block; }
+
+.material-radial-backdrop {
+  position: absolute;
+  inset: 0;
+  /* Deliberately faint and unblurred: watching the world change behind the ring is the
+     entire point of hovering a preset. */
+  background: rgba(4, 6, 10, 0.12);
+}
+
+.material-radial {
+  position: absolute;
+  /* Every child is absolutely positioned, so without an explicit box this collapses to
+     0x0: it still paints, but it is untestable and cannot be hit-tested as a unit. */
+  width: var(--radial-size, 428px);
+  height: var(--radial-size, 428px);
+  transform: translate(-50%, -50%);
+}
+
+.material-radial-ring {
+  position: absolute;
+  inset: 0;
+}
+
+.material-radial-category,
+.material-radial-preset {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  place-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 1px solid rgba(233, 239, 255, 0.14);
+  border-radius: 999px;
+  background: rgba(11, 15, 21, 0.9);
+  color: #c8d0e2;
+  font: inherit;
+  cursor: pointer;
+  transform: translate(calc(-50% + var(--radial-x)), calc(-50% + var(--radial-y)));
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+  backdrop-filter: blur(18px) saturate(120%);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  transition: transform 120ms ease-out, border-color 120ms ease-out;
+}
+
+/* Sized so the hub, inner ring and outer ring each clear their neighbours: see the
+   band budget in MaterialRadialMenu. At 54px against a 176px hub they overlapped. */
+.material-radial-category {
+  width: 48px;
+  height: 48px;
+  font-size: 14px;
+}
+
+.material-radial-category small,
+.material-radial-preset small {
+  max-width: 100%;
+  overflow: hidden;
+  color: #93a0b8;
+  font-size: 7px;
+  line-height: 1.1;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.material-radial-category small { max-width: 42px; }
+
+.material-radial-category.is-active {
+  border-color: rgba(170, 186, 255, 0.62);
+  background: linear-gradient(145deg, rgba(155, 171, 255, 0.2), rgba(91, 109, 198, 0.1)),
+    rgba(18, 24, 34, 0.92);
+  color: #eef1ff;
+}
+
+/* 72px clears the 44px touch-target minimum with room to spare. */
+.material-radial-preset {
+  width: 72px;
+  height: 72px;
+  padding: 5px;
+}
+
+.material-radial-category:hover,
+.material-radial-preset:hover,
+.material-radial-category:focus-visible,
+.material-radial-preset:focus-visible {
+  outline: none;
+  border-color: rgba(174, 190, 255, 0.7);
+  transform: translate(calc(-50% + var(--radial-x)), calc(-50% + var(--radial-y))) scale(1.08);
+}
+
+.material-radial-preset.is-selected {
+  border-color: rgba(126, 224, 192, 0.66);
+}
+
+.material-radial-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  background-color: #0b0e13;
+  background-position: center;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.material-radial-more .material-radial-thumb {
+  display: grid;
+  place-items: center;
+  color: #aeb8cb;
+  font-size: 15px;
+}
+
+.material-radial-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: grid;
+  width: 150px;
+  justify-items: center;
+  gap: 5px;
+  padding: 12px 12px 10px;
+  border: 1px solid rgba(233, 239, 255, 0.16);
+  border-radius: 18px;
+  background: rgba(9, 12, 18, 0.94);
+  text-align: center;
+  transform: translate(-50%, -50%);
+  -webkit-backdrop-filter: blur(22px) saturate(130%);
+  backdrop-filter: blur(22px) saturate(130%);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.5);
+}
+
+.material-radial-hub-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background-color: #10141c;
+  background-position: center;
+  background-size: cover;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.material-radial-hub-copy { display: grid; gap: 3px; }
+
+.material-radial-hub-copy .eyebrow {
+  color: #7d8aa4;
+  font-size: 7px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The ring carries pictures; the hub carries words. This is where truncation dies. */
+.material-radial-hub-copy strong {
+  color: #eef1ff;
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.material-radial-hub-copy small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #8b97ad;
+  font-size: 8px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.material-radial-tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 3px;
+}
+
+.material-radial-tags span {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: rgba(146, 163, 227, 0.14);
+  color: #9fadc8;
+  font-size: 6px;
+}
+
+.material-radial-hint,
+.material-radial-page {
+  color: #6f7b8e;
+  font-size: 7px;
+}
+
+.material-radial-reset {
+  width: 100%;
+  min-height: 24px;
+  border: 1px solid rgba(233, 239, 255, 0.16);
+  border-radius: 8px;
+  background: rgba(20, 26, 36, 0.8);
+  color: #c5cddd;
+  font: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+
+.material-radial-reset:hover { border-color: rgba(174, 190, 255, 0.5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .material-radial-category,
+  .material-radial-preset { transition: none; }
+  .material-radial-category:hover,
+  .material-radial-preset:hover,
+  .material-radial-category:focus-visible,
+  .material-radial-preset:focus-visible {
+    transform: translate(calc(-50% + var(--radial-x)), calc(-50% + var(--radial-y)));
+  }
+}

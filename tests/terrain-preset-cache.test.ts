@@ -2,6 +2,8 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { TERRAIN_CONFIG } from '../src/config/terrainConfig';
 import { MATERIAL_PRESETS } from '../src/materials/presets';
+import { TERRAIN_PBR_ATLAS_COLUMNS, TERRAIN_PBR_ATLAS_ROWS } from '../src/tile/TerrainPbrAtlas';
+import { TERRAIN_PBR_CHANNELS } from '../src/tile/TerrainTypes';
 
 const packageDocument = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -17,14 +19,19 @@ const publishSource = readFileSync(
 
 describe('terrain preset texture cache', () => {
   it.each(MATERIAL_PRESETS.map((preset) => [preset.id]))(
-    'contains a flat seamless PNG for %s',
+    'contains a complete seamless PBR atlas for %s',
     (id) => {
       const textureUrl = new URL(`../public/terrain-presets/${id}.png`, import.meta.url);
       expect(existsSync(textureUrl)).toBe(true);
       const texture = readFileSync(textureUrl);
       expect([...texture.subarray(0, 8)]).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
-      expect(texture.readUInt32BE(16)).toBe(TERRAIN_CONFIG.materials.presetBakeResolution);
-      expect(texture.readUInt32BE(20)).toBe(TERRAIN_CONFIG.materials.presetBakeResolution);
+      expect(TERRAIN_PBR_CHANNELS).toHaveLength(TERRAIN_PBR_ATLAS_COLUMNS * TERRAIN_PBR_ATLAS_ROWS);
+      expect(texture.readUInt32BE(16)).toBe(
+        TERRAIN_CONFIG.materials.presetBakeResolution * TERRAIN_PBR_ATLAS_COLUMNS
+      );
+      expect(texture.readUInt32BE(20)).toBe(
+        TERRAIN_CONFIG.materials.presetBakeResolution * TERRAIN_PBR_ATLAS_ROWS
+      );
     }
   );
 

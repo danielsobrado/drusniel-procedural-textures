@@ -161,7 +161,9 @@ export class TerrainPlayerController {
 
     this.camera.getWorldDirection(this.direction);
     this.yaw = Math.atan2(-this.direction.x, -this.direction.z);
-    this.pitch = Math.asin(THREE.MathUtils.clamp(this.direction.y, -1, 1));
+    // Preserve the orbit heading, but spawn at eye level instead of inheriting
+    // the overview camera's steep downward pitch.
+    this.pitch = 0;
     this.camera.rotation.order = 'YXZ';
     this.camera.position.x = wrapTerrainCoordinate(hit.point.x, this.terrainSize);
     this.camera.position.z = wrapTerrainCoordinate(hit.point.z, this.terrainSize);

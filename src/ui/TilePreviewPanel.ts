@@ -62,7 +62,7 @@ export class TilePreviewPanel {
   private terrainPanel: TerrainTileLabPanel | null = null;
   private terrainPanelPromise: Promise<TerrainTileLabPanel | null> | null = null;
   private disposed = false;
-  private currentMaterialTexture: HTMLCanvasElement | null = null;
+  private currentMaterialTextures: BakedTextureSet | null = null;
   private textures: BakedTextureSet | null = null;
   private channel: TileChannel = 'albedo';
   private tileCount: number = TILE_CONFIG.previewTiles;
@@ -186,17 +186,17 @@ export class TilePreviewPanel {
     this.refreshButton.disabled = false;
     this.saveButton.disabled = preserveStale;
     if (preserveStale) {
-      this.currentMaterialTexture = null;
+      this.currentMaterialTextures = null;
       this.terrainPanel?.clearCurrentMaterialTexture();
     } else {
-      this.currentMaterialTexture = textures.albedo.canvas;
-      this.terrainPanel?.setCurrentMaterialTexture(this.currentMaterialTexture);
+      this.currentMaterialTextures = textures;
+      this.terrainPanel?.setCurrentMaterialTextures(this.currentMaterialTextures);
     }
     this.render();
   }
 
   public markStale(): void {
-    this.currentMaterialTexture = null;
+    this.currentMaterialTextures = null;
     this.terrainPanel?.clearCurrentMaterialTexture();
     this.saveButton.disabled = true;
     if (this.root.getAttribute('aria-busy') === 'true') {
@@ -252,8 +252,8 @@ export class TilePreviewPanel {
           onCurrentMaterialRequested: () => this.callbacks.onTextureRequested?.()
         });
         this.terrainPanel = panel;
-        if (this.currentMaterialTexture !== null) {
-          panel.setCurrentMaterialTexture(this.currentMaterialTexture);
+        if (this.currentMaterialTextures !== null) {
+          panel.setCurrentMaterialTextures(this.currentMaterialTextures);
         }
         return panel;
       })

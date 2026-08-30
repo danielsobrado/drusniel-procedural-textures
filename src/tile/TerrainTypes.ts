@@ -23,6 +23,11 @@ export interface TerrainSettings {
   riverDepth: number;
   wetnessRadius: number;
   materialRepeat: number;
+  /**
+   * Optional per-material override in metres per tile, falling back to `materialRepeat`.
+   * Optional so `TerrainRecipe` stays version 1 and existing settings literals still compile.
+   */
+  materialScales?: Partial<Record<TerrainMaterialId, number>>;
 }
 
 export interface TerrainFields {
@@ -55,6 +60,33 @@ export interface TerrainTextureSource {
   width: number;
   height: number;
   pixels: Uint8ClampedArray;
+}
+
+export const TERRAIN_PBR_CHANNELS = [
+  'albedo',
+  'roughness',
+  'normal',
+  'height',
+  'clearcoat',
+  'clearcoatRoughness',
+  'metallic',
+  'ao',
+  'emissive'
+] as const;
+
+export type TerrainPbrChannel = typeof TERRAIN_PBR_CHANNELS[number];
+
+/** Complete baked material data. Imported single images intentionally provide albedo only. */
+export interface TerrainPbrTextureSet {
+  albedo: TerrainTextureSource;
+  roughness?: TerrainTextureSource;
+  normal?: TerrainTextureSource;
+  height?: TerrainTextureSource;
+  clearcoat?: TerrainTextureSource;
+  clearcoatRoughness?: TerrainTextureSource;
+  metallic?: TerrainTextureSource;
+  ao?: TerrainTextureSource;
+  emissive?: TerrainTextureSource;
 }
 
 export interface TerrainExternalMaterial {

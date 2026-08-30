@@ -12,6 +12,9 @@ const RENDER_TIMEOUT_MS = 120_000;
 const GENERATOR_URL = `http://${HOST}:${PORT}/thumbnail-generator.html`;
 const MISSING_ONLY = process.argv.includes('--missing-only');
 const CHECK_ONLY = process.argv.includes('--check');
+// Shader linking is GPU-process serialized under SwiftShader; one renderer is faster and avoids
+// three heavyweight compiles contending for the same software device.
+const WORKER_COUNT = 1;
 const PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
 function startVite(root) {
@@ -40,10 +43,13 @@ async function waitForVite() {
   throw new Error('Timed out waiting for the terrain preset generator page.');
 }
 
-async function hasCachedPng(path) {
+async function hasCachedPng(path, expectedSize) {
   if (!existsSync(path)) return false;
   const contents = await readFile(path);
-  return contents.length >= 24 && contents.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE);
+  return contents.length >= 24 &&
+    contents.subarray(0, PNG_SIGNATURE.length).equals(PNG_SIGNATURE) &&
+    contents.readUInt32BE(16) === expectedSize &&
+    contents.readUInt32BE(20) === expectedSize;
 }
 
 function decodePng(dataUrl) {
@@ -100,14 +106,25 @@ async function compareCachedPixels(page, id) {
   }, id);
 }
 
-async function verifyCache(page, outputDirectory, presetIds) {
+async function runWorkers(pages, entries, task) {
+  let cursor = 0;
+  await Promise.all(pages.map(async (page) => {
+    while (cursor < entries.length) {
+      const index = cursor;
+      cursor += 1;
+      await task(page, entries[index], index);
+    }
+  }));
+}
+
+async function verifyCache(pages, outputDirectory, presetIds, expectedSize) {
   const stale = [];
-  for (const [index, id] of presetIds.entries()) {
+  await runWorkers(pages, presetIds, async (page, id, index) => {
     const outputPath = join(outputDirectory, `${id}.png`);
-    const matches = await hasCachedPng(outputPath) && await compareCachedPixels(page, id);
+    const matches = await hasCachedPng(outputPath, expectedSize) && await compareCachedPixels(page, id);
     if (!matches) stale.push(id);
     console.log(`${index + 1}/${presetIds.length} ${id}${matches ? ' ok' : ' stale'}`);
-  }
+  });
 
   if (stale.length > 0) {
     throw new Error(
@@ -141,24 +158,28 @@ async function main() {
         '--enable-unsafe-swiftshader'
       ]
     });
-    const page = await browser.newPage({ viewport: { width: 320, height: 320 } });
-    page.setDefaultTimeout(RENDER_TIMEOUT_MS);
-    page.on('console', (message) => {
-      if (message.type() === 'error') console.error(`[browser] ${message.text()}`);
-    });
-    await page.goto(GENERATOR_URL, { waitUntil: 'networkidle' });
-    await page.waitForFunction(() => window.__PTL_THUMBNAIL_GENERATOR__ !== undefined);
+    const pages = await Promise.all(Array.from({ length: WORKER_COUNT }, async () => {
+      const page = await browser.newPage({ viewport: { width: 320, height: 320 } });
+      page.setDefaultTimeout(RENDER_TIMEOUT_MS);
+      page.on('console', (message) => {
+        if (message.type() === 'error') console.error(`[browser] ${message.text()}`);
+      });
+      await page.goto(GENERATOR_URL, { waitUntil: 'networkidle' });
+      await page.waitForFunction(() => window.__PTL_THUMBNAIL_GENERATOR__ !== undefined);
+      return page;
+    }));
 
-    const presetIds = await page.evaluate(() => [...window.__PTL_THUMBNAIL_GENERATOR__.presetIds]);
+    const presetIds = await pages[0].evaluate(() => [...window.__PTL_THUMBNAIL_GENERATOR__.presetIds]);
+    const expectedSize = await pages[0].evaluate(() => window.__PTL_THUMBNAIL_GENERATOR__.terrainAtlasSize);
     if (CHECK_ONLY) {
-      await verifyCache(page, outputDirectory, presetIds);
+      await verifyCache(pages, outputDirectory, presetIds, expectedSize);
       return;
     }
 
     const pending = [];
     for (const id of presetIds) {
       const outputPath = join(outputDirectory, `${id}.png`);
-      if (!MISSING_ONLY || !(await hasCachedPng(outputPath))) pending.push({ id, outputPath });
+      if (!MISSING_ONLY || !(await hasCachedPng(outputPath, expectedSize))) pending.push({ id, outputPath });
     }
 
     if (pending.length === 0) {
@@ -167,10 +188,10 @@ async function main() {
     }
 
     console.log(`Generating ${pending.length} terrain preset texture${pending.length === 1 ? '' : 's'}…`);
-    for (const [index, entry] of pending.entries()) {
+    await runWorkers(pages, pending, async (page, entry, index) => {
       await writeFile(entry.outputPath, await renderPng(page, entry.id));
       console.log(`${index + 1}/${pending.length} ${entry.id}.png`);
-    }
+    });
     console.log(`Terrain preset cache ready at ${outputDirectory}.`);
   } finally {
     if (browser !== null) await browser.close();

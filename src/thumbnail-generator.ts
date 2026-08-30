@@ -3,14 +3,17 @@ import { DEFAULT_PHYSICAL, DEFAULT_SYNTHESIS, EXPORT_CONFIG } from './app/consta
 import { TERRAIN_CONFIG } from './config/terrainConfig';
 import { TILE_CONFIG } from './config/tileConfig';
 import { PresetThumbnailRenderer } from './export/PresetThumbnailRenderer';
-import { makeTextureSeamless } from './export/SeamlessTexture';
+import { makeTextureSetSeamless } from './export/SeamlessTexture';
 import { TextureBaker } from './export/TextureBaker';
 import { MaterialCompiler } from './materials/MaterialCompiler';
 import { MATERIAL_PRESETS } from './materials/presets';
+import { createTerrainPbrAtlas, TERRAIN_PBR_ATLAS_COLUMNS } from './tile/TerrainPbrAtlas';
+import { TERRAIN_PBR_CHANNELS } from './tile/TerrainTypes';
 import { canvasToPngDataUrl } from './utils/canvas';
 
 interface ThumbnailGeneratorApi {
   presetIds: readonly string[];
+  terrainAtlasSize: number;
   render: (id: string) => Promise<string>;
   renderTerrain: (id: string) => Promise<string>;
   dispose: () => void;
@@ -42,6 +45,7 @@ let disposed = false;
 
 const api: ThumbnailGeneratorApi = {
   presetIds: MATERIAL_PRESETS.map((preset) => preset.id),
+  terrainAtlasSize: TERRAIN_CONFIG.materials.presetBakeResolution * TERRAIN_PBR_ATLAS_COLUMNS,
   async render(id) {
     if (disposed) throw new Error('Thumbnail generator is disposed.');
     const preset = presetsById.get(id);
@@ -62,13 +66,19 @@ const api: ThumbnailGeneratorApi = {
     const mesh = new THREE.Mesh(geometry);
     mesh.name = 'Cached terrain preset sample';
     try {
-      const albedo = await terrainBaker.bakeAlbedo(
+      const textures = await terrainBaker.bake(
         mesh,
         physical,
         TERRAIN_CONFIG.materials.presetBakeResolution
       );
-      await makeTextureSeamless(albedo, TILE_CONFIG.blendFraction);
-      return await canvasToPngDataUrl(albedo.canvas);
+      await makeTextureSetSeamless(textures, {
+        blendFraction: TILE_CONFIG.blendFraction,
+        worldSize: TILE_CONFIG.worldSize,
+        displacementExtent: terrainCompiler.displacementExtent
+      });
+      // Keep this reference explicit: the shared atlas layout is the cache/runtime contract.
+      if (TERRAIN_PBR_CHANNELS.length !== 9) throw new Error('Unexpected terrain PBR channel layout.');
+      return await canvasToPngDataUrl(createTerrainPbrAtlas(textures));
     } finally {
       geometry.dispose();
     }

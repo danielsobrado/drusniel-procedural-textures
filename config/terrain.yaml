@@ -2,7 +2,7 @@ resolution: 256
 worldSize: 512
 heightScale: 64
 meshSegments: 128
-materialRepeat: 24
+materialRepeat: 128
 mountains:
   coverage: 0.46
   height: 0.6
@@ -22,6 +22,30 @@ painting:
   strength: 0.8
 materials:
   presetBakeResolution: 256
+scale:
+  metersPerTextureTile: 4
+  minMetersPerTextureTile: 0.5
+  maxMetersPerTextureTile: 64
+  propReferenceMeters: 2.5
+camera:
+  orbitMinMeters: 0.8
+  orbitMaxMeters: 900
+  focusAnimationMs: 320
+radial:
+  outerRadiusPx: 192
+  presetsPerPage: 11
+  hoverDwellMs: 140
+lighting:
+  # Morning, not golden hour. At 11 degrees the sun sits behind the default spawn, so props
+  # become silhouettes and surfaces face away from the light: prettiest preset, worst one for
+  # judging a material, which is what this view is for. 26 degrees keeps directional relief
+  # without backlighting the scene. Golden hour is still one click away in the toolbar.
+  preset: morning
+  sunElevationDegrees: 26
+  sunAzimuthDegrees: 120
+  shadowMapSize: 2048
+  shadowFocusRadiusMeters: 120
+  shadowNormalBiasMeters: 0.06
 player:
   eyeHeightMeters: 1.72
   walkSpeedMetersPerSecond: 5.5

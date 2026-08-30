@@ -175,3 +175,20 @@
     min-width: calc(100% - 24px);
   }
 }
+
+/* Names the surface underfoot, so walking the world is also reading it. */
+.terrain-player-material {
+  display: block;
+  margin: 2px 0 1px;
+  color: #cfe3d8;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.terrain-player-material[hidden] { display: none; }
+
+.terrain-player-target-material {
+  margin-top: 0;
+  color: #c7d3eb;
+  font-size: 8px;
+}

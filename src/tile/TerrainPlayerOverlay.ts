@@ -10,6 +10,8 @@ export class TerrainPlayerOverlay {
   private readonly buttonLabel: HTMLElement;
   private readonly hud: HTMLElement;
   private readonly hudLabel: HTMLElement;
+  private readonly hudMaterial: HTMLElement;
+  private readonly hudTargetMaterial: HTMLElement;
 
   public constructor(
     canvas: HTMLCanvasElement,
@@ -26,6 +28,8 @@ export class TerrainPlayerOverlay {
         <span class="terrain-player-reticle" aria-hidden="true"></span>
         <div class="terrain-player-instructions">
           <strong data-role="terrain-player-hud-label">Click terrain to spawn</strong>
+          <span class="terrain-player-material" data-role="terrain-player-material" hidden></span>
+          <span class="terrain-player-material terrain-player-target-material" data-role="terrain-player-target-material" hidden></span>
           <small>WASD move · Shift sprint · mouse look · Esc releases mouse</small>
         </div>
       </div>
@@ -36,7 +40,10 @@ export class TerrainPlayerOverlay {
     const buttonLabel = this.root.querySelector<HTMLElement>('[data-role="terrain-player-button-label"]');
     const hud = this.root.querySelector<HTMLElement>('[data-role="terrain-player-hud"]');
     const hudLabel = this.root.querySelector<HTMLElement>('[data-role="terrain-player-hud-label"]');
-    if (button === null || buttonLabel === null || hud === null || hudLabel === null) {
+    const hudMaterial = this.root.querySelector<HTMLElement>('[data-role="terrain-player-material"]');
+    const hudTargetMaterial = this.root.querySelector<HTMLElement>('[data-role="terrain-player-target-material"]');
+    if (button === null || buttonLabel === null || hud === null || hudLabel === null ||
+        hudMaterial === null || hudTargetMaterial === null) {
       this.root.remove();
       throw new Error('Terrain player overlay could not be initialized.');
     }
@@ -44,6 +51,8 @@ export class TerrainPlayerOverlay {
     this.buttonLabel = buttonLabel;
     this.hud = hud;
     this.hudLabel = hudLabel;
+    this.hudMaterial = hudMaterial;
+    this.hudTargetMaterial = hudTargetMaterial;
     this.button.addEventListener('click', () => this.callbacks.onToggle());
     this.setState('idle');
   }
@@ -62,6 +71,14 @@ export class TerrainPlayerOverlay {
     if (state === 'placing') this.hudLabel.textContent = 'Click terrain to spawn';
     else if (state === 'playing') this.hudLabel.textContent = 'Walking seamless terrain';
     else if (state === 'paused') this.hudLabel.textContent = 'Click the view to resume';
+  }
+
+  /** What the player stands on and aims at, so walking the world is also reading it. */
+  public setMaterialReadout(feet: string | null, target: string | null = null): void {
+    this.hudMaterial.hidden = feet === null;
+    this.hudMaterial.textContent = feet ?? '';
+    this.hudTargetMaterial.hidden = target === null;
+    this.hudTargetMaterial.textContent = target ?? '';
   }
 
   public setStatus(message: string): void {

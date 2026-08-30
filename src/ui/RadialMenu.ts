@@ -1,4 +1,5 @@
 import { UI_CONFIG } from '../app/constants';
+import { ringSlotPosition, safeCenter } from './radialGeometry';
 
 export type RadialCommand =
   | 'add-noise'
@@ -43,22 +44,13 @@ const ITEMS: readonly RadialItem[] = [
 const NEXT_KEYS = new Set(['ArrowRight', 'ArrowDown']);
 const PREVIOUS_KEYS = new Set(['ArrowLeft', 'ArrowUp']);
 
-function safeCenter(position: number, extent: number, margin: number): number {
-  const center = extent / 2;
-  const minimum = Math.min(margin, center);
-  const maximum = Math.max(extent - margin, center);
-  return Math.max(minimum, Math.min(maximum, position));
-}
-
 function ringPosition(item: RadialItem, radius: number): { x: number; y: number } {
   const ringItems = ITEMS.filter((candidate) => candidate.ring === item.ring);
-  const index = ringItems.indexOf(item);
-  const ringRadius = item.ring === 'outer' ? radius : radius * 0.64;
-  const angle = -Math.PI / 2 + (index / ringItems.length) * Math.PI * 2;
-  return {
-    x: Math.cos(angle) * ringRadius,
-    y: Math.sin(angle) * ringRadius
-  };
+  return ringSlotPosition(
+    ringItems.indexOf(item),
+    ringItems.length,
+    item.ring === 'outer' ? radius : radius * 0.64
+  );
 }
 
 export class RadialMenu {

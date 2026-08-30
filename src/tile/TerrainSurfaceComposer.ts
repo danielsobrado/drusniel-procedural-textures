@@ -1,6 +1,7 @@
 import { TERRAIN_CONFIG } from '../config/terrainConfig';
 import {
   TERRAIN_MATERIALS,
+  type TerrainPbrTextureSet,
   type TerrainFields,
   type TerrainPaintMask,
   type TerrainTextureSource,
@@ -85,35 +86,17 @@ function writeFallbackRepeatColor(
   out[2] = byte(base[2] + grain * 0.58);
 }
 
-export function terrainTextureFromCanvas(source: HTMLCanvasElement): TerrainTextureSource | null {
-  const maxDimension = TERRAIN_CONFIG.imports.maxDimension;
-  const sourceWidth = Math.max(1, source.width);
-  const sourceHeight = Math.max(1, source.height);
-  const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
-  const copy = document.createElement('canvas');
-  copy.width = Math.max(1, Math.round(sourceWidth * scale));
-  copy.height = Math.max(1, Math.round(sourceHeight * scale));
-  const context = copy.getContext('2d', { willReadFrequently: true });
-  if (context === null) return null;
-  context.drawImage(source, 0, 0, copy.width, copy.height);
-  return {
-    width: copy.width,
-    height: copy.height,
-    pixels: context.getImageData(0, 0, copy.width, copy.height).data.slice()
-  };
-}
-
 export class TerrainSurfaceComposer {
-  private readonly textures = new Map<number, TerrainTextureSource>();
+  private readonly textures = new Map<number, TerrainPbrTextureSet>();
   private readonly autoColor = new Float64Array(3);
   private readonly overrideColor = new Float64Array(3);
   private readonly repeatColor = new Float64Array(3);
   private fallbackFields: Readonly<TerrainFields> | null = null;
   private fallbackGrain = new Float32Array(0);
 
-  public setTexture(materialIndex: number, texture: TerrainTextureSource | null): void {
-    if (texture === null) this.textures.delete(materialIndex);
-    else this.textures.set(materialIndex, texture);
+  public setTextures(materialIndex: number, textures: TerrainPbrTextureSet | null): void {
+    if (textures === null) this.textures.delete(materialIndex);
+    else this.textures.set(materialIndex, textures);
   }
 
   public renderPreview(
@@ -134,7 +117,7 @@ export class TerrainSurfaceComposer {
 
     const image = context.createImageData(canvas.width, canvas.height);
     const data = image.data;
-    const texture = this.textures.get(materialIndex);
+    const texture = this.textures.get(materialIndex)?.albedo;
     for (let y = 0; y < canvas.height; y += 1) {
       const v = ((y + 0.5) / canvas.height) * REPEAT_PREVIEW_TILES;
       for (let x = 0; x < canvas.width; x += 1) {
@@ -270,7 +253,7 @@ export class TerrainSurfaceComposer {
     index: number,
     materialRepeat: number
   ): void {
-    const texture = this.textures.get(materialIndex);
+    const texture = this.textures.get(materialIndex)?.albedo;
     if (texture !== undefined) {
       writeTextureColor(out, texture, u * materialRepeat, v * materialRepeat);
       return;

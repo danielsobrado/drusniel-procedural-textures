@@ -12,16 +12,41 @@ interface ActivePress {
   triggered: boolean;
 }
 
+export interface TouchRadialPosition {
+  clientX: number;
+  clientY: number;
+  target: EventTarget;
+}
+
+export interface TouchRadialTriggerOptions {
+  onTrigger?: (position: Readonly<TouchRadialPosition>) => void;
+}
+
 export class TouchRadialTrigger {
   private active: ActivePress | null = null;
   private forwardingCancel = false;
 
-  public constructor(private readonly target: HTMLElement) {
-    target.addEventListener('pointerdown', (event) => this.handlePointerDown(event), true);
-    target.addEventListener('pointermove', (event) => this.handlePointerMove(event), true);
-    target.addEventListener('pointerup', (event) => this.handlePointerEnd(event), true);
-    target.addEventListener('pointercancel', (event) => this.handlePointerEnd(event), true);
+  public constructor(
+    private readonly target: HTMLElement,
+    private readonly options: Readonly<TouchRadialTriggerOptions> = {}
+  ) {
+    target.addEventListener('pointerdown', this.onPointerDown, true);
+    target.addEventListener('pointermove', this.onPointerMove, true);
+    target.addEventListener('pointerup', this.onPointerEnd, true);
+    target.addEventListener('pointercancel', this.onPointerEnd, true);
   }
+
+  public dispose(): void {
+    this.cancel();
+    this.target.removeEventListener('pointerdown', this.onPointerDown, true);
+    this.target.removeEventListener('pointermove', this.onPointerMove, true);
+    this.target.removeEventListener('pointerup', this.onPointerEnd, true);
+    this.target.removeEventListener('pointercancel', this.onPointerEnd, true);
+  }
+
+  private readonly onPointerDown = (event: PointerEvent): void => this.handlePointerDown(event);
+  private readonly onPointerMove = (event: PointerEvent): void => this.handlePointerMove(event);
+  private readonly onPointerEnd = (event: PointerEvent): void => this.handlePointerEnd(event);
 
   private handlePointerDown(event: PointerEvent): void {
     if (event.target instanceof Element && event.target.closest('[data-role="surface-graph"]') !== null) return;
@@ -48,6 +73,14 @@ export class TouchRadialTrigger {
       if (this.active !== active) return;
       active.triggered = true;
       this.cancelViewportGesture(active);
+      if (this.options.onTrigger !== undefined) {
+        this.options.onTrigger({
+          clientX: active.clientX,
+          clientY: active.clientY,
+          target: active.pointerTarget
+        });
+        return;
+      }
       this.target.dispatchEvent(new MouseEvent('contextmenu', {
         bubbles: true,
         cancelable: true,

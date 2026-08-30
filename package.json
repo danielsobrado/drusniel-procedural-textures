@@ -36,7 +36,7 @@
     "test:production-export": "node scripts/production-export-smoke.mjs",
     "test:cross-browser": "node scripts/cross-browser-smoke.mjs",
     "test:runtime-package": "npm run build:runtime-package && node scripts/runtime-package-consumer-test.mjs",
-    "test:visual": "npm run build && node scripts/visual-suite.mjs",
+    "test:visual": "npm run build && node scripts/visual-suite.mjs && node scripts/terrain-game-context-visual.mjs",
     "test:qa": "npm run test:unit && npm run build && node scripts/capture-qa.mjs",
     "qa:capture": "npm run test:unit && npm run build && node scripts/capture-qa.mjs",
     "ci": "npm run check:version && npm run test:unit && npm run build && npm run test:browser:smoke && node scripts/build-runtime-package.mjs && node scripts/runtime-package-consumer-test.mjs",

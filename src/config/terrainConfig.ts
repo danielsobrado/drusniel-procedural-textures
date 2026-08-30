@@ -1,6 +1,19 @@
 import { parse } from 'yaml';
 import rawConfig from '../../config/terrain.yaml?raw';
 
+/** The yaml's lighting vocabulary. Declared here so the config stays the single authority. */
+export const TERRAIN_LIGHTING_PRESET_IDS = [
+  'dawn',
+  'morning',
+  'noon',
+  'golden',
+  'dusk',
+  'overcast',
+  'studio'
+] as const;
+
+export type TerrainLightingPresetId = typeof TERRAIN_LIGHTING_PRESET_IDS[number];
+
 export interface TerrainConfig {
   resolution: number;
   worldSize: number;
@@ -29,6 +42,30 @@ export interface TerrainConfig {
   };
   materials: {
     presetBakeResolution: number;
+  };
+  scale: {
+    metersPerTextureTile: number;
+    minMetersPerTextureTile: number;
+    maxMetersPerTextureTile: number;
+    propReferenceMeters: number;
+  };
+  camera: {
+    orbitMinMeters: number;
+    orbitMaxMeters: number;
+    focusAnimationMs: number;
+  };
+  radial: {
+    outerRadiusPx: number;
+    presetsPerPage: number;
+    hoverDwellMs: number;
+  };
+  lighting: {
+    preset: TerrainLightingPresetId;
+    sunElevationDegrees: number;
+    sunAzimuthDegrees: number;
+    shadowMapSize: number;
+    shadowFocusRadiusMeters: number;
+    shadowNormalBiasMeters: number;
   };
   player: {
     eyeHeightMeters: number;
@@ -84,6 +121,14 @@ function asPowerOfTwo(value: unknown, label: string, min: number, max: number): 
   return parsed;
 }
 
+function asLightingPreset(value: unknown, label: string): TerrainLightingPresetId {
+  if (typeof value !== 'string' ||
+      !(TERRAIN_LIGHTING_PRESET_IDS as readonly string[]).includes(value)) {
+    throw new Error(`${label} must be one of ${TERRAIN_LIGHTING_PRESET_IDS.join(', ')}.`);
+  }
+  return value as TerrainLightingPresetId;
+}
+
 function requireAscendingRange(min: number, max: number, label: string): void {
   if (max <= min) throw new Error(`${label} maximum must be greater than its minimum.`);
 }
@@ -94,6 +139,10 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
   const hydrology = asRecord(config.hydrology, 'Terrain hydrology configuration');
   const painting = asRecord(config.painting, 'Terrain painting configuration');
   const materials = asRecord(config.materials, 'Terrain materials configuration');
+  const scale = asRecord(config.scale, 'Terrain scale configuration');
+  const camera = asRecord(config.camera, 'Terrain camera configuration');
+  const lighting = asRecord(config.lighting, 'Terrain lighting configuration');
+  const radial = asRecord(config.radial, 'Terrain radial configuration');
   const player = asRecord(config.player, 'Terrain player configuration');
   const imports = asRecord(config.imports, 'Terrain import configuration');
   const preview = asRecord(config.preview, 'Terrain preview configuration');
@@ -112,6 +161,26 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
     0.3
   );
   requireAscendingRange(minRiverCoverage, maxRiverCoverage, 'hydrology river coverage');
+  const minMetersPerTextureTile = asNumber(
+    scale.minMetersPerTextureTile,
+    'scale.minMetersPerTextureTile',
+    0.05,
+    64
+  );
+  const maxMetersPerTextureTile = asNumber(
+    scale.maxMetersPerTextureTile,
+    'scale.maxMetersPerTextureTile',
+    minMetersPerTextureTile,
+    512
+  );
+  requireAscendingRange(
+    minMetersPerTextureTile,
+    maxMetersPerTextureTile,
+    'scale metres per texture tile'
+  );
+  const orbitMinMeters = asNumber(camera.orbitMinMeters, 'camera.orbitMinMeters', 0.05, 100);
+  const orbitMaxMeters = asNumber(camera.orbitMaxMeters, 'camera.orbitMaxMeters', orbitMinMeters, 8192);
+  requireAscendingRange(orbitMinMeters, orbitMaxMeters, 'camera orbit distance');
   const riverAlphaStart = asNumber(preview.riverAlphaStart, 'preview.riverAlphaStart', 0, 1);
   const riverAlphaEnd = asNumber(preview.riverAlphaEnd, 'preview.riverAlphaEnd', riverAlphaStart, 1);
   requireAscendingRange(riverAlphaStart, riverAlphaEnd, 'preview river alpha');
@@ -120,7 +189,7 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
     worldSize: asNumber(config.worldSize, 'worldSize', 16, 8192),
     heightScale: asNumber(config.heightScale, 'heightScale', 1, 2048),
     meshSegments: asInteger(config.meshSegments, 'meshSegments', 16, 256),
-    materialRepeat: asNumber(config.materialRepeat, 'materialRepeat', 1, 256),
+    materialRepeat: asNumber(config.materialRepeat, 'materialRepeat', 1, 1024),
     mountains: {
       coverage: asNumber(mountains.coverage, 'mountains.coverage', 0, 1),
       height: asNumber(mountains.height, 'mountains.height', 0, 1.5),
@@ -157,6 +226,47 @@ function parseTerrainConfig(value: unknown): TerrainConfig {
         'materials.presetBakeResolution',
         128,
         1024
+      )
+    },
+    scale: {
+      metersPerTextureTile: asNumber(
+        scale.metersPerTextureTile,
+        'scale.metersPerTextureTile',
+        minMetersPerTextureTile,
+        maxMetersPerTextureTile
+      ),
+      minMetersPerTextureTile,
+      maxMetersPerTextureTile,
+      propReferenceMeters: asNumber(scale.propReferenceMeters, 'scale.propReferenceMeters', 0.1, 64)
+    },
+    camera: {
+      orbitMinMeters,
+      orbitMaxMeters,
+      focusAnimationMs: asInteger(camera.focusAnimationMs, 'camera.focusAnimationMs', 0, 4000)
+    },
+    radial: {
+      // 116px (the shared viewport radial) gives a 60px pitch over 12 slots, too tight for a
+      // legible thumbnail. 168px yields an 88px pitch: 72px petals clear the 44px touch min.
+      outerRadiusPx: asNumber(radial.outerRadiusPx, 'radial.outerRadiusPx', 96, 320),
+      presetsPerPage: asInteger(radial.presetsPerPage, 'radial.presetsPerPage', 4, 16),
+      hoverDwellMs: asInteger(radial.hoverDwellMs, 'radial.hoverDwellMs', 0, 2000)
+    },
+    lighting: {
+      preset: asLightingPreset(lighting.preset, 'lighting.preset'),
+      sunElevationDegrees: asNumber(lighting.sunElevationDegrees, 'lighting.sunElevationDegrees', -5, 89),
+      sunAzimuthDegrees: asNumber(lighting.sunAzimuthDegrees, 'lighting.sunAzimuthDegrees', 0, 360),
+      shadowMapSize: asPowerOfTwo(lighting.shadowMapSize, 'lighting.shadowMapSize', 512, 4096),
+      shadowFocusRadiusMeters: asNumber(
+        lighting.shadowFocusRadiusMeters,
+        'lighting.shadowFocusRadiusMeters',
+        10,
+        2048
+      ),
+      shadowNormalBiasMeters: asNumber(
+        lighting.shadowNormalBiasMeters,
+        'lighting.shadowNormalBiasMeters',
+        0,
+        2
       )
     },
     player: {
