@@ -3,7 +3,15 @@
   "version": "0.3.2",
   "private": true,
   "type": "module",
+  "files": [
+    "dist-runtime",
+    "LICENSE"
+  ],
   "exports": {
+    ".": {
+      "types": "./dist-runtime/types/runtime/index.d.ts",
+      "import": "./dist-runtime/index.js"
+    },
     "./runtime": {
       "types": "./dist-runtime/types/runtime/index.d.ts",
       "import": "./dist-runtime/index.js"
@@ -22,6 +30,7 @@
     "check:version": "node scripts/check-version-consistency.mjs",
     "build:runtime": "npm run check:runtime-config && npm run check:runtime-boundary && tsc --noEmit && vite build --config vite.runtime.config.ts && tsc -p tsconfig.runtime.json",
     "build:runtime-package": "npm run build:runtime && node scripts/build-runtime-package.mjs",
+    "prepare": "npm run build:runtime",
     "preview": "vite preview",
     "thumbnails:generate": "node scripts/generate-preset-thumbnails.mjs",
     "terrain-presets:generate": "node scripts/generate-terrain-preset-textures.mjs",
