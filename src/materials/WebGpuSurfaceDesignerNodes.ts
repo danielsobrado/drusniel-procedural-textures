@@ -35,6 +35,7 @@ import {
   buildWebGpuProceduralLayerMesoField,
   buildWebGpuStochasticDomain,
   buildWebGpuSurfaceNodes as buildLegacySurfaceNodes,
+  type WebGpuSurfaceStage,
   webGpuTopologyFingerprint as legacyTopologyFingerprint,
   type WebGpuSimulationState,
   type WebGpuSurfaceNodes
@@ -339,13 +340,17 @@ export function buildWebGpuSurfaceNodes(
   uniforms: WebGpuMaterialUniforms,
   simulation: Readonly<WebGpuSimulationState>,
   textures: ReadonlyMap<string, ResolvedTextureField> = new Map(),
-  triplanarNormal: Node<'vec3'> = normalWorldGeometry
+  triplanarNormal: Node<'vec3'> = normalWorldGeometry,
+  stage: Readonly<WebGpuSurfaceStage> = {}
 ): WebGpuSurfaceNodes {
   const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
   const designerIndices = designerLayerIndices(activeLayers);
   if (designerIndices.size === 0) {
-    return buildLegacySurfaceNodes(position, activeLayers, uniforms, simulation);
+    return buildLegacySurfaceNodes(position, activeLayers, uniforms, simulation, undefined, stage);
   }
+  const from = stage.from ?? 0;
+  const to = stage.to ?? activeLayers.length;
+  const finish = stage.finish ?? true;
 
   const neutralUniforms = withoutSynthesis(uniforms);
   const synthesisBase = buildLegacySurfaceNodes(position, [], neutralUniforms, simulation);
@@ -354,18 +359,19 @@ export function buildWebGpuSurfaceNodes(
   const synthesisRoughness = synthesis.roughness.sub(synthesisBase.roughness);
   const synthesisAo = synthesis.ao.div(max(synthesisBase.ao, 0.0001));
   const indexById = new Map(activeLayers.map((layer, index) => [layer.id, index]));
-  let color: Node<'vec3'> = vec3(0.42, 0.45, 0.50);
-  let roughness: Node<'float'> = float(0);
+  let color: Node<'vec3'> = stage.previous?.color ?? vec3(0.42, 0.45, 0.50);
+  let roughness: Node<'float'> = stage.previous?.roughness ?? float(0);
   let clearcoat: Node<'float'> = float(0);
   let clearcoatRoughness: Node<'float'> = float(0.18);
   let sss: Node<'float'> = float(0);
   let sssColor: Node<'vec3'> = vec3(0);
-  let metallic: Node<'float'> = float(0);
-  let ao: Node<'float'> = float(1);
+  let metallic: Node<'float'> = stage.previous?.metallic ?? float(0);
+  let ao: Node<'float'> = stage.previous?.ao ?? float(1);
   let emissive: Node<'vec3'> = vec3(0);
-  let displacement: Node<'float'> = float(0);
+  let displacement: Node<'float'> = stage.previous?.displacement ?? float(0);
 
   activeLayers.forEach((layer, index) => {
+    if (index < from || index >= to) return;
     const field = designerFieldForLayer(
       index,
       position,
@@ -440,6 +446,9 @@ export function buildWebGpuSurfaceNodes(
     if (layer.channel === 'emissive') emissive = emissive.add(layerColor.mul(shaped).mul(opacity));
   });
 
+  if (!finish) {
+    return { color, roughness, clearcoat, clearcoatRoughness, sss: clamp(sss, 0, 1), sssColor: sssColor.div(max(sss, 0.0001)), metallic, ao, emissive, displacement };
+  }
   return {
     color: color.mul(synthesisColor),
     roughness: roughness.add(synthesisRoughness),
@@ -476,4 +485,4 @@ export function webGpuTopologyFingerprint(
   )}`;
 }
 
-export type { WebGpuSimulationState, WebGpuSurfaceNodes } from './WebGpuProceduralNodes';
+export type { WebGpuSimulationState, WebGpuSurfaceNodes, WebGpuSurfaceStage } from './WebGpuProceduralNodes';

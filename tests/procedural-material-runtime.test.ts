@@ -109,3 +109,77 @@ describe('ProceduralMaterial runtime', () => {
     }
   });
 });
+
+describe('ProceduralMaterial.createSurfaceNodes', () => {
+  it('exposes the surface channels for a caller-supplied position on the WebGPU backend', async () => {
+    const { positionLocal, vec3 } = await import('three/tsl');
+    const { createMaterialRecipe, ProceduralMaterial } = await import('../src/runtime');
+    const { MATERIAL_PRESETS } = await import('../src/materials/presets');
+    const { DEFAULT_PHYSICAL, DEFAULT_SYNTHESIS } = await import('../src/app/constants');
+    const preset = MATERIAL_PRESETS.find((candidate) => candidate.id === 'cut-cobble-stone');
+    if (preset === undefined) throw new Error('Missing preset fixture.');
+    const recipe = createMaterialRecipe({
+      physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
+      synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) },
+      groups: preset.groups ?? [],
+      layers: preset.layers,
+      surfaceGraph: preset.surfaceGraph ?? null
+    }, 0, 'object');
+    const procedural = new ProceduralMaterial(recipe);
+    try {
+      const nodes = procedural.createSurfaceNodes(positionLocal, vec3(0, 0, 1));
+      for (const channel of ['color', 'roughness', 'metallic', 'ao', 'displacement'] as const) {
+        expect(nodes[channel], channel).toBeDefined();
+      }
+      expect(nodes.color).not.toBe(procedural.createSurfaceNodes(positionLocal, vec3(0, 0, 1)).color);
+    } finally {
+      procedural.dispose();
+    }
+  });
+
+  it('refuses the classic WebGL backend, which has no node graph', async () => {
+    const { vec3 } = await import('three/tsl');
+    const recipe = createMaterialRecipe(createDefaultProject(), 0, 'object');
+    const procedural = new ProceduralMaterial(recipe, { backend: 'webgl' });
+    try {
+      expect(() => procedural.createSurfaceNodes(vec3(0), vec3(0, 0, 1))).toThrow(/webgpu/u);
+    } finally {
+      procedural.dispose();
+    }
+  });
+});
+
+describe('ProceduralMaterial staged surface nodes', () => {
+  it('builds a stack a slice at a time from carried accumulators', async () => {
+    const { float, positionLocal, vec3 } = await import('three/tsl');
+    const { MATERIAL_PRESETS } = await import('../src/materials/presets');
+    const { DEFAULT_PHYSICAL, DEFAULT_SYNTHESIS } = await import('../src/app/constants');
+    const preset = MATERIAL_PRESETS.find((candidate) => candidate.id === 'cut-cobble-stone');
+    if (preset === undefined) throw new Error('Missing preset fixture.');
+    const procedural = new ProceduralMaterial(createMaterialRecipe({
+      physical: { ...DEFAULT_PHYSICAL, ...(preset.physical ?? {}) },
+      synthesis: { ...DEFAULT_SYNTHESIS, ...(preset.synthesis ?? {}) },
+      groups: preset.groups ?? [],
+      layers: preset.layers,
+      surfaceGraph: preset.surfaceGraph ?? null
+    }, 0, 'object'));
+    try {
+      expect(procedural.layerCount).toBe(preset.layers.length);
+      const previous = { color: vec3(0.2), roughness: float(0.1), metallic: float(0), ao: float(1), displacement: float(0.05) };
+      // An empty, unfinished stage is the identity: it hands back exactly what it was given.
+      const idle = procedural.createSurfaceNodes(positionLocal, vec3(0, 0, 1), { from: 3, to: 3, previous, finish: false });
+      expect(idle.color).toBe(previous.color);
+      expect(idle.roughness).toBe(previous.roughness);
+      expect(idle.ao).toBe(previous.ao);
+      expect(idle.displacement).toBe(previous.displacement);
+      // A real stage builds on it.
+      const staged = procedural.createSurfaceNodes(positionLocal, vec3(0, 0, 1), { from: 0, to: 2, previous, finish: false });
+      expect(staged.color).not.toBe(previous.color);
+      const physical = procedural.createPhysicalNodes(staged);
+      expect(physical.roughness).toBeDefined();
+      expect(physical.metalness).toBeDefined();
+    } finally {
+      procedural.dispose();
+    }
+  });
+});

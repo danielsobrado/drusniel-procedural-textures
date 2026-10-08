@@ -49,6 +49,31 @@ export interface WebGpuSurfaceNodes {
   displacement: Node<'float'>;
 }
 
+/**
+ * A slice of the layer stack to build, for hosts that bake a material a few layers at a
+ * time. A whole stack compiles to one shader whose cost grows far faster than its layer
+ * count; staged, each pass is small. `previous` carries the accumulators of the stages
+ * already baked (sampled back from wherever the host kept them). Only the channels a bake
+ * keeps are carried; the rest restart at their neutral values.
+ */
+export interface WebGpuSurfaceStage {
+  /** First layer of this stage. Defaults to 0. */
+  from?: number;
+  /** One past its last layer. Defaults to the end of the stack. */
+  to?: number;
+  previous?: WebGpuSurfaceAccumulators | null;
+  /** Apply the whole-stack finishing terms (ageing, synthesis). Defaults to true. */
+  finish?: boolean;
+}
+
+export interface WebGpuSurfaceAccumulators {
+  color: Node<'vec3'>;
+  roughness: Node<'float'>;
+  metallic: Node<'float'>;
+  ao: Node<'float'>;
+  displacement: Node<'float'>;
+}
+
 export type WebGpuLayerFieldResolver = (
   layerIndex: number,
   position: Node<'vec3'>
@@ -564,25 +589,30 @@ export function buildWebGpuSurfaceNodes(
   layers: readonly MaterialLayer[],
   uniforms: WebGpuMaterialUniforms,
   simulation: Readonly<WebGpuSimulationState>,
-  fieldResolver?: WebGpuLayerFieldResolver
+  fieldResolver?: WebGpuLayerFieldResolver,
+  stage: Readonly<WebGpuSurfaceStage> = {}
 ): WebGpuSurfaceNodes {
   const activeLayers = layers.slice(0, PTL_MAX_LAYERS);
+  const from = stage.from ?? 0;
+  const to = stage.to ?? activeLayers.length;
+  const finish = stage.finish ?? true;
   const indexById = layerIndexById(activeLayers);
   const resolveField: WebGpuLayerFieldResolver = fieldResolver ?? ((layerIndex, samplePosition) =>
     fieldForLayer(layerIndex, samplePosition, activeLayers, indexById, uniforms, simulation)
   );
-  let surfaceColor: Node<'vec3'> = vec3(0.42, 0.45, 0.50);
-  let roughness: Node<'float'> = float(0);
+  let surfaceColor: Node<'vec3'> = stage.previous?.color ?? vec3(0.42, 0.45, 0.50);
+  let roughness: Node<'float'> = stage.previous?.roughness ?? float(0);
   let clearcoat: Node<'float'> = float(0);
   let clearcoatRoughness: Node<'float'> = float(0.18);
   let sss: Node<'float'> = float(0);
   let sssColor: Node<'vec3'> = vec3(0);
-  let metallic: Node<'float'> = float(0);
-  let ao: Node<'float'> = float(1);
+  let metallic: Node<'float'> = stage.previous?.metallic ?? float(0);
+  let ao: Node<'float'> = stage.previous?.ao ?? float(1);
   let emissive: Node<'vec3'> = vec3(0);
-  let displacement: Node<'float'> = float(0);
+  let displacement: Node<'float'> = stage.previous?.displacement ?? float(0);
 
   activeLayers.forEach((layer, index) => {
+    if (index < from || index >= to) return;
     const opacityBase = effectiveOpacity(index, position, activeLayers, indexById, uniforms, resolveField);
     const field = resolveField(index, position);
     const shaped = shapedField(field, uniforms.strength[index]!);
@@ -630,15 +660,17 @@ export function buildWebGpuSurfaceNodes(
     if (layer.channel === 'emissive') emissive = emissive.add(layerColor.mul(shaped).mul(opacity));
   });
 
-  const ageMask = clamp(uniforms.age.mul(uniforms.weathering), 0, 1);
-  const gravityStain = smoothstep(
-    0.25,
-    0.82,
-    fbm(position.mul(0.43).add(vec3(0, uniforms.gravity.mul(7), 0)), 3)
-  );
-  surfaceColor = surfaceColor.mul(mix(1, gravityStain.mul(0.18).add(0.62), ageMask));
-  roughness = roughness.add(ageMask.mul(mix(0.03, 0.18, gravityStain)));
-  ao = ao.mul(float(1).sub(ageMask.mul(gravityStain.oneMinus()).mul(0.22)));
+  if (finish) {
+    const ageMask = clamp(uniforms.age.mul(uniforms.weathering), 0, 1);
+    const gravityStain = smoothstep(
+      0.25,
+      0.82,
+      fbm(position.mul(0.43).add(vec3(0, uniforms.gravity.mul(7), 0)), 3)
+    );
+    surfaceColor = surfaceColor.mul(mix(1, gravityStain.mul(0.18).add(0.62), ageMask));
+    roughness = roughness.add(ageMask.mul(mix(0.03, 0.18, gravityStain)));
+    ao = ao.mul(float(1).sub(ageMask.mul(gravityStain.oneMinus()).mul(0.22)));
+  }
   const safeSss = max(sss, 0.0001);
 
   return {
@@ -649,7 +681,8 @@ export function buildWebGpuSurfaceNodes(
     sss: clamp(sss, 0, 1),
     sssColor: sssColor.div(safeSss),
     metallic,
-    ao: clamp(ao, 0, 1),
+    // An unfinished stage hands its occlusion on unclamped, exactly as the loop left it.
+    ao: finish ? clamp(ao, 0, 1) : ao,
     emissive,
     displacement
   };

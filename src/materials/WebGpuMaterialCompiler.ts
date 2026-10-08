@@ -35,7 +35,8 @@ import {
   buildWebGpuSurfaceNodes,
   webGpuTopologyFingerprint,
   type WebGpuSimulationState,
-  type WebGpuSurfaceNodes
+  type WebGpuSurfaceNodes,
+  type WebGpuSurfaceStage
 } from './WebGpuSurfaceDesignerNodes';
 import { WebGpuMaterialUniforms } from './WebGpuMaterialUniforms';
 import type {
@@ -132,7 +133,8 @@ export class WebGpuMaterialCompiler {
    */
   public buildSurfaceNodes(
     position: Node<'vec3'>,
-    triplanarNormal: Node<'vec3'>
+    triplanarNormal: Node<'vec3'>,
+    stage: Readonly<WebGpuSurfaceStage> = {}
   ): WebGpuSurfaceNodes {
     return buildWebGpuSurfaceNodes(
       position,
@@ -140,8 +142,14 @@ export class WebGpuMaterialCompiler {
       this.uniforms,
       this.simulation,
       this.textureFields,
-      triplanarNormal
+      triplanarNormal,
+      stage
     );
+  }
+
+  /** How many layers the stack has, for hosts that bake it in stages. */
+  public get layerCount(): number {
+    return Math.min(this.layers.length, PTL_MAX_LAYERS);
   }
 
   /** The base physical uniforms a bake blends its channels against. */

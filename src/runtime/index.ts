@@ -14,6 +14,8 @@ export {
   ProceduralMaterial,
   type ProceduralMaterialBackend,
   type ProceduralMaterialOptions,
+  type ProceduralSurfaceNodes,
+  type ProceduralSurfaceStage,
   type TextureFieldSource
 } from './ProceduralMaterial';
 export {

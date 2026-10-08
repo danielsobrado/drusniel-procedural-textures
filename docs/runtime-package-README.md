@@ -146,6 +146,9 @@ procedural.dispose();
 - `backend`: `webgpu` or `webgl`.
 - `textureFieldSource`: the selected `generated` or `external` source after `auto` resolution.
 - `displacementExtent`: estimated absolute procedural displacement.
+- `createSurfaceNodes(position, normal, stage?)`: the surface channels (colour, roughness, metallic, AO, emissive, displacement and more) as TSL nodes at a caller-supplied position, for hosts that bake the material to textures. `stage` (`{ from, to, previous, finish }`) builds a slice of the layer stack on accumulators carried from earlier passes: one shader for a whole stack compiles far slower than its layers do apart (a nine-layer preset: 45 s as one pass, under 4 s staged). WebGPU backend only; call after `prepare()`.
+- `layerCount`: how many layers a staged bake iterates over.
+- `createPhysicalNodes(surface)`: the roughness and metalness the material itself shades with, from a finished surface.
 - `prepare()`: generates or resolves only the recipe’s required texture fields and builds simulation data.
 - `applyTo(mesh)`: installs the runtime material on a `THREE.Mesh`.
 - `setRecipe(recipe)`: replaces the recipe and invalidates prepared state.

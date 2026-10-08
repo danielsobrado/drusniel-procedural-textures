@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Node } from 'three/webgpu';
 import {
   normalizeResolvedTextureField,
   type ResolvedTextureField
@@ -12,6 +13,8 @@ import {
 } from '../engine/SimulationAtlas';
 import { SurfaceMaterialCompiler } from '../materials/SurfaceMaterialCompiler';
 import { WebGpuMaterialCompiler } from '../materials/WebGpuMaterialCompiler';
+import type { WebGpuSurfaceNodes, WebGpuSurfaceStage } from '../materials/WebGpuProceduralNodes';
+import { clamp } from 'three/tsl';
 import type { MaterialLayer } from '../core/material/RuntimeMaterial';
 import { parseMaterialRecipe, reseedMaterialRecipe, type MaterialRecipe } from './MaterialRecipe';
 import {
@@ -22,6 +25,19 @@ import type { TextureResolver } from './TextureResolver';
 
 export type ProceduralMaterialBackend = 'webgpu' | 'webgl';
 export type TextureFieldSource = 'auto' | 'generated' | 'external';
+
+/**
+ * The material's surface channels as TSL nodes, evaluated at a caller-supplied position.
+ * `displacement` is the signed height the material would displace by, before any soft limit.
+ */
+export type ProceduralSurfaceNodes = WebGpuSurfaceNodes;
+
+/**
+ * A slice of the layer stack, for baking a material a few layers at a time. One shader for
+ * a whole stack costs far more to compile than its layers do apart — a nine-layer preset
+ * took 45 s as one pass. See `ProceduralMaterial.createSurfaceNodes`.
+ */
+export type ProceduralSurfaceStage = WebGpuSurfaceStage;
 
 export interface ProceduralMaterialOptions {
   wireframe?: boolean;
@@ -181,6 +197,56 @@ export class ProceduralMaterial {
 
   public get displacementExtent(): number {
     return this.compiler.displacementExtent;
+  }
+
+  /**
+   * Builds this material's surface channels for an arbitrary sample position, for hosts that
+   * bake the material into textures or drive their own shading from it.
+   *
+   * The nodes come from the same layer stack, uniforms, simulation and texture fields as
+   * `material`, so they cannot drift from what the material renders. Unlike `material` they
+   * carry no vertex displacement: a bake of a flat tile compiles the layer stack once instead
+   * of once per shader stage. Call after `prepare()`; nodes built earlier do not see fields
+   * that preparation resolves later.
+   *
+   * @param position where to sample, in the material's coordinate space
+   * @param normal the surface normal there, used to weight triplanar texture fields
+   */
+  public createSurfaceNodes(
+    position: Node<'vec3'>,
+    normal: Node<'vec3'>,
+    stage: Readonly<ProceduralSurfaceStage> = {}
+  ): ProceduralSurfaceNodes {
+    return this.webGpuCompiler().buildSurfaceNodes(position, normal, stage);
+  }
+
+  /** How many layers `createSurfaceNodes` can be staged over. */
+  public get layerCount(): number {
+    return this.webGpuCompiler().layerCount;
+  }
+
+  /**
+   * The roughness and metalness the material itself would shade with, from a finished
+   * surface: the layers' contribution over the recipe's base values, clamped as the
+   * material clamps them.
+   */
+  public createPhysicalNodes(surface: Pick<ProceduralSurfaceNodes, 'roughness' | 'metallic'>): {
+    roughness: Node<'float'>;
+    metalness: Node<'float'>;
+  } {
+    const uniforms = this.webGpuCompiler().physicalUniforms;
+    return {
+      roughness: clamp(uniforms.baseRoughness.add(surface.roughness), 0.045, 1) as Node<'float'>,
+      metalness: clamp(uniforms.baseMetalness.add(surface.metallic), 0, 1) as Node<'float'>
+    };
+  }
+
+  private webGpuCompiler(): WebGpuMaterialCompiler {
+    this.assertAvailable();
+    if (!(this.compiler instanceof WebGpuMaterialCompiler)) {
+      throw new Error('Surface nodes require the "webgpu" backend.');
+    }
+    return this.compiler;
   }
 
   public async prepare(): Promise<void> {
