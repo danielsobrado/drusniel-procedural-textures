@@ -20,7 +20,7 @@ function stripOptimizedDepSourcemaps(): Plugin {
   };
 }
 
-// three 0.185 ships `build/three.module.js` and `build/three.webgpu.js` that BOTH
+// Three.js ships `build/three.module.js` and `build/three.webgpu.js` that both
 // re-export from `./three.core.js`, so the core classes are already shared between
 // the `three` and `three/webgpu` entry points. Aliasing them to `three/src/*` (as we
 // did previously) forced Vite to pre-bundle ~750 individual source modules for no gain.

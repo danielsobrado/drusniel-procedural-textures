@@ -11,7 +11,7 @@ keywords:
   - material
   - texture
 peerDependencies:
-  three: ">=0.185.0 <0.186.0"
+  three: ">=0.187.0 <0.188.0"
 budgets:
   javascriptBytes: 400000
   gzipBytes: 100000

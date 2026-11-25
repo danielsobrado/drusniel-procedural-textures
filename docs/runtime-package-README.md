@@ -39,13 +39,13 @@ The code-generated fallback and Lab KTX2 texture-field assets are licensed under
 ## Installation
 
 ```bash
-npm install @drusniel/ptl-runtime three@0.185
+npm install @drusniel/ptl-runtime three@0.187
 ```
 
 V0.3 declares this Three.js peer range:
 
 ```text
->=0.185.0 <0.186.0
+>=0.187.0 <0.188.0
 ```
 
 Three.js is a peer dependency so the host application and PTL use the same `Texture`, `Material`, `Mesh`, and renderer ecosystem.

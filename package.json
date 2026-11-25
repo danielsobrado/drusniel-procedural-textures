@@ -55,11 +55,11 @@
     "publish:runtime": "node scripts/publish-runtime.mjs"
   },
   "dependencies": {
-    "three": "0.185.1",
+    "three": "0.187.0",
     "yaml": "2.9.0"
   },
   "devDependencies": {
-    "@types/three": "0.185.4",
+    "@types/three": "0.187.0",
     "gh-pages": "^6.3.0",
     "gltf-validator": "2.0.0-dev.3.10",
     "playwright": "1.62.1",
